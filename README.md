@@ -8,6 +8,7 @@ Transform YouTube videos into stunning carousel images for Instagram, TikTok, an
 - 🎬 **YouTube Integration** - Extract high-quality frames from any YouTube video
 - 📝 **Text Overlays** - Add custom text to your carousel slides
 - 🎯 **Dual-Frame Slides** - Each slide shows two video frames stacked vertically
+- 🤖 **Auto-Extract Captions** - Automatically extract YouTube auto-captions for each slide with filler word removal
 - 🖼️ **Custom Branding** - Optional logo overlay on slides
 - 🚀 **CLI Support** - Generate carousels via command line or web interface
 - 📦 **Batch Processing** - Generate multiple carousels from a single config
@@ -27,6 +28,21 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) to access the carousel generator interface.
+
+### Using Auto-Extract Captions
+
+The web interface includes an **Auto-extract Captions** feature that pulls YouTube auto-generated captions directly into your slides:
+
+1. Enter a YouTube URL or video ID
+2. Set the **Top Frame Timestamp** and **Bottom Frame Timestamp** for a slide
+3. Click **Auto-extract Captions** — this fetches the captions spoken between the two timestamps and populates both text fields automatically
+4. Edit the extracted text as needed before generating
+
+**How it works:**
+- Captions between the two timestamps are split into top and bottom halves at the midpoint
+- Partial sentences are completed using surrounding caption context (±5 seconds)
+- Top and bottom captions never overlap or duplicate each other
+- The **Remove filler words** toggle (on by default) strips out "uh", "um", "er", and similar filler words
 
 ### Generate via CLI
 
@@ -98,7 +114,7 @@ npm run generate:bulk
 
 ## Output
 
-Generated carousel slides are saved to `public/output/[carousel-name]/` as PNG files (1080x1080px).
+Generated carousel slides using CLI are saved to `public/output/[carousel-name]/` as PNG files (1080x1080px).
 
 ## License
 
