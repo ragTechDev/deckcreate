@@ -1,5 +1,5 @@
 import { Container, Title, Text, Stack, Group, Paper, Button, Badge, ThemeIcon, SimpleGrid, Box, Anchor } from '@mantine/core';
-import { IconPhoto, IconFileText, IconLeaf, IconSparkles, IconArrowRight, IconBrandYoutube } from '@tabler/icons-react';
+import { IconPhoto, IconFileText, IconLeaf, IconSparkles, IconArrowRight, IconBrandYoutube, IconWand, IconLock } from '@tabler/icons-react';
 import { Header } from './components/Header';
 import { InstagramEmbed } from './components/InstagramEmbed';
 
@@ -14,7 +14,7 @@ export default function Home() {
           {/* Hero */}
           <Stack gap="md" align="center" ta="center" py="xl">
             <Badge size="lg" variant="light" color="secondary" leftSection={<IconLeaf size={14} />}>
-              No AI. No carbon footprint. Just your content.
+              Minimal AI. Low carbon footprint. Your authentic content.
             </Badge>
             <Title
               order={1}
@@ -47,7 +47,7 @@ export default function Home() {
           </Stack>
 
           {/* Tool Cards */}
-          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="lg">
+          <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="lg">
 
             {/* Carousel Generator Card */}
             <Paper p="xl" withBorder radius="lg" style={{ display: 'flex', flexDirection: 'column' }}>
@@ -57,16 +57,14 @@ export default function Home() {
                     <IconPhoto size={24} />
                   </ThemeIcon>
                 </Group>
-                <Title order={3}>Carousel Generator</Title>
+                <Title order={4}>Carousel Generator</Title>
                 <Text size="sm" c="dimmed" style={{ flex: 1 }}>
                   Extract frames from your YouTube videos and overlay captions to create
-                  beautiful carousel slides for Instagram, TikTok, and LinkedIn.
-                  Auto-extract captions directly from the video — no manual transcription needed.
+                  carousel slides for Instagram, TikTok, and LinkedIn.
                 </Text>
                 <Group gap="xs" wrap="wrap">
-                  <Badge size="sm" variant="dot" color="primary">Frame extraction</Badge>
-                  <Badge size="sm" variant="dot" color="secondary">Auto-captions</Badge>
-                  <Badge size="sm" variant="dot" color="accent">Text overlays</Badge>
+                  <Badge size="xs" variant="dot" color="primary">Frame extraction</Badge>
+                  <Badge size="xs" variant="dot" color="secondary">Auto-captions</Badge>
                 </Group>
                 <Anchor href="/carousel" underline="never">
                   <Button
@@ -88,16 +86,14 @@ export default function Home() {
                     <IconFileText size={24} />
                   </ThemeIcon>
                 </Group>
-                <Title order={3}>Video Transcription</Title>
+                <Title order={4}>Video Transcription</Title>
                 <Text size="sm" c="dimmed" style={{ flex: 1 }}>
-                  Get a full transcription of any YouTube video with per-sentence timestamps.
-                  Extract the full video or a custom time range. Remove filler words automatically
-                  for clean, publishable text.
+                  Get a full transcription of any YouTube video with per-sentence timestamps
+                  and automatic filler word removal.
                 </Text>
                 <Group gap="xs" wrap="wrap">
-                  <Badge size="sm" variant="dot" color="primary">Per-sentence timestamps</Badge>
-                  <Badge size="sm" variant="dot" color="secondary">Custom ranges</Badge>
-                  <Badge size="sm" variant="dot" color="accent">Filler removal</Badge>
+                  <Badge size="xs" variant="dot" color="primary">Timestamps</Badge>
+                  <Badge size="xs" variant="dot" color="secondary">Filler removal</Badge>
                 </Group>
                 <Anchor href="/transcribe" underline="never">
                   <Button
@@ -107,6 +103,55 @@ export default function Home() {
                     rightSection={<IconArrowRight size={16} />}
                   >
                     Transcribe Video
+                  </Button>
+                </Anchor>
+              </Stack>
+            </Paper>
+
+            {/* Auto Carousel Pro Card */}
+            <Paper
+              p="xl"
+              withBorder
+              radius="lg"
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                borderColor: 'var(--mantine-color-violet-4)',
+                position: 'relative',
+                overflow: 'hidden',
+              }}
+            >
+              <Badge
+                color="violet"
+                variant="filled"
+                size="sm"
+                style={{ position: 'absolute', top: 12, right: 12 }}
+              >
+                Pro
+              </Badge>
+              <Stack gap="md" style={{ flex: 1 }}>
+                <Group>
+                  <ThemeIcon size={48} radius="md" variant="light" color="violet">
+                    <IconWand size={24} />
+                  </ThemeIcon>
+                </Group>
+                <Title order={4}>Auto Bulk Carousel</Title>
+                <Text size="sm" c="dimmed" style={{ flex: 1 }}>
+                  Paste a link and let our LLM analyze the transcript to auto-generate
+                  multiple carousels with hooks and CTA slides.
+                </Text>
+                <Group gap="xs" wrap="wrap">
+                  <Badge size="xs" variant="dot" color="violet">LLM-powered</Badge>
+                  <Badge size="xs" variant="dot" color="violet">CTA slides</Badge>
+                </Group>
+                <Anchor href="/auto-carousel" underline="never">
+                  <Button
+                    fullWidth
+                    size="md"
+                    color="violet"
+                    rightSection={<IconLock size={16} />}
+                  >
+                    Try Auto Carousel
                   </Button>
                 </Anchor>
               </Stack>
@@ -133,14 +178,16 @@ export default function Home() {
               </ThemeIcon>
               <Title order={3}>Built different. On purpose.</Title>
               <Text size="sm" c="dimmed" maw={520}>
-                Deckcreate does <strong>not</strong> use AI for generation. We extract what&apos;s already
-                there — your words, your frames, your content. No large language models burning
-                through energy to rephrase what you already said perfectly.
+                Our <strong>Carousel Generator</strong> and <strong>Transcription</strong> tools use <strong>zero AI</strong>.
+                We extract what&apos;s already there — your words, your frames, your content. No large
+                language models burning through energy to rephrase what you already said perfectly.
               </Text>
               <Text size="sm" c="dimmed" maw={520}>
-                This makes our tools <strong>fast, deterministic, and sustainable</strong>. You get
-                exactly what&apos;s in your video — nothing hallucinated, nothing rewritten. Just your
-                authentic content, repurposed for every platform.
+                Our <strong>Auto Bulk Carousel</strong> uses AI minimally — only to analyze transcripts
+                and suggest segments. The actual content extraction remains AI-free. This approach keeps
+                our tools <strong>fast, deterministic, and sustainable</strong>. You get exactly what&apos;s
+                in your video — nothing hallucinated, nothing rewritten. Just your authentic content,
+                repurposed for every platform.
               </Text>
             </Stack>
           </Paper>

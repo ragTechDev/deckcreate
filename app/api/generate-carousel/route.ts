@@ -5,7 +5,7 @@ const CarouselGenerator = require('@/scripts/CarouselGenerator');
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name, videoId, showLogo, slides } = body;
+    const { name, videoId, showLogo, slides, ctaSlide } = body;
 
     if (!name || !videoId || !slides || slides.length === 0) {
       return NextResponse.json(
@@ -26,6 +26,13 @@ export async function POST(request: NextRequest) {
     
     await generator.init();
     const result = await generator.generateCarousel();
+
+    // Generate CTA slide if configured
+    if (ctaSlide) {
+      const ctaResult = await generator.generateCtaSlide(ctaSlide, slides.length + 1);
+      result.push(ctaResult);
+    }
+
     await generator.close();
 
     return NextResponse.json({

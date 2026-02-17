@@ -60,6 +60,12 @@ class CarouselGenerator {
   async seekAndExtractFrame(page, timestamp) {
     console.log(`  Seeking to ${timestamp}s...`);
     
+    // Clear any existing error state and reload if necessary
+    await page.evaluate(() => {
+      const errorElements = document.querySelectorAll('.ytp-error, .ytp-error-content-wrap');
+      errorElements.forEach(el => el.remove());
+    });
+
     await page.evaluate((ts) => {
       const video = document.querySelector('video');
       if (video) {
@@ -68,7 +74,8 @@ class CarouselGenerator {
       }
     }, timestamp);
 
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    // Wait longer for YouTube to buffer to the target timestamp
+    await new Promise(resolve => setTimeout(resolve, 4000));
 
     await page.evaluate(() => {
       const video = document.querySelector('video');
@@ -79,7 +86,7 @@ class CarouselGenerator {
       }
     });
 
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, 1500));
 
     const isPaused = await page.evaluate(() => {
       const video = document.querySelector('video');
@@ -92,27 +99,112 @@ class CarouselGenerator {
 
     console.log(`  Video paused: ${isPaused}`);
 
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // Wait for video to be ready at the target timestamp
+    await new Promise(resolve => setTimeout(resolve, 3000));
 
-    console.log('  Extracting video frame...');
-    const frameDataUrl = await page.evaluate(() => {
+    // Check again for errors after seeking (errors may appear during playback)
+    const errorInfo = await page.evaluate(() => {
+      const errorElements = document.querySelectorAll('.ytp-error, .ytp-error-content-wrap');
       const video = document.querySelector('video');
-      if (!video) {
-        throw new Error('Video element not found');
-      }
-
-      const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
       
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      
-      return canvas.toDataURL('image/png');
+      return {
+        hasErrorElements: errorElements.length > 0,
+        hasVideoError: video && video.error ? true : false,
+        videoReadyState: video ? video.readyState : null,
+        videoCurrentTime: video ? video.currentTime : null,
+        videoNetworkState: video ? video.networkState : null,
+      };
     });
 
-    const base64Data = frameDataUrl.replace(/^data:image\/png;base64,/, '');
-    const screenshot = Buffer.from(base64Data, 'base64');
+    console.log(`  Error check:`, errorInfo);
+
+    // If video reset to 0, YouTube likely triggered anti-scraping - reload and retry
+    if (errorInfo.videoCurrentTime === 0 && timestamp > 10) {
+      console.log(`  Video reset detected - reloading page and retrying...`);
+      await page.reload({ waitUntil: 'networkidle0' });
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      // Navigate to the timestamp directly in URL
+      const videoUrl = page.url().split('&t=')[0];
+      await page.goto(`${videoUrl}&t=${Math.floor(timestamp)}s&vq=hd1080`, { waitUntil: 'networkidle0' });
+      await new Promise(resolve => setTimeout(resolve, 4000));
+      
+      // Re-check after reload
+      const retryErrorInfo = await page.evaluate(() => {
+        const errorElements = document.querySelectorAll('.ytp-error, .ytp-error-content-wrap');
+        const video = document.querySelector('video');
+        return {
+          hasErrorElements: errorElements.length > 0,
+          hasVideoError: video && video.error ? true : false,
+          videoCurrentTime: video ? video.currentTime : null,
+        };
+      });
+      
+      console.log(`  After reload:`, retryErrorInfo);
+      
+      if (retryErrorInfo.hasErrorElements || retryErrorInfo.hasVideoError) {
+        throw new Error(`YouTube error detected after seeking to ${timestamp}s - timestamp may be beyond video duration`);
+      }
+    } else if (errorInfo.hasErrorElements || errorInfo.hasVideoError) {
+      throw new Error(`YouTube error detected after seeking to ${timestamp}s - timestamp may be beyond video duration`);
+    }
+
+    console.log('  Extracting video frame...');
+
+    let screenshot = null;
+    const maxRetries = 3;
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      const frameDataUrl = await page.evaluate(() => {
+        const video = document.querySelector('video');
+        if (!video) {
+          throw new Error('Video element not found');
+        }
+
+        // Ensure video has valid dimensions
+        if (video.videoWidth === 0 || video.videoHeight === 0) {
+          return null;
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        
+        const dataUrl = canvas.toDataURL('image/png');
+        // Check for empty/invalid canvas output
+        if (!dataUrl || dataUrl === 'data:,' || dataUrl.length < 100) {
+          return null;
+        }
+        return dataUrl;
+      });
+
+      if (frameDataUrl) {
+        const base64Data = frameDataUrl.replace(/^data:image\/png;base64,/, '');
+        const buffer = Buffer.from(base64Data, 'base64');
+        // Validate buffer has reasonable size (at least 1KB for a real image)
+        if (buffer.length > 1024) {
+          screenshot = buffer;
+          break;
+        }
+      }
+
+      console.log(`  Frame extraction attempt ${attempt + 1} failed, retrying...`);
+      await new Promise(resolve => setTimeout(resolve, 3000));
+    }
+
+    if (!screenshot) {
+      // Fallback: take a page screenshot of the video element
+      console.log('  Falling back to element screenshot...');
+      const videoElement = await page.$('video');
+      if (videoElement) {
+        screenshot = await videoElement.screenshot({ type: 'png' });
+      } else {
+        throw new Error('Could not extract video frame after multiple attempts');
+      }
+    }
 
     console.log('  Frame extracted successfully');
     return screenshot;
@@ -236,8 +328,21 @@ class CarouselGenerator {
     const height = 1080;
     const halfHeight = height / 2;
 
-    const topScreenshot = await this.seekAndExtractFrame(page, slideConfig.topTimestamp);
-    const bottomScreenshot = await this.seekAndExtractFrame(page, slideConfig.bottomTimestamp);
+    let topScreenshot, bottomScreenshot;
+    
+    try {
+      topScreenshot = await this.seekAndExtractFrame(page, slideConfig.topTimestamp);
+    } catch (error) {
+      console.error(`  Failed to extract frame at ${slideConfig.topTimestamp}s:`, error.message);
+      throw new Error(`Invalid timestamp ${slideConfig.topTimestamp}s - ${error.message}`);
+    }
+
+    try {
+      bottomScreenshot = await this.seekAndExtractFrame(page, slideConfig.bottomTimestamp);
+    } catch (error) {
+      console.error(`  Failed to extract frame at ${slideConfig.bottomTimestamp}s:`, error.message);
+      throw new Error(`Invalid timestamp ${slideConfig.bottomTimestamp}s - ${error.message}`);
+    }
 
     // Use Sharp to resize and crop frames to fit each half
     const topFrame = await sharp(topScreenshot)
@@ -290,6 +395,160 @@ class CarouselGenerator {
       
       await fs.writeFile(outputPath, composited);
       console.log(`✓ Saved: ${outputPath}`);
+      return outputPath;
+    }
+  }
+
+  async generateCtaSlide(ctaConfig, slideNumber) {
+    console.log(`Generating CTA slide ${slideNumber}`);
+
+    const width = 1080;
+    const height = 1080;
+    const bgColor = ctaConfig.bgColor || '#1a1a2e';
+    const ctaText = ctaConfig.text || '';
+    const thumbnailUrl = ctaConfig.thumbnailUrl || '';
+    const platforms = ctaConfig.platforms || [];
+
+    // Parse hex color to RGB
+    const hexToRgb = (hex) => {
+      const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+      return result ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16),
+      } : { r: 26, g: 26, b: 46 };
+    };
+
+    const rgb = hexToRgb(bgColor);
+
+    // Create base with background color
+    let composite = sharp({
+      create: {
+        width,
+        height,
+        channels: 4,
+        background: { r: rgb.r, g: rgb.g, b: rgb.b, alpha: 1 },
+      },
+    }).png();
+
+    const layers = [];
+
+    // Fetch and add YouTube thumbnail if available
+    if (thumbnailUrl) {
+      try {
+        const thumbResponse = await fetch(thumbnailUrl);
+        if (thumbResponse.ok) {
+          const thumbBuffer = Buffer.from(await thumbResponse.arrayBuffer());
+          // Resize thumbnail to fit nicely in center (max 700px wide)
+          const resizedThumb = await sharp(thumbBuffer)
+            .resize(700, 394, { fit: 'inside' })
+            .png()
+            .toBuffer();
+
+          const thumbMeta = await sharp(resizedThumb).metadata();
+          const thumbX = Math.round((width - thumbMeta.width) / 2);
+          const thumbY = Math.round((height / 2) - thumbMeta.height / 2 - 60);
+
+          // Add rounded corners to thumbnail
+          const roundedMask = Buffer.from(
+            `<svg width="${thumbMeta.width}" height="${thumbMeta.height}">
+              <rect x="0" y="0" width="${thumbMeta.width}" height="${thumbMeta.height}" rx="16" ry="16" fill="white"/>
+            </svg>`
+          );
+          const roundedThumb = await sharp(resizedThumb)
+            .composite([{ input: roundedMask, blend: 'dest-in' }])
+            .png()
+            .toBuffer();
+
+          layers.push({ input: roundedThumb, top: thumbY, left: thumbX });
+        }
+      } catch (e) {
+        console.log('  Could not fetch thumbnail:', e.message);
+      }
+    }
+
+    // Platform icon SVGs (simple recognizable shapes)
+    const platformIcons = {
+      instagram: `<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><circle cx="12" cy="12" r="5"/><circle cx="17.5" cy="6.5" r="1.5" fill="white" stroke="none"/></svg>`,
+      youtube: `<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22.54 6.42a2.78 2.78 0 0 0-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.46a2.78 2.78 0 0 0-1.94 2A29 29 0 0 0 1 11.75a29 29 0 0 0 .46 5.33A2.78 2.78 0 0 0 3.4 19.13C5.12 19.56 12 19.56 12 19.56s6.88 0 8.6-.46a2.78 2.78 0 0 0 1.94-2 29 29 0 0 0 .46-5.25 29 29 0 0 0-.46-5.33z"/><polygon points="9.75 15.02 15.5 11.75 9.75 8.48 9.75 15.02" fill="white" stroke="none"/></svg>`,
+      tiktok: `<svg width="32" height="32" viewBox="0 0 24 24" fill="white"><path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1 0-5.78 2.92 2.92 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 3 15.57 6.33 6.33 0 0 0 9.37 22a6.33 6.33 0 0 0 6.37-6.22V9.4a8.16 8.16 0 0 0 3.85.96V7.1a4.85 4.85 0 0 1-1.59-.41z"/></svg>`,
+      linkedin: `<svg width="32" height="32" viewBox="0 0 24 24" fill="white"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"/><rect x="2" y="9" width="4" height="12"/><circle cx="4" cy="4" r="2"/></svg>`,
+      spotify: `<svg width="32" height="32" viewBox="0 0 24 24" fill="white"><circle cx="12" cy="12" r="10" fill="none" stroke="white" stroke-width="2"/><path d="M8 15s3-1 4-1 4 1 4 1" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"/><path d="M7 12s3.5-1.5 5-1.5 5 1.5 5 1.5" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"/><path d="M6.5 9s4-2 5.5-2 5.5 2 5.5 2" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>`,
+      apple: `<svg width="32" height="32" viewBox="0 0 24 24" fill="white"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83z"/><path d="M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>`,
+    };
+
+    // Build CTA text and platform icons SVG overlay
+    const fontData = await this.loadNunitoFont();
+    const ctaFontSize = 32;
+    const ctaLines = this.wordWrapText(ctaText, width - 120, ctaFontSize);
+    const ctaStartY = height - 200;
+
+    // Platform icons layout
+    const iconSize = 40;
+    const iconGap = 20;
+    const totalIconsWidth = platforms.length * iconSize + (platforms.length - 1) * iconGap;
+    const iconsStartX = (width - totalIconsWidth) / 2;
+    const iconsY = ctaStartY + (ctaLines.length * ctaFontSize * 1.3) + 30;
+
+    const platformIconsSvg = platforms.map((p, i) => {
+      const icon = platformIcons[p.toLowerCase()];
+      if (!icon) return '';
+      const x = iconsStartX + i * (iconSize + iconGap);
+      return `<g transform="translate(${x}, ${iconsY})">${icon.replace(/width="\d+"/, `width="${iconSize}"`).replace(/height="\d+"/, `height="${iconSize}"`)}</g>`;
+    }).join('');
+
+    const overlaySvg = `
+      <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <style type="text/css"><![CDATA[
+            @font-face {
+              font-family: 'Nunito';
+              font-style: normal;
+              font-weight: 700;
+              src: url(data:font/truetype;charset=utf-8;base64,${fontData}) format('truetype');
+            }
+          ]]></style>
+        </defs>
+        ${ctaLines.map((line, i) => `
+          <text
+            x="${width / 2}"
+            y="${ctaStartY + i * ctaFontSize * 1.3}"
+            font-family="Nunito, Arial, sans-serif"
+            font-size="${ctaFontSize}"
+            font-weight="700"
+            fill="white"
+            text-anchor="middle"
+          >${this.escapeXml(line)}</text>
+        `).join('')}
+        ${platformIconsSvg}
+      </svg>
+    `;
+
+    layers.push({ input: Buffer.from(overlaySvg), top: 0, left: 0 });
+
+    const composited = await sharp({
+      create: {
+        width,
+        height,
+        channels: 4,
+        background: { r: rgb.r, g: rgb.g, b: rgb.b, alpha: 1 },
+      },
+    })
+      .composite(layers)
+      .png()
+      .toBuffer();
+
+    if (this.returnBase64) {
+      const base64 = `data:image/png;base64,${composited.toString('base64')}`;
+      console.log(`✓ Generated CTA slide ${slideNumber} (base64)`);
+      return {
+        base64,
+        filename: `${this.config.name}-cta-slide-${slideNumber}.png`,
+      };
+    } else {
+      const outputPath = path.join(this.outputDir, `cta-slide-${slideNumber}.png`);
+      await fs.writeFile(outputPath, composited);
+      console.log(`✓ Saved CTA: ${outputPath}`);
       return outputPath;
     }
   }

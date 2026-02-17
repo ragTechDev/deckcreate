@@ -3,10 +3,12 @@ import { ColorSchemeScript, MantineProvider } from '@mantine/core';
 import { Notifications } from '@mantine/notifications';
 import { Nunito } from "next/font/google";
 import { theme } from './theme';
+import { AuthProvider } from './context/AuthContext';
 import "./globals.css";
 import '@mantine/core/styles.css';
 import '@mantine/notifications/styles.css';
 import '@mantine/dates/styles.css';
+import '@mantine/carousel/styles.css';
 
 const nunito = Nunito({
   subsets: ["latin"],
@@ -34,8 +36,10 @@ export default function RootLayout({
       </head>
       <body className={nunito.variable}>
         <MantineProvider theme={theme}>
-          <Notifications position="top-right" />
-          {children}
+          <AuthProvider>
+            <Notifications position="top-right" />
+            {children}
+          </AuthProvider>
         </MantineProvider>
       </body>
     </html>

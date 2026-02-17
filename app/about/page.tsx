@@ -150,11 +150,12 @@ export default function AboutPage() {
               <Title order={3}>Our philosophy</Title>
               <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="lg" style={{ width: '100%' }}>
                 <Stack gap="xs" ta="left">
-                  <Text fw={600} size="sm">No AI generation</Text>
+                  <Text fw={600} size="sm">Minimal AI usage</Text>
                   <Text size="xs" c="dimmed" lh={1.6}>
-                    We don&apos;t use AI to rewrite, rephrase, or generate your content. Your words
-                    are already good enough — we just help you get them in front of more people.
-                    This also means our tools are sustainable and energy-efficient.
+                    Our Carousel Generator and Transcription tools use <strong>zero AI</strong>. Our Auto Bulk
+                    Carousel uses AI minimally — only to analyze transcripts and suggest segments. We never
+                    use AI to rewrite or generate your content. Your words are already good enough — we just
+                    help you get them in front of more people. This keeps our tools sustainable and energy-efficient.
                   </Text>
                 </Stack>
                 <Stack gap="xs" ta="left">
