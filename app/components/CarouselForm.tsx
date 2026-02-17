@@ -21,7 +21,7 @@ import {
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
-import { IconPlus, IconTrash, IconVideo, IconInfoCircle, IconDownload } from '@tabler/icons-react';
+import { IconPlus, IconTrash, IconVideo, IconInfoCircle, IconDownload, IconMessageChatbot } from '@tabler/icons-react';
 import { TimePicker } from '@mantine/dates';
 import { extractVideoId, timeToSeconds, secondsToTime, getVideoTitle } from '../utils/youtube';
 
@@ -50,6 +50,8 @@ export function CarouselForm() {
   const [videoTitle, setVideoTitle] = useState<string>('');
   const [accordionValue, setAccordionValue] = useState<string | null>('slide-0');
   const generatedSlidesRef = useRef<HTMLDivElement>(null);
+  const [extractingCaption, setExtractingCaption] = useState<number | null>(null);
+  const [removeFillers, setRemoveFillers] = useState(true);
 
   const form = useForm<FormValues>({
     initialValues: {
@@ -111,6 +113,64 @@ export function CarouselForm() {
 
   const removeSlide = (index: number) => {
     form.removeListItem('slides', index);
+  };
+
+  const extractCaption = async (slideIndex: number) => {
+    setExtractingCaption(slideIndex);
+
+    try {
+      const videoId = extractVideoId(form.values.youtubeUrl);
+      if (!videoId) {
+        throw new Error('Please enter a valid YouTube URL first');
+      }
+
+      const slide = form.values.slides[slideIndex];
+      if (!slide.topTime || slide.topTime === '00:00:00') {
+        throw new Error('Please enter the top frame timestamp first');
+      }
+      if (!slide.bottomTime || slide.bottomTime === '00:00:00') {
+        throw new Error('Please enter the bottom frame timestamp first');
+      }
+
+      const topTimestamp = timeToSeconds(slide.topTime);
+      const bottomTimestamp = timeToSeconds(slide.bottomTime);
+
+      const response = await fetch('/api/extract-captions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoId, topTimestamp, bottomTimestamp, removeFillers }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to extract captions');
+      }
+
+      const data = await response.json();
+      form.setFieldValue(`slides.${slideIndex}.topText`, data.topCaption || '');
+      form.setFieldValue(`slides.${slideIndex}.bottomText`, data.bottomCaption || '');
+
+      if (data.topCaption || data.bottomCaption) {
+        notifications.show({
+          title: 'Captions Extracted',
+          message: 'Captions have been populated for both frames. You can edit them before generating.',
+          color: 'teal',
+        });
+      } else {
+        notifications.show({
+          title: 'No Captions Found',
+          message: 'No auto-captions were found for these timestamps. Try different times.',
+          color: 'yellow',
+        });
+      }
+    } catch (error) {
+      notifications.show({
+        title: 'Error',
+        message: error instanceof Error ? error.message : 'Failed to extract captions',
+        color: 'red',
+      });
+    } finally {
+      setExtractingCaption(null);
+    }
   };
 
   const handleSubmit = async (values: FormValues) => {
@@ -287,6 +347,26 @@ export function CarouselForm() {
                           minRows={2}
                           {...form.getInputProps(`slides.${index}.bottomText`)}
                         />
+
+                        <Group gap="sm" align="center">
+                          <Button
+                            variant="light"
+                            color="violet"
+                            size="xs"
+                            leftSection={<IconMessageChatbot size={14} />}
+                            loading={extractingCaption === index}
+                            disabled={extractingCaption !== null}
+                            onClick={() => extractCaption(index)}
+                          >
+                            Auto-extract Captions
+                          </Button>
+                          <Switch
+                            label="Remove filler words"
+                            size="xs"
+                            checked={removeFillers}
+                            onChange={(e) => setRemoveFillers(e.currentTarget.checked)}
+                          />
+                        </Group>
                       </Stack>
                     </Accordion.Panel>
                   </Accordion.Item>
