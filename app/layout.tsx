@@ -15,8 +15,8 @@ const nunito = Nunito({
 });
 
 export const metadata: Metadata = {
-  title: "Deckcreate - YouTube Carousel Generator",
-  description: "Generate beautiful carousel images from YouTube videos",
+  title: "Deckcreate - Content Repurposing Tools for Creators",
+  description: "Turn YouTube videos into carousels and transcriptions. No AI — just your authentic content, repurposed for every platform.",
   icons: {
     icon: '/favicon.png',
   },

@@ -296,6 +296,137 @@ class CaptionExtractor {
     return { topCaption, bottomCaption };
   }
 
+  // Transcribe a video: returns array of { timestamp, text } sentences
+  // Options: { startTime, endTime, removeFillers, includeTimestamps }
+  async transcribeVideo(videoId, options = {}) {
+    const {
+      startTime = null,
+      endTime = null,
+      removeFillers = true,
+    } = options;
+
+    console.log(`Transcribing video ${videoId}`);
+    if (startTime !== null) console.log(`  Range: ${startTime}s - ${endTime || 'end'}s`);
+
+    const allSegments = await this.fetchAllCaptions(videoId);
+    console.log(`  Total caption segments: ${allSegments.length}`);
+
+    if (allSegments.length === 0) {
+      return { sentences: [], fullText: '' };
+    }
+
+    // Filter to time range if specified
+    let segments = allSegments;
+    if (startTime !== null || endTime !== null) {
+      const rangeStart = startTime || 0;
+      const rangeEnd = endTime || Infinity;
+      segments = allSegments.filter(
+        (s) => s.endSec >= rangeStart && s.startSec <= rangeEnd
+      );
+    }
+
+    if (segments.length === 0) {
+      return { sentences: [], fullText: '' };
+    }
+
+    // Build full text from segments, joining with spaces
+    let fullText = segments.map((s) => s.text).join(' ').replace(/\s+/g, ' ').trim();
+
+    if (removeFillers) {
+      fullText = this.removeFillerWords(fullText);
+    }
+
+    // Split into sentences and assign timestamps
+    // We need to map each sentence back to its approximate start time
+    // First, build a word-to-time mapping from segments
+    const timedWords = [];
+    for (const seg of segments) {
+      const words = seg.text.split(/\s+/).filter(Boolean);
+      const wordDuration = words.length > 0 ? (seg.endSec - seg.startSec) / words.length : 0;
+      words.forEach((word, i) => {
+        timedWords.push({
+          word: word.toLowerCase().replace(/[^a-z0-9']/g, ''),
+          originalWord: word,
+          time: seg.startSec + i * wordDuration,
+        });
+      });
+    }
+
+    // Split the cleaned fullText into sentences
+    const rawSentences = this.splitIntoSentences(fullText);
+
+    // For each sentence, find the timestamp of its first word
+    let wordCursor = 0;
+    const sentences = [];
+
+    for (const sentenceText of rawSentences) {
+      if (!sentenceText.trim()) continue;
+
+      const sentenceWords = sentenceText.trim().split(/\s+/);
+      const firstWord = sentenceWords[0].toLowerCase().replace(/[^a-z0-9']/g, '');
+
+      // Find this word in timedWords starting from cursor
+      let timestamp = null;
+      for (let i = wordCursor; i < timedWords.length; i++) {
+        if (timedWords[i].word === firstWord) {
+          timestamp = timedWords[i].time;
+          wordCursor = i + sentenceWords.length;
+          break;
+        }
+      }
+
+      // If we couldn't find an exact match, use the cursor position
+      if (timestamp === null && wordCursor < timedWords.length) {
+        timestamp = timedWords[wordCursor].time;
+      } else if (timestamp === null) {
+        timestamp = segments[0].startSec;
+      }
+
+      const text = sentenceText.trim();
+      sentences.push({
+        timestamp: Math.round(timestamp * 10) / 10,
+        text: text.charAt(0).toUpperCase() + text.slice(1),
+      });
+    }
+
+    console.log(`  Transcribed ${sentences.length} sentences`);
+
+    return {
+      sentences,
+      fullText: sentences.map((s) => s.text).join(' '),
+    };
+  }
+
+  // Split text into sentences using punctuation boundaries
+  splitIntoSentences(text) {
+    // Split on sentence-ending punctuation followed by a space and uppercase letter,
+    // or just on . ! ? followed by space
+    const sentences = [];
+    let current = '';
+
+    const words = text.split(' ');
+    for (let i = 0; i < words.length; i++) {
+      current += (current ? ' ' : '') + words[i];
+
+      // Check if this word ends a sentence
+      const endsWithPunctuation = /[.!?]$/.test(words[i]);
+      const nextWordCapitalized = i + 1 < words.length && /^[A-Z]/.test(words[i + 1]);
+      const isLastWord = i === words.length - 1;
+
+      if (endsWithPunctuation && (nextWordCapitalized || isLastWord)) {
+        sentences.push(current.trim());
+        current = '';
+      }
+    }
+
+    // Add any remaining text as a final sentence
+    if (current.trim()) {
+      sentences.push(current.trim());
+    }
+
+    return sentences;
+  }
+
   // Legacy single-timestamp method (kept for backward compatibility)
   async extractCaptions(videoId, timestampSeconds) {
     const allSegments = await this.fetchAllCaptions(videoId);
