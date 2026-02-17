@@ -1,0 +1,19 @@
+{
+  "name": "example-carousel",
+  "videoId": "dQw4w9WgXcQ",
+  "showLogo": true,
+  "slides": [
+    {
+      "topTimestamp": 10,
+      "bottomTimestamp": 15,
+      "topText": "This is the first frame",
+      "bottomText": "This is the second frame"
+    },
+    {
+      "topTimestamp": 30,
+      "bottomTimestamp": 35,
+      "topText": "Another great moment",
+      "bottomText": "From the video"
+    }
+  ]
+}

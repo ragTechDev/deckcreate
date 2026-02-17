@@ -1,7 +1,19 @@
 import type { NextConfig } from "next";
+import path from "path";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  serverExternalPackages: [
+    'pdfkit',
+    'fontkit',
+    'puppeteer',
+    'puppeteer-extra',
+    'puppeteer-extra-plugin-stealth',
+    'sharp',
+    'fs-extra',
+  ],
+  turbopack: {
+    root: path.resolve(__dirname),
+  },
 };
 
 export default nextConfig;
