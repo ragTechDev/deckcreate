@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
-const fs = require('fs-extra');
-const path = require('path');
-const CarouselGenerator = require('./CarouselGenerator');
+import fs from 'fs-extra';
+import path from 'path';
+import CarouselGenerator from './CarouselGenerator.js';
 
 async function main() {
   const args = process.argv.slice(2);
@@ -88,8 +88,11 @@ async function main() {
   }
 }
 
-if (require.main === module) {
+// Check if running as main module (both for CommonJS and ES modules)
+if (typeof require !== 'undefined' && require.main === module) {
+  main();
+} else if (typeof import.meta !== 'undefined' && import.meta.url === `file://${process.argv[1]}`) {
   main();
 }
 
-module.exports = main;
+export default main;

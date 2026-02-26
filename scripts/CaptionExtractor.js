@@ -502,4 +502,4 @@ class CaptionExtractor {
   }
 }
 
-module.exports = CaptionExtractor;
+export default CaptionExtractor;

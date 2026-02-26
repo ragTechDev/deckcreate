@@ -95,6 +95,29 @@ Then run:
 npm run generate:bulk
 ```
 
+## Testing
+
+The project includes comprehensive tests for all scripts:
+
+```bash
+# Run all tests
+npm test
+
+# Run tests in watch mode
+npm run test:watch
+
+# Run tests with coverage report
+npm run test:coverage
+```
+
+### Test Coverage
+
+- **CaptionExtractor.js** - Tests YouTube caption fetching, parsing, and text processing
+- **CarouselGenerator.js** - Tests image generation, Puppeteer automation, and SVG overlay creation
+- **generate-carousel.js** - Tests CLI interface for single and bulk carousel generation
+
+Tests use Jest with mocking for external dependencies (Puppeteer, Sharp, file system) to ensure fast, reliable unit tests.
+
 ## Tech Stack
 
 - **Framework**: Next.js 16 with App Router
@@ -103,6 +126,7 @@ npm run generate:bulk
 - **Fonts**: Nunito (Google Fonts)
 - **Automation**: Puppeteer with Stealth Plugin
 - **Image Processing**: Sharp
+- **Testing**: Jest with comprehensive test coverage
 
 ## Brand Colors
 

@@ -1,15 +1,15 @@
-const sharp = require('sharp');
-const fs = require('fs-extra');
-const path = require('path');
+import sharp from 'sharp';
+import fs from 'fs-extra';
+import path from 'path';
 
 let puppeteer;
 let isStealthPluginLoaded = false;
 
-function loadPuppeteer() {
+async function loadPuppeteer() {
   if (!puppeteer) {
-    puppeteer = require('puppeteer-extra');
+    puppeteer = (await import('puppeteer-extra')).default;
     if (!isStealthPluginLoaded) {
-      const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+      const StealthPlugin = (await import('puppeteer-extra-plugin-stealth')).default;
       puppeteer.use(StealthPlugin());
       isStealthPluginLoaded = true;
     }
@@ -31,7 +31,7 @@ class CarouselGenerator {
     if (this.outputDir) {
       await fs.ensureDir(this.outputDir);
     }
-    const pptr = loadPuppeteer();
+    const pptr = await loadPuppeteer();
     this.browser = await pptr.launch({
       headless: true,
       args: [
@@ -667,4 +667,4 @@ class CarouselGenerator {
   }
 }
 
-module.exports = CarouselGenerator;
+export default CarouselGenerator;
