@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-const CaptionExtractor = require('@/scripts/CaptionExtractor');
+import CaptionExtractor from '@/scripts/CaptionExtractor';
 
 export async function POST(request: NextRequest) {
   try {

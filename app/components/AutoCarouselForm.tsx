@@ -110,7 +110,7 @@ export function AutoCarouselForm() {
   // CTA config
   const [ctaPreset, setCtaPreset] = useState<string>('follow');
   const [ctaCustomText, setCtaCustomText] = useState('');
-  const [ctaHandle, setCtaHandle] = useState('@ragtech');
+  const [ctaHandle, setCtaHandle] = useState('@ragtechdev');
   const [ctaPlatforms, setCtaPlatforms] = useState<string[]>(['instagram', 'youtube']);
   const [ctaBgColor, setCtaBgColor] = useState('#1a1a2e');
   const [includeCtaSlide, setIncludeCtaSlide] = useState(true);
@@ -139,7 +139,7 @@ export function AutoCarouselForm() {
   const getCtaText = () => {
     if (ctaPreset === 'custom') return ctaCustomText;
     if (ctaPreset === 'follow') return `Follow us for more ${ctaHandle}`;
-    if (ctaPreset === 'stream') return `Stream our latest episode on`;
+    if (ctaPreset === 'stream') return `Stream our latest episode on by searching ${ctaHandle} on your favourite streaming platform!`;
     return '';
   };
 
@@ -553,6 +553,12 @@ export function AutoCarouselForm() {
                     );
                   })}
                 </Group>
+                <TextInput
+                  label="Handle"
+                  placeholder="@yourhandle"
+                  value={ctaHandle}
+                  onChange={(e) => setCtaHandle(e.currentTarget.value)}
+                />
               </Box>
 
               <Box>

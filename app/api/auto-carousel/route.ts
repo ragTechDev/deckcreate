@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-const CaptionExtractor = require('@/scripts/CaptionExtractor');
+import CaptionExtractor from '@/scripts/CaptionExtractor';
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-4-20250514';

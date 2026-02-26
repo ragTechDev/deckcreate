@@ -58,14 +58,22 @@ class CaptionExtractor {
     }
 
     // Prefer auto-generated English
-    let track = captionTracks.find((t) => t.languageCode === 'en' && t.kind === 'asr');
-    if (!track) track = captionTracks.find((t) => t.languageCode === 'en');
-    if (!track) track = captionTracks[0];
+    const rankedTracks = [...captionTracks].sort((a, b) => {
+      const score = (t) => {
+        let s = 0;
+        if (t.languageCode === 'en') s += 10;
+        if (t.kind === 'asr') s += 5;
+        return s;
+      };
+      return score(b) - score(a);
+    });
 
-    console.log(`  Selected track: ${track.languageCode} (${track.kind || 'manual'})`);
-
-    // Step 2: Fetch caption data — try with page cookies first, then InnerTube fallback
-    let captionData = await this.fetchCaptionData(track.baseUrl, cookieStr);
+    let captionData = null;
+    for (const track of rankedTracks) {
+      console.log(`  Trying track: ${track.languageCode} (${track.kind || 'manual'})`);
+      captionData = await this.fetchCaptionData(track.baseUrl, cookieStr, videoId, track);
+      if (captionData) break;
+    }
 
     if (!captionData) {
       console.log('  Page cookies failed, trying InnerTube ANDROID fallback...');
@@ -80,25 +88,83 @@ class CaptionExtractor {
     return this.parseAllSegments(captionData);
   }
 
-  async fetchCaptionData(baseUrl, cookieStr) {
-    for (const fmt of ['json3', '']) {
-      let url = baseUrl;
-      if (fmt) url += (url.includes('?') ? '&' : '?') + `fmt=${fmt}`;
-
-      const resp = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Cookie': cookieStr,
-          'Referer': 'https://www.youtube.com/',
-        },
-      });
-
-      const text = await resp.text();
-      if (text.length > 0) return text;
+  withQueryParam(url, key, value) {
+    try {
+      const parsed = new URL(url);
+      parsed.searchParams.set(key, value);
+      return parsed.toString();
+    } catch {
+      const join = url.includes('?') ? '&' : '?';
+      return `${url}${join}${key}=${encodeURIComponent(value)}`;
     }
-    return null;
   }
 
+  buildCaptionUrls(baseUrl, videoId, track = {}) {
+    const urls = [];
+    urls.push(baseUrl);
+    urls.push(this.withQueryParam(baseUrl, 'fmt', 'json3'));
+    urls.push(this.withQueryParam(baseUrl, 'fmt', 'srv3'));
+    urls.push(this.withQueryParam(baseUrl, 'fmt', 'vtt'));
+    urls.push(this.withQueryParam(baseUrl, 'fmt', 'ttml'));
+
+    try {
+      const parsed = new URL(baseUrl);
+      const lang = track.languageCode || parsed.searchParams.get('lang') || 'en';
+      const kind = track.kind || parsed.searchParams.get('kind');
+      const name = parsed.searchParams.get('name');
+      const v = parsed.searchParams.get('v') || videoId;
+
+      const timedtext = new URL('https://www.youtube.com/api/timedtext');
+      timedtext.searchParams.set('v', v);
+      if (lang) timedtext.searchParams.set('lang', lang);
+      if (kind) timedtext.searchParams.set('kind', kind);
+      if (name) timedtext.searchParams.set('name', name);
+
+      urls.push(timedtext.toString());
+      urls.push(this.withQueryParam(timedtext.toString(), 'fmt', 'json3'));
+      urls.push(this.withQueryParam(timedtext.toString(), 'fmt', 'srv3'));
+    } catch {
+      urls.push(`https://www.youtube.com/api/timedtext?v=${encodeURIComponent(videoId)}&lang=en`);
+      urls.push(`https://www.youtube.com/api/timedtext?v=${encodeURIComponent(videoId)}&lang=en&fmt=json3`);
+    }
+
+    return [...new Set(urls)];
+  }
+
+  async fetchCaptionData(baseUrl, cookieStr, videoId, track = {}) {
+    const urls = this.buildCaptionUrls(baseUrl, videoId, track);
+    const headerProfiles = [
+      {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://www.youtube.com/',
+        ...(cookieStr ? { Cookie: cookieStr } : {}),
+      },
+      {
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+    ];
+
+    for (const url of urls) {
+      for (const headers of headerProfiles) {
+        try {
+          const resp = await fetch(url, { headers });
+          if (!resp.ok) continue;
+
+          const text = (await resp.text()).trim();
+          if (!text) continue;
+          if (/^<!doctype html/i.test(text) || /^<html/i.test(text)) continue;
+
+          return text;
+        } catch {
+          // Continue trying additional URL/header combinations.
+        }
+      }
+    }
+
+    return null;
+  }
   async fetchViaInnertube(videoId) {
     const clients = [
       { clientName: 'ANDROID', clientVersion: '19.09.37', apiKey: 'AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w', ua: 'com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip' },
@@ -500,6 +566,63 @@ class CaptionExtractor {
       .replace(/&#(\d+);/g, (_, num) => String.fromCharCode(parseInt(num, 10)))
       .replace(/\n/g, ' ');
   }
+}
+
+import fs from 'fs-extra';
+import path from 'path';
+
+// Command line interface
+if (process.argv[1].endsWith('CaptionExtractor.js')) {
+  const videoId = process.argv[2];
+  
+  if (!videoId) {
+    console.error('Usage: node CaptionExtractor.js <video-id>');
+    process.exit(1);
+  }
+
+  async function generateTranscript() {
+    const extractor = new CaptionExtractor();
+    try {
+      await extractor.init();
+      
+      console.log(`Generating transcript for video: ${videoId}`);
+      const captions = await extractor.fetchAllCaptions(videoId);
+      
+      if (!captions || captions.length === 0) {
+        console.log('No captions found for this video');
+        return;
+      }
+
+      // Create output directory
+      const outputDir = path.join(process.cwd(), 'transcripts');
+      await fs.ensureDir(outputDir);
+      
+      // Generate transcript file
+      const outputFile = path.join(outputDir, `${videoId}-transcript.txt`);
+      const transcript = captions.map(caption => 
+        `[${formatTime(caption.startSec)}] ${caption.text}`
+      ).join('\n\n');
+      
+      await fs.writeFile(outputFile, transcript, 'utf8');
+      console.log(`Transcript saved to: ${outputFile}`);
+      console.log(`Found ${captions.length} caption segments`);
+      
+    } catch (error) {
+      console.error('Error generating transcript:', error.message);
+      process.exit(1);
+    } finally {
+      await extractor.close();
+    }
+  }
+
+  function formatTime(seconds) {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
+
+  generateTranscript();
 }
 
 export default CaptionExtractor;
