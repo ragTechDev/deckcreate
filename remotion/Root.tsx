@@ -13,9 +13,9 @@ export const RemotionRoot: React.FC = () => {
         width={1920}
         height={1080}
         defaultProps={{
-            src: '/video/IMG_5238.MOV',
-            audioSrc: '/audio/your-audio-file.mp3', // Replace with your audio file path
-            audioStartFrom: 0, // Start audio from 0 seconds (sync with video start)
+            src: 'video/isCodingRelevant.mp4',
+            audioSrc: 'audio/isCodeRelevant.mp3',
+            audioStartFrom: 0, // Assume audio is synced from the start
         }}
         calculateMetadata={calculateMetadata}
         />

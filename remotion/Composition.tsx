@@ -1,11 +1,12 @@
 import { 
-    useCurrentFrame, 
     OffthreadVideo, 
     Audio,
     staticFile,
-    CalculateMetadataFunction
+    CalculateMetadataFunction,
+    useVideoConfig
  } from "remotion";
- import { parseMedia } from "@remotion/media-parser";
+import { parseMedia } from "@remotion/media-parser";
+import React from 'react';
 
 type MyCompositionProps = {
   src: string;
@@ -13,38 +14,61 @@ type MyCompositionProps = {
   audioStartFrom?: number; // in seconds
 };
 
- export const calculateMetadata: CalculateMetadataFunction<MyCompositionProps> = async ({props}) => {
-  const {slowDurationInSeconds, dimensions} = await parseMedia({
-    src: staticFile(props.src),
-    fields: {
-      slowDurationInSeconds: true,
-      dimensions: true,
-    },
-  });
+const normalizeStaticPath = (src: string) => src.replace(/^\/+/, '');
 
-  if (dimensions === null) {
-    // For example when passing an MP3 file:
-    throw new Error('Not a video file');
-  }
-
+export const calculateMetadata: CalculateMetadataFunction<MyCompositionProps> = async ({props}) => {
   const fps = 60;
-
-  return {
-    durationInFrames: Math.floor(slowDurationInSeconds * fps),
+  const fallback = {
+    durationInFrames: 300,
     fps,
-    width: dimensions.width,
-    height: dimensions.height,
+    width: 1920,
+    height: 1080,
   };
+
+  try {
+    const src = staticFile(normalizeStaticPath(props.src));
+    const parsed = await parseMedia({
+      src,
+      fields: {
+        slowDurationInSeconds: true,
+        dimensions: true,
+      },
+    });
+
+    if (parsed.dimensions === null) {
+      return fallback;
+    }
+
+    return {
+      durationInFrames: Math.max(1, Math.floor(parsed.slowDurationInSeconds * fps)),
+      fps,
+      width: parsed.dimensions.width,
+      height: parsed.dimensions.height,
+    };
+  } catch {
+    return fallback;
+  }
 };
 
-export const MyComposition = ({ src, audioSrc, audioStartFrom = 0 }: MyCompositionProps) => {
+export const MyComposition = ({
+  src,
+  audioSrc,
+  audioStartFrom = 0,
+}: MyCompositionProps) => {
+  const {fps} = useVideoConfig();
+  const audioStartFromFrames = Math.max(0, Math.round(audioStartFrom * fps));
+
   return (
     <>
-      <OffthreadVideo src={staticFile(src)} />
+      <OffthreadVideo
+        src={staticFile(normalizeStaticPath(src))}
+        muted={!!audioSrc}
+      />
+
       {audioSrc && (
-        <Audio 
-          src={staticFile(audioSrc)} 
-          startFrom={audioStartFrom}
+        <Audio
+          src={staticFile(normalizeStaticPath(audioSrc))}
+          startFrom={audioStartFromFrames}
         />
       )}
     </>
