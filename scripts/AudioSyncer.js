@@ -203,23 +203,120 @@ class AudioSyncer {
     return { videoStart, audioStart, duration, videoDuration, audioDuration };
   }
 
-  async runFinalFfmpeg(trimPoints) {
+  // ─── Audio processing ───────────────────────────────────────────────────────
+
+  /**
+   * Shared processing chain applied to both outputs before loudness normalisation:
+   *   1. High-pass at 80 Hz  — removes low-frequency rumble and hiss
+   *   2. FFT denoising       — broadband noise reduction (noise floor -25 dB)
+   *   3. Low-mid cut 300 Hz  — reduces boxiness/muddiness
+   *   4. Presence boost 3 kHz — adds vocal clarity and intelligibility
+   *   5. Dynamic compressor  — evens out volume, ratio 4:1 with soft makeup gain
+   */
+  buildBaseFilterChain() {
+    return [
+      'highpass=f=80',
+      'afftdn=nf=-25',
+      'equalizer=f=300:width_type=o:width=2:g=-2',
+      'equalizer=f=3000:width_type=o:width=2:g=2',
+      'acompressor=threshold=-20dB:ratio=4:attack=5:release=50:makeup=3dB',
+    ].join(',');
+  }
+
+  /**
+   * Two-pass loudnorm: first pass measures actual loudness of the source,
+   * second pass uses those measurements for accurate linear normalisation.
+   * Returns the parsed JSON stats from ffmpeg's loudnorm filter.
+   */
+  async measureLoudness(audioStart, duration, baseFilter, targetI, targetTP) {
+    const filter = `${baseFilter},loudnorm=I=${targetI}:TP=${targetTP}:LRA=11:print_format=json`;
+    return new Promise((resolve, reject) => {
+      const proc = spawn('ffmpeg', [
+        '-ss', String(audioStart),
+        '-i', this.audioPath,
+        '-t', String(duration),
+        '-af', filter,
+        '-f', 'null', '-',
+        '-y',
+      ], { stdio: ['ignore', 'pipe', 'pipe'] });
+
+      let stderr = '';
+      proc.stderr.on('data', (d) => { stderr += d.toString(); });
+      proc.on('close', (code) => {
+        // loudnorm prints its JSON block to stderr after processing completes
+        const start = stderr.lastIndexOf('{');
+        const end = stderr.lastIndexOf('}');
+        if (start === -1 || end === -1) {
+          return reject(new Error('loudnorm measurement JSON not found in ffmpeg output'));
+        }
+        try {
+          resolve(JSON.parse(stderr.slice(start, end + 1)));
+        } catch (e) {
+          reject(new Error(`Failed to parse loudnorm JSON: ${e.message}`));
+        }
+      });
+      proc.on('error', (err) => reject(new Error(`Failed to spawn ffmpeg: ${err.message}`)));
+    });
+  }
+
+  buildLoudnormFilter(stats, targetI, targetTP) {
+    return [
+      `loudnorm=I=${targetI}:TP=${targetTP}:LRA=11`,
+      `measured_I=${stats.input_i}`,
+      `measured_TP=${stats.input_tp}`,
+      `measured_LRA=${stats.input_lra}`,
+      `measured_thresh=${stats.input_thresh}`,
+      `offset=${stats.target_offset}`,
+      'linear=true',
+    ].join(':');
+  }
+
+  /**
+   * Produce the synchronized video MP4 with processed audio.
+   * Audio target: -1 dBFS true peak (iZotope peak normalisation advice).
+   */
+  async runVideoOutput(trimPoints, baseFilter, videoStats) {
     const { videoStart, audioStart, duration } = trimPoints;
-    const args = [
+    const loudnorm = this.buildLoudnormFilter(videoStats, -16, -1);
+    const audioFilter = `[1:a]${baseFilter},${loudnorm}[a_out]`;
+
+    await spawnProcess('ffmpeg', [
       '-ss', String(videoStart), '-i', this.videoPath,
       '-ss', String(audioStart), '-i', this.audioPath,
       '-t', String(duration),
+      '-filter_complex', audioFilter,
       '-map', '0:v:0',
-      '-map', '1:a:0',
+      '-map', '[a_out]',
       '-c:v', 'copy',
-      '-c:a', 'aac',
-      '-b:a', '192k',
+      '-c:a', 'aac', '-b:a', '192k',
       '-movflags', '+faststart',
       this.outputPath,
       '-y',
-    ];
-    await spawnProcess('ffmpeg', args);
+    ]);
   }
+
+  /**
+   * Produce the standalone processed audio MP3.
+   * Audio target: -14 LUFS integrated, TP -1 dB (or -2 dB if source is louder than -14 LUFS).
+   * Output format: 24-bit PCM WAV (lossless).
+   */
+  async runAudioOutput(trimPoints, baseFilter, audioStats, audioOutputPath, tp = -1) {
+    const { audioStart, duration } = trimPoints;
+    const loudnorm = this.buildLoudnormFilter(audioStats, -14, tp);
+    const filter = `${baseFilter},${loudnorm}`;
+
+    await spawnProcess('ffmpeg', [
+      '-ss', String(audioStart),
+      '-i', this.audioPath,
+      '-t', String(duration),
+      '-af', filter,
+      '-c:a', 'pcm_s24le',
+      audioOutputPath,
+      '-y',
+    ]);
+  }
+
+  // ─── Orchestration ───────────────────────────────────────────────────────────
 
   async sync() {
     console.log('Step 1/5: Extracting audio from video (may take a while for large files)...');
@@ -247,13 +344,34 @@ class AudioSyncer {
     }
 
     const trimPoints = await this.computeTrimPoints(lagSeconds);
-    console.log(`  Video start:    ${trimPoints.videoStart.toFixed(3)}s`);
-    console.log(`  Audio start:    ${trimPoints.audioStart.toFixed(3)}s`);
+    console.log(`  Video start:     ${trimPoints.videoStart.toFixed(3)}s`);
+    console.log(`  Audio start:     ${trimPoints.audioStart.toFixed(3)}s`);
     console.log(`  Output duration: ${trimPoints.duration.toFixed(3)}s`);
 
-    console.log('Step 5/5: Producing synchronized output MP4...');
-    await this.runFinalFfmpeg(trimPoints);
-    console.log(`Done. Output: ${this.outputPath}`);
+    console.log('Step 5/5: Processing audio and producing outputs...');
+    const baseFilter = this.buildBaseFilterChain();
+
+    // Video: iZotope advice — normalise max peaks to -1 dBFS
+    console.log('  Measuring loudness for video output (-1 dBFS TP)...');
+    const videoStats = await this.measureLoudness(trimPoints.audioStart, trimPoints.duration, baseFilter, -16, -1);
+    console.log(`  Video audio measured: ${videoStats.input_i} LUFS integrated, ${videoStats.input_tp} dBTP`);
+
+    // Audio: Spotify advice — -14 LUFS integrated; TP -1 if source <= -14 LUFS, else TP -2
+    console.log('  Measuring loudness for audio output (-14 LUFS)...');
+    const audioStats = await this.measureLoudness(trimPoints.audioStart, trimPoints.duration, baseFilter, -14, -1);
+    const audioTP = parseFloat(audioStats.input_i) > -14 ? -2 : -1;
+    console.log(`  Audio measured:       ${audioStats.input_i} LUFS integrated, ${audioStats.input_tp} dBTP -> using TP=${audioTP} dB`);
+
+    console.log('  Rendering video output...');
+    await this.runVideoOutput(trimPoints, baseFilter, videoStats);
+    console.log(`  Video: ${this.outputPath}`);
+
+    const audioOutputPath = this.outputPath.replace(/\.[^.]+$/, '.wav');
+    console.log('  Rendering audio output...');
+    await this.runAudioOutput(trimPoints, baseFilter, audioStats, audioOutputPath, audioTP);
+    console.log(`  Audio: ${audioOutputPath}`);
+
+    console.log('Done.');
   }
 }
 
