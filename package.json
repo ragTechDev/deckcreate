@@ -13,7 +13,9 @@
     "test:coverage": "jest --coverage",
     "generate": "node scripts/generate-carousel.js",
     "generate:bulk": "node scripts/generate-carousel.js --bulk",
-    "generate:transcript": "node scripts/CaptionExtractor.js"
+    "generate:transcript": "node scripts/CaptionExtractor.js",
+    "sync": "node scripts/sync-audio-video.js",
+    "remotion": "npx remotion studio"
   },
   "dependencies": {
     "@mantine/carousel": "^8.3.15",
@@ -29,6 +31,7 @@
     "@types/file-saver": "^2.0.7",
     "dayjs": "^1.11.19",
     "embla-carousel-react": "^8.6.0",
+    "fft.js": "^4.0.4",
     "file-saver": "^2.0.5",
     "fs-extra": "^11.2.0",
     "jszip": "^3.10.1",
@@ -39,7 +42,8 @@
     "react-dom": "19.2.3",
     "youtube-transcript": "^1.3.0",
     "remotion": "4.0.436",
-    "sharp": "^0.33.0"
+    "sharp": "^0.33.0",
+    "wavefile": "^11.0.0"
   },
   "devDependencies": {
     "@babel/core": "^7.29.0",
