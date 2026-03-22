@@ -48,6 +48,30 @@ async function getMediaDuration(filePath) {
   });
 }
 
+async function getAudioChannels(filePath) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('ffprobe', [
+      '-v', 'quiet',
+      '-print_format', 'json',
+      '-show_streams',
+      '-select_streams', 'a:0',
+      filePath,
+    ], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    proc.stdout.on('data', (d) => { stdout += d.toString(); });
+    proc.on('close', (code) => {
+      if (code !== 0) return reject(new Error(`ffprobe failed for ${filePath}`));
+      try {
+        const data = JSON.parse(stdout);
+        resolve(data.streams?.[0]?.channels ?? 1);
+      } catch (e) {
+        reject(new Error(`Failed to parse ffprobe output: ${e.message}`));
+      }
+    });
+    proc.on('error', (err) => reject(new Error(`Failed to spawn ffprobe: ${err.message}`)));
+  });
+}
+
 // Default correlation window: 300s keeps FFT size at ~4M samples (~64 MB), well within Node limits.
 const DEFAULT_CORRELATION_WINDOW = 300;
 
@@ -207,20 +231,24 @@ class AudioSyncer {
 
   /**
    * Shared processing chain applied to both outputs before loudness normalisation:
+   *   0. Stereo→mono downmix (aformat) — only when input has ≥2 channels
    *   1. High-pass at 80 Hz  — removes low-frequency rumble and hiss
    *   2. FFT denoising       — broadband noise reduction (noise floor -25 dB)
    *   3. Low-mid cut 300 Hz  — reduces boxiness/muddiness
    *   4. Presence boost 3 kHz — adds vocal clarity and intelligibility
    *   5. Dynamic compressor  — evens out volume, ratio 4:1 with soft makeup gain
    */
-  buildBaseFilterChain() {
-    return [
+  buildBaseFilterChain(isStereo = false) {
+    const filters = [];
+    if (isStereo) filters.push('aformat=channel_layouts=mono');
+    filters.push(
       'highpass=f=80',
       'afftdn=nf=-25',
       'equalizer=f=300:width_type=o:width=2:g=-2',
       'equalizer=f=3000:width_type=o:width=2:g=2',
       'acompressor=threshold=-20dB:ratio=4:attack=5:release=50:makeup=3dB',
-    ].join(',');
+    );
+    return filters.join(',');
   }
 
   /**
@@ -349,7 +377,10 @@ class AudioSyncer {
     console.log(`  Output duration: ${trimPoints.duration.toFixed(3)}s`);
 
     console.log('Step 5/5: Processing audio and producing outputs...');
-    const baseFilter = this.buildBaseFilterChain();
+    const audioChannels = await getAudioChannels(this.audioPath);
+    const isStereo = audioChannels >= 2;
+    if (isStereo) console.log(`  Input audio has ${audioChannels} channels — downmixing to mono.`);
+    const baseFilter = this.buildBaseFilterChain(isStereo);
 
     // Video: iZotope advice — normalise max peaks to -1 dBFS
     console.log('  Measuring loudness for video output (-1 dBFS TP)...');
