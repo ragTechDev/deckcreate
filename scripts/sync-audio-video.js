@@ -27,18 +27,18 @@ async function resolveArgs(cwd) {
   const cli = parseArgs();
 
   const videoPath = cli.videoPath
-    || await autoDetectFile(path.join(cwd, 'public', 'video'), ['.mov', '.mp4', '.avi', '.mkv']);
+    || await autoDetectFile(path.join(cwd, 'public', 'sync', 'video'), ['.mov', '.mp4', '.avi', '.mkv']);
   const audioPath = cli.audioPath
-    || await autoDetectFile(path.join(cwd, 'public', 'audio'), ['.mp3', '.aac', '.wav', '.m4a']);
+    || await autoDetectFile(path.join(cwd, 'public', 'sync', 'audio'), ['.mp3', '.aac', '.wav', '.m4a']);
   const outputPath = cli.outputPath
-    || path.join(cwd, 'public', 'output', 'synced-output.mp4');
+    || path.join(cwd, 'public', 'sync', 'output', 'synced-output.mp4');
 
   if (!videoPath) {
-    console.error('❌ No video file found. Use --video <path> or place a video in public/video/');
+    console.error('❌ No video file found. Use --video <path> or place a video in public/sync/video/');
     process.exit(1);
   }
   if (!audioPath) {
-    console.error('❌ No audio file found. Use --audio <path> or place an audio file in public/audio/');
+    console.error('❌ No audio file found. Use --audio <path> or place an audio file in public/sync/audio/');
     process.exit(1);
   }
 

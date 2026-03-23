@@ -15,6 +15,12 @@
     "generate:bulk": "node scripts/generate-carousel.js --bulk",
     "generate:transcript": "node scripts/CaptionExtractor.js",
     "sync": "node scripts/sync-audio-video.js",
+    "transcribe": "node scripts/transcribe-audio.js",
+    "diarize": "node scripts/diarize-audio.js",
+    "edit-transcript": "node scripts/edit-transcript.js",
+    "merge-doc": "node scripts/edit-transcript.js --merge-doc public/transcribe/output/edit/transcript.doc.txt",
+    "merge-doc:cut-pauses": "node scripts/edit-transcript.js --merge-doc public/transcribe/output/edit/transcript.doc.txt --auto-cut-pauses 0.5",
+    "vtt-to-srt": "node scripts/vtt-to-srt.js",
     "remotion": "npx remotion studio"
   },
   "dependencies": {
@@ -25,6 +31,7 @@
     "@mantine/hooks": "^8.3.15",
     "@mantine/notifications": "^8.3.15",
     "@remotion/cli": "4.0.436",
+    "@remotion/install-whisper-cpp": "^4.0.436",
     "@remotion/media-parser": "^4.0.436",
     "@remotion/media-utils": "^4.0.436",
     "@tabler/icons-react": "^3.29.0",

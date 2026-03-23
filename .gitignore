@@ -41,7 +41,12 @@ yarn-error.log*
 next-env.d.ts
 
 # Media content
-/public/video/*
-/public/audio/*
-/public/output/*
+/public/sync/audio/*
+/public/sync/output/*
+/public/sync/video/*
+/public/transcribe/input/*
+/public/transcribe/output/*
+
+# Whisper.cpp binary and models (downloaded on first run)
+/whisper.cpp/
 .claude/settings.local.json

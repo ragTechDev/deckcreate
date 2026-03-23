@@ -95,6 +95,121 @@ Then run:
 npm run generate:bulk
 ```
 
+## Transcribing Audio
+
+Local transcription is powered by [`@remotion/install-whisper-cpp`](https://www.remotion.dev/docs/install-whisper-cpp), which compiles and runs Whisper on-device with word-level timestamps. The workflow is split into two passes to keep word correction separate from structural editing.
+
+```
+Audio → transcript.raw.vtt  ← pass 1: correct words in any text editor
+      → transcript.raw.json ← pass 2: mark cuts, add speakers & graphics cues
+                ↓
+         transcript.json     ← Remotion reads this to render the video
+```
+
+### Pass 1 — Transcribe
+
+Place an audio file (`.mp3`, `.aac`, `.wav`, or `.m4a`) in `public/audio-to-transcribe/`, then run:
+
+```bash
+npm run transcribe
+```
+
+Or specify paths explicitly:
+
+```bash
+npm run transcribe -- --audio <path> --output-dir <dir> --model tiny.en
+```
+
+Outputs to `public/output/`:
+- `transcript.raw.vtt` — clean, minimal format for word correction
+- `transcript.raw.json` — full structured format with word-level timestamps, cut markers, and graphics cue fields
+
+The `tiny.en` model is used by default. `whisper.cpp` and its models are downloaded on first run to `whisper.cpp/` in the project root (gitignored). Available models: `tiny`, `tiny.en`, `base`, `base.en`, `small`, `small.en`, `medium`, `medium.en`, `large-v1` through `large-v3-turbo`.
+
+### Pass 2 — Edit transcript
+
+After correcting words in `transcript.raw.vtt`, merge the corrections back and produce the working `transcript.json`:
+
+```bash
+# Initialise transcript.json from raw (no VTT corrections)
+npm run edit-transcript
+
+# Merge corrected VTT text into transcript.json
+npm run edit-transcript -- --merge-vtt public/output/transcript.raw.vtt
+```
+
+Re-running `edit-transcript` is safe — it preserves manual edits (`speaker`, `cut`, `cutReason`, `graphics`) by segment ID and only refreshes timestamps and tokens from the raw source.
+
+Open `transcript.json` to mark cuts and add graphics cues:
+
+```jsonc
+{
+  "segments": [
+    {
+      "id": 2,
+      "start": 3.4, "end": 5.1,
+      "speaker": "Host",
+      "text": "Um, so today we're going to...",
+      "cut": true,           // ← mark to skip in render
+      "cutReason": "filler", // filler | pause | offtopic | duplicate
+      "graphics": []
+    },
+    {
+      "id": 3,
+      "start": 5.1, "end": 10.8,
+      "speaker": "Guest",
+      "text": "We're covering the new RAG architecture.",
+      "cut": false,
+      "cutReason": null,
+      "graphics": [
+        {
+          "type": "LowerThird",       // maps to remotion/components/graphics/LowerThird.tsx
+          "at": 5.1, "duration": 3.0,
+          "props": { "name": "Dr. Jane Smith", "title": "AI Researcher" }
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Troubleshooting: Whisper Build Errors
+
+`@remotion/install-whisper-cpp` compiles the Whisper C++ binary at runtime (on first `npm run transcribe`), not at `npm install`. Build failures look like:
+
+```
+Error: Could not find 'main' binary
+make: *** [Makefile:...] Error 1
+```
+
+**Common causes and fixes:**
+
+| Issue | Fix |
+|---|---|
+| Missing C++ build tools on Windows | Install [Build Tools for Visual Studio](https://visualstudio.microsoft.com/visual-cpp-build-tools/) and select the "C++ build tools" workload |
+| Missing `make` / `cmake` on macOS/Linux | Run `xcode-select --install` (macOS) or `sudo apt install build-essential cmake` (Linux) |
+| `whisper.cpp/` in a broken state | Delete the `whisper.cpp/` directory and re-run `npm run transcribe` |
+
+### Docker-Based Alternative (Recommended for CI / Cross-Platform Use)
+
+If you hit persistent native build errors, a Docker container eliminates the need for local C++ tooling entirely and gives a reproducible environment. **This is strongly recommended** if you are running in CI, sharing the project across different OSes, or cannot resolve the build errors above.
+
+The project includes `Dockerfile.transcribe` and `docker-compose.transcribe.yml` for exactly this purpose.
+
+**Prerequisites:** [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running.
+
+```bash
+# Build the image (only needed once, or after dependency changes)
+docker compose -f docker-compose.transcribe.yml build
+
+# Run transcription — reads from public/audio-to-transcribe/, writes to public/output/
+docker compose -f docker-compose.transcribe.yml run --rm transcribe
+```
+
+- Native compilation of the Whisper binary happens inside the Linux container — no host build tools needed.
+- Downloaded Whisper models are cached in a named Docker volume (`whisper-models`) so they are not re-downloaded on each run.
+- Input/output directories are bind-mounted from the host, so files are accessible normally after the container exits.
+
 ## Testing
 
 The project includes comprehensive tests for all scripts:
