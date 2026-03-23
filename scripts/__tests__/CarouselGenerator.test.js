@@ -1,4 +1,4 @@
-import CarouselGenerator from './CarouselGenerator.js';
+import CarouselGenerator from '../carousel/CarouselGenerator.js';
 import fs from 'fs-extra';
 
 // Mock sharp and puppeteer

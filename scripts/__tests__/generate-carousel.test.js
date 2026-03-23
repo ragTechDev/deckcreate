@@ -1,11 +1,11 @@
-import main from './generate-carousel.js';
+import main from '../carousel/generate-carousel.js';
 import fs from 'fs-extra';
 import path from 'path';
-import CarouselGenerator from './CarouselGenerator.js';
+import CarouselGenerator from '../carousel/CarouselGenerator.js';
 
 // Mock dependencies
 jest.mock('fs-extra');
-jest.mock('./CarouselGenerator.js', () => {
+jest.mock('../carousel/CarouselGenerator.js', () => {
   return jest.fn().mockImplementation((config) => ({
     config,
     outputDir: null,

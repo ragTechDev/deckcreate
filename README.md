@@ -95,20 +95,58 @@ Then run:
 npm run generate:bulk
 ```
 
-## Transcribing Audio
+## Video Editor Pipeline
 
-Local transcription is powered by [`@remotion/install-whisper-cpp`](https://www.remotion.dev/docs/install-whisper-cpp), which compiles and runs Whisper on-device with word-level timestamps. The workflow is split into two passes to keep word correction separate from structural editing.
+Local transcription is powered by [`@remotion/install-whisper-cpp`](https://www.remotion.dev/docs/install-whisper-cpp), which compiles and runs Whisper on-device with word-level timestamps. Speaker diarization uses [`diarize`](https://github.com/FoxNoseTech/diarize) (wespeaker + silero-vad) via a Python subprocess — no API key required.
+
+### Directory layout
 
 ```
-Audio → transcript.raw.vtt  ← pass 1: correct words in any text editor
-      → transcript.raw.json ← pass 2: mark cuts, add speakers & graphics cues
-                ↓
-         transcript.json     ← Remotion reads this to render the video
+public/
+  sync/
+    video/                          ← drop source video here
+    audio/                          ← drop cleaned audio here
+    output/                         ← synced-output.mp4
+  transcribe/
+    input/                          ← drop audio to transcribe here
+    output/
+      raw/                          ← machine output, don't edit directly
+        transcript.raw.vtt          ←   word-level VTT (optional word correction)
+        transcript.raw.json         ←   structured JSON with token timestamps
+      edit/                         ← your working files
+        transcript.doc.txt          ←   human-readable edit file (cuts, speakers, graphics)
+        transcript.json             ←   Remotion reads this to render
+        transcript.sentences.vtt/.srt
 ```
 
-### Pass 1 — Transcribe
+### Full workflow
 
-Place an audio file (`.mp3`, `.aac`, `.wav`, or `.m4a`) in `public/audio-to-transcribe/`, then run:
+```
+npm run sync            # 1. align cleaned audio to raw video
+npm run transcribe      # 2. whisper → transcript.raw.json
+npm run diarize         # 3. diarize → speaker labels in transcript.raw.json
+npm run edit-transcript # 4. generate transcript.doc.txt for editing
+# edit transcript.doc.txt
+npm run merge-doc       # 5. merge edits → transcript.json (Remotion input)
+```
+
+---
+
+### Step 1 — Sync audio to video
+
+Place a video in `public/sync/video/` and a cleaned audio file in `public/sync/audio/`, then run:
+
+```bash
+npm run sync
+```
+
+Output: `public/sync/output/synced-output.mp4`
+
+---
+
+### Step 2 — Transcribe
+
+Place an audio file (`.mp3`, `.aac`, `.wav`, or `.m4a`) in `public/transcribe/input/`, then run:
 
 ```bash
 npm run transcribe
@@ -120,60 +158,13 @@ Or specify paths explicitly:
 npm run transcribe -- --audio <path> --output-dir <dir> --model tiny.en
 ```
 
-Outputs to `public/output/`:
-- `transcript.raw.vtt` — clean, minimal format for word correction
-- `transcript.raw.json` — full structured format with word-level timestamps, cut markers, and graphics cue fields
+Outputs to `public/transcribe/output/raw/`:
+- `transcript.raw.vtt` — word-level VTT, open in any text editor to fix mis-heard words
+- `transcript.raw.json` — structured JSON with token timestamps; consumed by later steps
 
 The `tiny.en` model is used by default. `whisper.cpp` and its models are downloaded on first run to `whisper.cpp/` in the project root (gitignored). Available models: `tiny`, `tiny.en`, `base`, `base.en`, `small`, `small.en`, `medium`, `medium.en`, `large-v1` through `large-v3-turbo`.
 
-### Pass 2 — Edit transcript
-
-After correcting words in `transcript.raw.vtt`, merge the corrections back and produce the working `transcript.json`:
-
-```bash
-# Initialise transcript.json from raw (no VTT corrections)
-npm run edit-transcript
-
-# Merge corrected VTT text into transcript.json
-npm run edit-transcript -- --merge-vtt public/output/transcript.raw.vtt
-```
-
-Re-running `edit-transcript` is safe — it preserves manual edits (`speaker`, `cut`, `cutReason`, `graphics`) by segment ID and only refreshes timestamps and tokens from the raw source.
-
-Open `transcript.json` to mark cuts and add graphics cues:
-
-```jsonc
-{
-  "segments": [
-    {
-      "id": 2,
-      "start": 3.4, "end": 5.1,
-      "speaker": "Host",
-      "text": "Um, so today we're going to...",
-      "cut": true,           // ← mark to skip in render
-      "cutReason": "filler", // filler | pause | offtopic | duplicate
-      "graphics": []
-    },
-    {
-      "id": 3,
-      "start": 5.1, "end": 10.8,
-      "speaker": "Guest",
-      "text": "We're covering the new RAG architecture.",
-      "cut": false,
-      "cutReason": null,
-      "graphics": [
-        {
-          "type": "LowerThird",       // maps to remotion/components/graphics/LowerThird.tsx
-          "at": 5.1, "duration": 3.0,
-          "props": { "name": "Dr. Jane Smith", "title": "AI Researcher" }
-        }
-      ]
-    }
-  ]
-}
-```
-
-### Troubleshooting: Whisper Build Errors
+#### Troubleshooting: Whisper Build Errors
 
 `@remotion/install-whisper-cpp` compiles the Whisper C++ binary at runtime (on first `npm run transcribe`), not at `npm install`. Build failures look like:
 
@@ -182,33 +173,165 @@ Error: Could not find 'main' binary
 make: *** [Makefile:...] Error 1
 ```
 
-**Common causes and fixes:**
-
 | Issue | Fix |
 |---|---|
 | Missing C++ build tools on Windows | Install [Build Tools for Visual Studio](https://visualstudio.microsoft.com/visual-cpp-build-tools/) and select the "C++ build tools" workload |
 | Missing `make` / `cmake` on macOS/Linux | Run `xcode-select --install` (macOS) or `sudo apt install build-essential cmake` (Linux) |
 | `whisper.cpp/` in a broken state | Delete the `whisper.cpp/` directory and re-run `npm run transcribe` |
 
-### Docker-Based Alternative (Recommended for CI / Cross-Platform Use)
+---
 
-If you hit persistent native build errors, a Docker container eliminates the need for local C++ tooling entirely and gives a reproducible environment. **This is strongly recommended** if you are running in CI, sharing the project across different OSes, or cannot resolve the build errors above.
+### Step 3 — Diarize (assign speakers)
 
-The project includes `Dockerfile.transcribe` and `docker-compose.transcribe.yml` for exactly this purpose.
+This step identifies who is speaking and writes speaker labels (`SPEAKER_00`, `SPEAKER_01`, …) into `transcript.raw.json`. It requires Python 3.9–3.12 and no account or API key.
 
-**Prerequisites:** [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running.
+> **Python version:** `diarize` depends on `torch<2.9`, which is only available for Python ≤3.12. Python 3.13+ will not work.
 
-```bash
-# Build the image (only needed once, or after dependency changes)
-docker compose -f docker-compose.transcribe.yml build
+#### One-time setup
 
-# Run transcription — reads from public/audio-to-transcribe/, writes to public/output/
-docker compose -f docker-compose.transcribe.yml run --rm transcribe
+**1. Install Python 3.12** if not already available. Check what you have:
+
+```powershell
+py --list        # Windows
+python3 --version  # macOS / Linux
 ```
 
-- Native compilation of the Whisper binary happens inside the Linux container — no host build tools needed.
-- Downloaded Whisper models are cached in a named Docker volume (`whisper-models`) so they are not re-downloaded on each run.
-- Input/output directories are bind-mounted from the host, so files are accessible normally after the container exits.
+It is recommended to use a dedicated venv to avoid conflicts with your system Python:
+
+```powershell
+# Windows (PowerShell)
+py -3.12 -m venv .venv
+.venv\Scripts\activate
+pip install -r scripts/diarize/requirements.txt
+```
+
+```bash
+# macOS / Linux
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r scripts/diarize/requirements.txt
+```
+
+**2. Install Python dependencies** (if not using the venv activate above):
+
+```bash
+pip install -r scripts/diarize/requirements.txt
+```
+
+This installs the `diarize` package and its dependencies (torch, torchaudio, wespeaker, silero-vad). Models download automatically on first run.
+
+#### Running diarization
+
+```bash
+npm run diarize
+```
+
+If using a venv or `python` is not on your PATH:
+
+```bash
+# Windows
+npm run diarize -- --python .venv\Scripts\python.exe
+
+# macOS / Linux
+npm run diarize -- --python .venv/bin/python
+```
+
+If you know the exact number of speakers in advance, pass it for more accurate results:
+
+```bash
+npm run diarize -- --num-speakers 3
+```
+
+**Output:** Speaker labels written back into `public/transcribe/output/raw/transcript.raw.json`.
+
+---
+
+### Step 4 — Edit transcript
+
+Generate the human-readable edit file:
+
+```bash
+npm run edit-transcript
+```
+
+This produces `public/transcribe/output/edit/transcript.doc.txt` with speaker labels (`SPEAKER_00`, `SPEAKER_01`, …) and inline cut markers. Open it in any text editor.
+
+To merge a corrected VTT (if you fixed word errors in `transcript.raw.vtt`):
+
+```bash
+npm run edit-transcript -- --merge-vtt public/transcribe/output/raw/transcript.raw.vtt
+```
+
+Re-running `edit-transcript` is safe — it preserves manual edits (`speaker`, `cut`, `cutReason`, `graphics`) by segment ID and only refreshes timestamps and tokens from the raw source.
+
+---
+
+### Step 5 — Merge edits
+
+After editing `transcript.doc.txt` (renaming speakers, marking cuts, adding graphics cues):
+
+```bash
+npm run merge-doc
+```
+
+With automatic pause cutting:
+
+```bash
+npm run merge-doc:cut-pauses    # cuts inter-word silences longer than 0.5s
+```
+
+**Output:** `public/transcribe/output/edit/transcript.json` — the final Remotion input.
+
+#### transcript.doc.txt format
+
+```
+SPEAKER_00  [25]
+I'm Natasha and I'm a software engineer.
+
+SPEAKER_01  [26]
+Welcome to ragTech. We are three engineers {um} breaking down tech for everyone.
+
+SPEAKER_00  [27]  CUT:offtopic
+Oh so that would be nice.
+```
+
+- Rename `SPEAKER_00` etc. to real names — a single find-replace covers the whole file
+- `{word}` marks a filler cut; `{word:reason}` marks a cut with a custom reason
+- `CUT` or `CUT:reason` on the header line cuts the entire segment
+- Graphics cues use `> TypeName  at="word"  duration=3  key=value` on lines after the text
+
+#### transcript.json structure
+
+```jsonc
+{
+  "segments": [
+    {
+      "id": 25,
+      "start": 42.1, "end": 45.8,
+      "speaker": "Natasha",
+      "text": "I'm Natasha and I'm a software engineer.",
+      "cut": false,
+      "cutReason": null,
+      "graphics": []
+    },
+    {
+      "id": 26,
+      "start": 46.0, "end": 52.3,
+      "speaker": "Saloni",
+      "text": "Welcome to ragTech.",
+      "cut": false,
+      "cutReason": null,
+      "graphics": [
+        {
+          "type": "LowerThird",
+          "at": 46.0, "duration": 3.0,
+          "props": { "name": "Saloni", "title": "Software Developer" }
+        }
+      ]
+    }
+  ]
+}
+```
 
 ## Testing
 

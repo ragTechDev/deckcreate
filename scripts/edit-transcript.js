@@ -2,7 +2,7 @@
 
 import fs from 'fs-extra';
 import path from 'path';
-import { convertVttToSrt } from './vtt-to-srt.js';
+import { convertVttToSrt } from './shared/vtt-to-srt.js';
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -207,18 +207,69 @@ function buildGraphicLine(graphic, tokens) {
   return `> ${graphic.type}  ${pairs.join('  ')}`;
 }
 
+function buildInstructionsBlock() {
+  return [
+    '════════════════════════════════════════════════════════════════',
+    '  TRANSCRIPT EDITOR  ─  Editing Guide',
+    '════════════════════════════════════════════════════════════════',
+    '',
+    '  EDIT TEXT       Just retype any word. Changes are saved.',
+    '',
+    '  CUT WORD(S)     Wrap in curly braces:  {um}  {you know}',
+    '                  With reason:  {um:filler}  {well:pause}',
+    '                  Reasons: filler (default), pause, offtopic, duplicate',
+    '',
+    '  CUT SEGMENT     Add CUT after the segment number:',
+    '                    [3] CUT  original text...',
+    '                    [3] CUT:offtopic  original text...',
+    '',
+    '  RENAME SPEAKER  Edit the name after the colon in SPEAKERS below.',
+    '',
+    '  GRAPHICS        Add a line starting with > after the segment:',
+    '                    > LowerThird  at="word"  duration=3  name="Name"  title="Role"',
+    '                    > Callout  at="word"  duration=2  text="Quote"',
+    '                    > ChapterMarker  at="word"  duration=1',
+    '',
+    '════════════════════════════════════════════════════════════════',
+    '',
+  ].join('\n');
+}
+
+function buildSpeakersSection(transcript) {
+  const speakers = [...new Set(transcript.segments.map(s => s.speaker).filter(Boolean))].sort();
+  if (!speakers.length) return '';
+  return '# SPEAKERS\n' + speakers.map(s => `${s}: ${s}`).join('\n') + '\n\n---\n\n';
+}
+
 function buildDoc(transcript) {
-  const blocks = transcript.segments.map(seg => {
-    let header = `${seg.speaker || 'SPEAKER'}  [${seg.id}]`;
-    if (seg.cut) header += `  CUT${seg.cutReason ? ':' + seg.cutReason : ''}`;
+  const instructions = buildInstructionsBlock();
+  const speakersSection = buildSpeakersSection(transcript);
 
+  const lines = [];
+  let lastSpeaker = null;
+
+  for (const seg of transcript.segments) {
+    const speaker = seg.speaker || 'SPEAKER';
+
+    if (speaker !== lastSpeaker) {
+      if (lastSpeaker !== null) lines.push('');
+      lines.push(`=== ${speaker} ===`);
+      lines.push('');
+      lastSpeaker = speaker;
+    }
+
+    let segLine = `[${seg.id}]`;
+    if (seg.cut) segLine += ` CUT${seg.cutReason ? ':' + seg.cutReason : ''}`;
     const text = buildTextWithCuts(seg);
-    const graphicLines = (seg.graphics || []).map(g => buildGraphicLine(g, seg.tokens));
+    if (text) segLine += `  ${text}`;
+    lines.push(segLine);
 
-    return [header, text, ...graphicLines].filter(Boolean).join('\n');
-  });
+    for (const g of (seg.graphics || [])) {
+      lines.push('    ' + buildGraphicLine(g, seg.tokens));
+    }
+  }
 
-  return blocks.join('\n\n') + '\n';
+  return instructions + speakersSection + lines.join('\n') + '\n';
 }
 
 // ─── Doc merge ────────────────────────────────────────────────────────────────
@@ -315,51 +366,98 @@ function applyTextPartsToTokens(rawText, tokens) {
   return updated;
 }
 
+function parseSpeakerRenames(docContent) {
+  const match = docContent.match(/^#\s*SPEAKERS\s*\n([\s\S]*?)\n---/m);
+  if (!match) return {};
+  const map = {};
+  for (const line of match[1].split('\n')) {
+    const colonIdx = line.indexOf(':');
+    if (colonIdx < 0) continue;
+    const from = line.slice(0, colonIdx).trim();
+    const to = line.slice(colonIdx + 1).trim();
+    if (from && to && from !== to) map[from] = to;
+  }
+  return map;
+}
+
+function stripSpeakersSection(docContent) {
+  // Strip everything from the start through the --- separator
+  // (covers both the instructions block and the SPEAKERS section)
+  return docContent.replace(/^[\s\S]*?\n---[ \t]*\n+/m, '');
+}
+
 function mergeDocIntoTranscript(transcript, docContent) {
-  const blocks = docContent.split(/\n\n+/).filter(b => b.trim());
+  const renames = parseSpeakerRenames(docContent);
+  const stripped = stripSpeakersSection(docContent);
+
   const byId = Object.fromEntries(transcript.segments.map(s => [s.id, s]));
   let applied = 0;
+  let currentSpeaker = null;
+  let pendingSeg = null;
+  let pendingGraphicLines = [];
 
-  for (const block of blocks) {
-    const lines = block.split('\n').filter(l => l.trim());
-    if (!lines.length) continue;
-
-    const header = lines[0];
-
-    // Find [N] anywhere on the header line — tolerant of any spacing
-    const idMatch = header.match(/\[(\d+)\]/);
-    if (!idMatch) continue;
-
-    const id = parseInt(idMatch[1]);
-    const seg = byId[id];
-    if (!seg) continue;
-
-    // Speaker = everything before [N], trimmed
-    const speaker = header.slice(0, header.indexOf(idMatch[0])).trim();
-
-    // CUT = any occurrence of "CUT" after [N], optionally followed by :reason
-    const afterId = header.slice(header.indexOf(idMatch[0]) + idMatch[0].length).trim();
-    const cutMatch = afterId.match(/\bCUT(?::(\w+))?\b/i);
-    const cut = !!cutMatch;
-    const cutReason = cutMatch?.[1]?.toLowerCase() || (cut ? 'offtopic' : null);
-
-    const textLines = [];
-    const graphicLines = [];
-    for (let i = 1; i < lines.length; i++) {
-      if (lines[i].trimStart().startsWith('>')) graphicLines.push(lines[i].trim().slice(1).trim());
-      else textLines.push(lines[i]);
-    }
-
-    const rawText = textLines.join(' ');
-    const tokens = applyTextPartsToTokens(rawText, seg.tokens);
-    const cleanText = rawText.replace(/\{[^}]+\}/g, '').replace(/\s{2,}/g, ' ').trim();
-    const graphics = graphicLines.map(l => parseGraphicLine(l, tokens));
-
-    byId[id] = { ...seg, speaker, cut, cutReason: cutReason || null, text: cleanText, tokens, graphics };
-    applied++;
+  function flushPending() {
+    if (!pendingSeg) return;
+    const graphics = pendingGraphicLines.map(l => parseGraphicLine(l, pendingSeg.tokens));
+    byId[pendingSeg.id] = { ...pendingSeg, graphics };
+    pendingSeg = null;
+    pendingGraphicLines = [];
   }
 
-  console.log(`  ${applied}/${blocks.length} blocks merged.`);
+  for (const line of stripped.split('\n')) {
+    const trimmed = line.trim();
+
+    // Speaker group header: === Speaker Name ===
+    const speakerMatch = trimmed.match(/^===\s+(.+?)\s+===$/);
+    if (speakerMatch) {
+      flushPending();
+      const rawSpeaker = speakerMatch[1];
+      currentSpeaker = renames[rawSpeaker] ?? rawSpeaker;
+      continue;
+    }
+
+    // Graphic line: > GraphicType ...
+    if (trimmed.startsWith('>')) {
+      if (pendingSeg) pendingGraphicLines.push(trimmed.slice(1).trim());
+      continue;
+    }
+
+    // Segment line: [N]  text  or  [N] CUT  text  or  [N] CUT:reason  text
+    const segMatch = trimmed.match(/^\[(\d+)\](.*)/);
+    if (segMatch) {
+      flushPending();
+      const id = parseInt(segMatch[1]);
+      const seg = byId[id];
+      if (!seg) continue;
+
+      let rest = segMatch[2].trim();
+      let cut = false;
+      let cutReason = null;
+
+      const cutMatch = rest.match(/^CUT(?::(\w+))?\s*(.*)/i);
+      if (cutMatch) {
+        cut = true;
+        cutReason = cutMatch[1]?.toLowerCase() || 'offtopic';
+        rest = cutMatch[2];
+      }
+
+      const rawText = rest;
+      const tokens = applyTextPartsToTokens(rawText, seg.tokens);
+      const cleanText = rawText.replace(/\{[^}]+\}/g, '').replace(/\s{2,}/g, ' ').trim();
+      const speaker = currentSpeaker ?? seg.speaker;
+
+      pendingSeg = { ...seg, speaker, cut, cutReason: cutReason || null, text: cleanText, tokens };
+      applied++;
+      continue;
+    }
+  }
+
+  flushPending();
+
+  if (Object.keys(renames).length) {
+    console.log(`  Speaker renames: ${Object.entries(renames).map(([k, v]) => `${k} → ${v}`).join(', ')}`);
+  }
+  console.log(`  ${applied} segments merged.`);
   return { ...transcript, segments: transcript.segments.map(s => byId[s.id] ?? s) };
 }
 
