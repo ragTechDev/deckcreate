@@ -21,6 +21,7 @@
     "edit-transcript": "node scripts/edit-transcript.js",
     "merge-doc": "node scripts/edit-transcript.js --merge-doc public/transcribe/output/edit/transcript.doc.txt",
     "merge-doc:cut-pauses": "node scripts/edit-transcript.js --merge-doc public/transcribe/output/edit/transcript.doc.txt --auto-cut-pauses 0.5",
+    "cut-preview": "node scripts/cut-preview.js",
     "vtt-to-srt": "node scripts/shared/vtt-to-srt.js",
     "remotion": "npx remotion studio"
   },

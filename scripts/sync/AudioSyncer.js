@@ -316,7 +316,7 @@ class AudioSyncer {
       '-map', '0:v:0',
       '-map', '[a_out]',
       '-c:v', 'copy',
-      '-c:a', 'aac', '-b:a', '192k',
+      '-c:a', 'aac', '-ar', '48000', '-b:a', '192k',
       '-movflags', '+faststart',
       this.outputPath,
       '-y',

@@ -66,8 +66,7 @@ async function main() {
   console.log(`✓ ${outPath}`);
 }
 
-import { fileURLToPath } from 'url';
-const __filename = fileURLToPath(import.meta.url);
-if (process.argv[1] === __filename || process.argv[1].replace(/\\/g, '/') === __filename.replace(/\\/g, '/')) {
+const _argv1 = (process.argv[1] || '').replace(/\\/g, '/');
+if (_argv1.endsWith('/vtt-to-srt.js') || _argv1.endsWith('/vtt-to-srt')) {
   main().catch(err => { console.error('❌ Error:', err.message); process.exit(1); });
 }

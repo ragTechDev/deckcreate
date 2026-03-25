@@ -28,16 +28,32 @@ function normalize(text) {
   return stripPunctuation(text).toLowerCase();
 }
 
+// Whisper special tokens (e.g. _BEG_, _EOS_) — never shown in text, never cut.
+function isSpecialToken(token) {
+  return /_[A-Z]+_/.test(token.text.trim());
+}
+
+// Whisper disfluency markers (e.g. "--", "...") — spoken hesitation tokens whose
+// audio is present but invisible in the doc (they look like punctuation but carry
+// speech). Only matches multi-char repeated markers, NOT single punctuation like
+// ".", "?", "!" which Whisper also emits as separate tokens.
+function isDisfluencyToken(token) {
+  if (isSpecialToken(token)) return false;
+  const t = token.text.trim();
+  return /^-{2,}$|^\.{2,}$|^—+$/.test(t);
+}
+
 // Whisper BPE tokens carry their word boundary as a leading space:
 // " j" starts a new word, "inx" continues the previous one → "jinx".
 function joinTokenTexts(tokens) {
   let result = '';
   for (const t of tokens) {
-    const stripped = stripPunctuation(t.text);
-    if (!stripped) continue;
+    if (isSpecialToken(t)) continue;
+    const raw = t.text.trim();
+    if (!raw) continue;
     result = (!result || t.text.startsWith(' '))
-      ? (result ? `${result} ${stripped}` : stripped)
-      : result + stripped;
+      ? (result ? `${result} ${raw}` : raw)
+      : result + raw;
   }
   return result;
 }
@@ -50,23 +66,49 @@ function fixContractions(text) {
 
 // ─── Cut derivation ───────────────────────────────────────────────────────────
 
+// How far (0–1) to bias cut boundaries towards the adjacent spoken words.
+// 0 = cut starts/ends at the cut token's own t_dtw (original behaviour).
+// 1 = cut starts/ends exactly at the neighbouring word's t_dtw.
+// Raise towards 1 to tighten cuts; lower towards 0 for more breathing room.
+const CUT_BOUNDARY_BIAS = 1.0;
+
 function deriveCuts(segment) {
   const cuts = [];
   let cutFrom = null;
-  let cutReason = null;
+  let lastCutToken = null;
+  // Last non-cut, non-special token with real text — used to start the cut at
+  // the midpoint between the previous word and the first cut token, so the cut
+  // begins closer to where the previous word ends rather than its t_dtw start.
+  let prevWordToken = null;
 
   for (let i = 0; i <= segment.tokens.length; i++) {
     const token = segment.tokens[i];
     const isCut = token?.cut ?? false;
 
     if (!cutFrom && isCut) {
-      cutFrom = token.t_dtw;
-      cutReason = token.cutReason || 'filler';
+      cutFrom = token._cutFrom !== undefined
+        ? token._cutFrom
+        : (prevWordToken
+            ? prevWordToken.t_dtw + CUT_BOUNDARY_BIAS * (token.t_dtw - prevWordToken.t_dtw)
+            : token.t_dtw);
+      lastCutToken = token;
+    } else if (cutFrom && isCut) {
+      lastCutToken = token;
     } else if (cutFrom && !isCut) {
-      const cutTo = token ? token.t_dtw : segment.end;
-      cuts.push({ from: cutFrom, to: cutTo, reason: cutReason });
+      const endTime = token ? token.t_dtw : segment.end;
+      const cutTo = lastCutToken._cutTo !== undefined
+        ? lastCutToken._cutTo
+        : lastCutToken.t_dtw + CUT_BOUNDARY_BIAS * (endTime - lastCutToken.t_dtw);
+      // Skip zero-duration or inverted cuts (can happen when token t_dtw > segment.end
+      // due to Whisper timing imprecision, or when consecutive tokens share a t_dtw).
+      if (cutTo > cutFrom) cuts.push({ from: cutFrom, to: cutTo });
       cutFrom = null;
-      cutReason = null;
+      lastCutToken = null;
+      if (token && !isSpecialToken(token) && normalize(token.text) !== '') {
+        prevWordToken = token;
+      }
+    } else if (!isCut && token && !isSpecialToken(token) && normalize(token.text) !== '') {
+      prevWordToken = token;
     }
   }
 
@@ -76,7 +118,7 @@ function deriveCuts(segment) {
 // ─── Sentence merging ─────────────────────────────────────────────────────────
 
 const SENTENCE_END = /[.!?](\s|$)/;
-const MAX_WORDS = 20;
+const MAX_WORDS = 12;
 const PAUSE_THRESHOLD = 0.8;
 
 function mergeIntoSentences(segments) {
@@ -90,19 +132,20 @@ function mergeIntoSentences(segments) {
 
     if (!bucket) {
       bucket = { ...seg, tokens: [...seg.tokens] };
-      wordCount = seg.tokens.length || seg.text.split(/\s+/).filter(Boolean).length;
+      wordCount = seg.text.split(/\s+/).filter(Boolean).length;
     } else {
       bucket.end = seg.end;
       bucket.text = bucket.text.trimEnd() + ' ' + seg.text.trimStart();
       bucket.tokens = [...bucket.tokens, ...seg.tokens];
-      wordCount += seg.tokens.length || seg.text.split(/\s+/).filter(Boolean).length;
+      wordCount += seg.text.split(/\s+/).filter(Boolean).length;
     }
 
     const endsWithPunctuation = SENTENCE_END.test(seg.text.trim());
     const longPause = next && (next.start - seg.end) > PAUSE_THRESHOLD;
     const tooLong = wordCount >= MAX_WORDS;
+    const speakerChange = next && next.speaker && seg.speaker && next.speaker !== seg.speaker;
 
-    if (endsWithPunctuation || longPause || tooLong || !next) {
+    if (endsWithPunctuation || longPause || tooLong || speakerChange || !next) {
       sentences.push({ ...bucket, id: sentences.length + 1 });
       bucket = null;
       wordCount = 0;
@@ -120,14 +163,22 @@ function buildTextWithCuts(seg) {
   // No cut tokens — rebuild from token boundaries to fix subword splits (e.g. "j inx" → "jinx").
   // Fall back to seg.text when the user has made structural word-count edits.
   if (!hasCuts) {
-    const tokenText = fixContractions(joinTokenTexts(seg.tokens));
+    const tokenText = fixContractions(joinTokenTexts(seg.tokens.filter(t => !isSpecialToken(t))));
     if (!seg.text || !tokenText) return tokenText || seg.text;
     const segWords = seg.text.split(/\s+/).filter(Boolean);
     const tokWords = tokenText.split(/\s+/).filter(Boolean);
-    if (tokWords.length < segWords.length) return tokenText;         // tokens merge subwords
-    if (segWords.length < tokWords.length) return seg.text;          // user deleted words
-    const wordsMatch = segWords.every((w, i) => normalize(w) === normalize(tokWords[i]));
-    return wordsMatch ? tokenText : seg.text;                        // user changed words → trust seg.text
+    if (tokWords.length === segWords.length) {
+      const normalMatch = segWords.every((w, i) => normalize(w) === normalize(tokWords[i]));
+      if (!normalMatch) return seg.text;                             // user changed words
+      // Words match (normalized); use tokenText only if text is identical — preserves user punctuation corrections
+      return segWords.every((w, i) => w.toLowerCase() === tokWords[i].toLowerCase()) ? tokenText : seg.text;
+    }
+    // Word counts differ: BPE subword merge if concat matches (e.g. "j inx" → "jinx"), otherwise user edit
+    if (normalize(segWords.join('')) === normalize(tokWords.join(''))) return tokenText;
+    // Tokens have more words than seg.text — seg.text is missing content (stale/corrupted).
+    // In the no-cuts path tokens are authoritative, so show the full token reconstruction.
+    if (tokWords.length > segWords.length) return tokenText;
+    return seg.text;
   }
 
   // Build parts list from tokens (cut markers + non-cut token words)
@@ -135,25 +186,55 @@ function buildTextWithCuts(seg) {
   let i = 0;
   while (i < seg.tokens.length) {
     const token = seg.tokens[i];
-    const word = stripPunctuation(token.text);
-    if (!word) { i++; continue; }
+    if (isSpecialToken(token)) { i++; continue; }
 
     if (token.cut) {
-      const reason = token.cutReason || 'filler';
+      // Collect all consecutive cut tokens (including disfluencies like "--" whose
+      // stripped word is empty — they still need to appear as {--} in the doc).
       const cutTokens = [];
-      while (
-        i < seg.tokens.length &&
-        seg.tokens[i].cut &&
-        (seg.tokens[i].cutReason || 'filler') === reason
-      ) {
-        cutTokens.push(seg.tokens[i]);
+      while (i < seg.tokens.length && seg.tokens[i].cut) {
+        if (!isSpecialToken(seg.tokens[i])) cutTokens.push(seg.tokens[i]);
         i++;
       }
-      const span = joinTokenTexts(cutTokens);
-      if (span) parts.push(reason === 'filler' ? `{${span}}` : `{${span}:${reason}}`);
+      // Build span from word-only tokens (skip punctuation, dedupe same-text/same-t_dtw BPE pairs)
+      // so the span round-trips correctly through applyTextPartsToTokens when edited with | from, to.
+      // Fall back to joinTokenTexts (which handles "--" etc.) when no word tokens exist.
+      const wordSpan = (() => {
+        const words = [];
+        let prevNorm = null, prevTdtw = null;
+        for (const t of cutTokens) {
+          const norm = normalize(t.text);
+          if (!norm) continue;
+          if (norm === prevNorm && t.t_dtw === prevTdtw) continue; // dedupe BPE dups
+          words.push(stripPunctuation(t.text).trim());
+          prevNorm = norm; prevTdtw = t.t_dtw;
+        }
+        return words.join(' ');
+      })();
+      const span = wordSpan || joinTokenTexts(cutTokens) || cutTokens.map(t => t.text.trim()).filter(Boolean).join(' ');
+      if (span) {
+        // Show explicit time override if one was stored (from a previous {text | from, to} edit).
+        const first = cutTokens[0];
+        const last = cutTokens[cutTokens.length - 1];
+        const timeOverride = (first?._cutFrom !== undefined && last?._cutTo !== undefined)
+          ? ` | ${first._cutFrom.toFixed(2)}, ${last._cutTo.toFixed(2)}`
+          : '';
+        parts.push(`{${span}${timeOverride}}`);
+      }
     } else {
-      parts.push(word);
-      i++;
+      // Group BPE subword tokens into a single word part (e.g. " today" + "'s" → "today's",
+      // " 20" + "26" → "2026") so the part count matches segTextWords.
+      let word = '';
+      while (i < seg.tokens.length && !seg.tokens[i].cut && !isSpecialToken(seg.tokens[i])) {
+        const raw = stripPunctuation(seg.tokens[i].text);
+        if (!raw) { i++; continue; } // skip empty tokens (lone punctuation like "?")
+        if (!word || !seg.tokens[i].text.startsWith(' ')) {
+          word += raw; i++;
+        } else {
+          break; // next token starts a new word
+        }
+      }
+      if (word) parts.push(word);
     }
   }
 
@@ -216,19 +297,31 @@ function buildInstructionsBlock() {
     '  EDIT TEXT       Just retype any word. Changes are saved.',
     '',
     '  CUT WORD(S)     Wrap in curly braces:  {um}  {you know}',
-    '                  With reason:  {um:filler}  {well:pause}',
-    '                  Reasons: filler (default), pause, offtopic, duplicate',
+    '                  Fine-tune cut timing:  {you know | 12.50, 14.20}',
+    '                  (seconds from start of audio — overrides auto-detection)',
     '',
     '  CUT SEGMENT     Add CUT after the segment number:',
     '                    [3] CUT  original text...',
-    '                    [3] CUT:offtopic  original text...',
     '',
     '  RENAME SPEAKER  Edit the name after the colon in SPEAKERS below.',
+    '',
+    '  OVERRIDE SPEAKER Override the speaker for one segment:',
+    '                    [10] SPEAKER: Alice  text...',
     '',
     '  GRAPHICS        Add a line starting with > after the segment:',
     '                    > LowerThird  at="word"  duration=3  name="Name"  title="Role"',
     '                    > Callout  at="word"  duration=2  text="Quote"',
     '                    > ChapterMarker  at="word"  duration=1',
+    '',
+    '  TRIM VIDEO       Place > START before the first segment to keep,',
+    '                  and > END after the last segment to keep:',
+    '                    > START',
+    '                    [5] first segment you want...',
+    '                    [12] last segment you want...',
+    '                    > END',
+    '                  Anything outside these markers is excluded.',
+    '',
+    '  SAVE EDITS       npm run merge-doc',
     '',
     '════════════════════════════════════════════════════════════════',
     '',
@@ -248,6 +341,8 @@ function buildDoc(transcript) {
   const lines = [];
   let lastSpeaker = null;
 
+  const { videoStart, videoEnd } = transcript.meta;
+
   for (const seg of transcript.segments) {
     const speaker = seg.speaker || 'SPEAKER';
 
@@ -258,15 +353,19 @@ function buildDoc(transcript) {
       lastSpeaker = speaker;
     }
 
+    if (videoStart !== undefined && seg.start === videoStart) lines.push('> START');
+
     let segLine = `[${seg.id}]`;
-    if (seg.cut) segLine += ` CUT${seg.cutReason ? ':' + seg.cutReason : ''}`;
-    const text = buildTextWithCuts(seg);
+    if (seg.cut) segLine += ` CUT`;
+    const text = cleanCaptionText(buildTextWithCuts(seg));
     if (text) segLine += `  ${text}`;
     lines.push(segLine);
 
     for (const g of (seg.graphics || [])) {
       lines.push('    ' + buildGraphicLine(g, seg.tokens));
     }
+
+    if (videoEnd !== undefined && seg.end === videoEnd) lines.push('> END');
   }
 
   return instructions + speakersSection + lines.join('\n') + '\n';
@@ -320,46 +419,87 @@ function parseGraphicLine(line, tokens) {
 }
 
 function applyTextPartsToTokens(rawText, tokens) {
-  // Reset all cut flags first — doc is the source of truth
-  const updated = tokens.map(t => ({ ...t, cut: false, cutReason: null }));
+  // Reset cut flags and any stored time overrides — doc is the source of truth.
+  const updated = tokens.map(({ _cutFrom, _cutTo, ...t }) => ({ ...t, cut: false }));
 
-  // Find every {span} or {span:reason} marker and search for it in the token list
+  // Find every {span} marker and search for it in word tokens only.
+  // Supports optional explicit time override: {text | from, to}
+  // Word tokens are non-special tokens with non-empty normalized text (i.e. not
+  // bare punctuation like "." or ","). Searching only word tokens lets the user
+  // write {Oh so that would be nice Oh} even when Whisper emitted "," or "."
+  // tokens between those words. The cut range is then extended to include:
+  //   • all non-word tokens between the first and last matched word token, and
+  //   • any immediately following tokens that share the same t_dtw or have no
+  //     leading space (Whisper sometimes emits duplicate tokens at the same time).
   const re = /\{([^}]+)\}/g;
   let m;
   while ((m = re.exec(rawText)) !== null) {
-    const inner = m[1];
-    const colonIdx = inner.lastIndexOf(':');
-    let span, reason;
-    if (colonIdx > 0 && !inner.slice(colonIdx + 1).includes(' ')) {
-      span = inner.slice(0, colonIdx);
-      reason = inner.slice(colonIdx + 1);
-    } else {
-      span = inner;
-      reason = 'filler';
+    const content = m[1];
+
+    // Parse optional explicit time override: {text | from, to}
+    let textSpan = content;
+    let explicitFrom = null;
+    let explicitTo = null;
+    const pipeIdx = content.indexOf('|');
+    if (pipeIdx >= 0) {
+      textSpan = content.slice(0, pipeIdx).trim();
+      const timeMatch = content.slice(pipeIdx + 1).trim().match(/^([\d.]+)\s*,\s*([\d.]+)$/);
+      if (timeMatch) {
+        explicitFrom = parseFloat(timeMatch[1]);
+        explicitTo = parseFloat(timeMatch[2]);
+      }
     }
 
-    const cutWords = span.split(/\s+/).filter(Boolean).map(w => normalize(w));
+    const cutWords = textSpan.split(/\s+/).filter(Boolean).map(w => normalize(w));
     if (!cutWords.length) continue;
 
-    // Find first run of tokens matching the cut word sequence
-    for (let i = 0; i <= updated.length - cutWords.length; i++) {
-      const matches = cutWords.every((w, j) => normalize(updated[i + j].text) === w);
+    const wordTokens = updated
+      .map((t, idx) => ({ t, idx }))
+      .filter(({ t }) => !isSpecialToken(t) && normalize(t.text) !== '');
+
+    for (let i = 0; i <= wordTokens.length - cutWords.length; i++) {
+      const matches = cutWords.every((w, j) => normalize(wordTokens[i + j].t.text) === w);
       if (matches) {
-        for (let j = 0; j < cutWords.length; j++) {
-          updated[i + j] = { ...updated[i + j], cut: true, cutReason: reason };
+        const firstIdx = wordTokens[i].idx;
+        const lastWordIdx = wordTokens[i + cutWords.length - 1].idx;
+        const lastTdtw = updated[lastWordIdx].t_dtw;
+
+        // Extend past adjacent tokens that are BPE continuations (no leading space)
+        // or share the same t_dtw (Whisper duplicate tokens at identical timestamps).
+        let cutEndIdx = lastWordIdx;
+        let k = lastWordIdx + 1;
+        while (k < updated.length && !isSpecialToken(updated[k])) {
+          if (!updated[k].text.startsWith(' ') || updated[k].t_dtw === lastTdtw) {
+            cutEndIdx = k; k++;
+          } else { break; }
         }
+
+        for (let k = firstIdx; k <= cutEndIdx; k++) {
+          if (!isSpecialToken(updated[k])) updated[k] = { ...updated[k], cut: true };
+        }
+        // Store explicit time overrides on the boundary tokens so deriveCuts can use them.
+        if (explicitFrom !== null) updated[firstIdx] = { ...updated[firstIdx], _cutFrom: explicitFrom };
+        if (explicitTo !== null) updated[cutEndIdx] = { ...updated[cutEndIdx], _cutTo: explicitTo };
         break;
       }
     }
   }
 
   // Apply word-level text corrections: align visible (non-cut) words from doc
-  // with non-cut tokens and update token.text so corrections persist.
+  // with non-cut, non-special tokens and update token.text so corrections persist.
   const visibleWords = rawText.replace(/\{[^}]+\}/g, ' ').replace(/\s+/g, ' ').trim().split(/\s+/).filter(Boolean);
-  const nonCutIndices = updated.reduce((acc, t, i) => { if (!t.cut) acc.push(i); return acc; }, []);
-  if (visibleWords.length === nonCutIndices.length) {
+  const nonCutNonSpecialIndices = updated.reduce((acc, t, i) => {
+    if (!t.cut && !isSpecialToken(t)) acc.push(i);
+    return acc;
+  }, []);
+  if (visibleWords.length === nonCutNonSpecialIndices.length) {
     visibleWords.forEach((word, wi) => {
-      updated[nonCutIndices[wi]] = { ...updated[nonCutIndices[wi]], text: word };
+      const idx = nonCutNonSpecialIndices[wi];
+      // Preserve the original leading space so joinTokenTexts can still detect
+      // word boundaries (Whisper BPE marks word starts with a leading space).
+      const origText = updated[idx].text;
+      const prefix = origText.startsWith(' ') ? ' ' : '';
+      updated[idx] = { ...updated[idx], text: prefix + word };
     });
   }
 
@@ -395,6 +535,9 @@ function mergeDocIntoTranscript(transcript, docContent) {
   let currentSpeaker = null;
   let pendingSeg = null;
   let pendingGraphicLines = [];
+  let videoStart = transcript.meta.videoStart;
+  let videoEnd = transcript.meta.videoEnd;
+  let nextSegIsVideoStart = false;
 
   function flushPending() {
     if (!pendingSeg) return;
@@ -416,6 +559,16 @@ function mergeDocIntoTranscript(transcript, docContent) {
       continue;
     }
 
+    // Special trim markers: > START / > END
+    if (trimmed === '> START') {
+      nextSegIsVideoStart = true;
+      continue;
+    }
+    if (trimmed === '> END') {
+      if (pendingSeg) videoEnd = pendingSeg.end;
+      continue;
+    }
+
     // Graphic line: > GraphicType ...
     if (trimmed.startsWith('>')) {
       if (pendingSeg) pendingGraphicLines.push(trimmed.slice(1).trim());
@@ -432,21 +585,31 @@ function mergeDocIntoTranscript(transcript, docContent) {
 
       let rest = segMatch[2].trim();
       let cut = false;
-      let cutReason = null;
+      let inlineSpeaker = null;
 
-      const cutMatch = rest.match(/^CUT(?::(\w+))?\s*(.*)/i);
+      const cutMatch = rest.match(/^CUT(?::\w+)?\s*(.*)/i);
       if (cutMatch) {
         cut = true;
-        cutReason = cutMatch[1]?.toLowerCase() || 'offtopic';
-        rest = cutMatch[2];
+        rest = cutMatch[1];
+      }
+
+      const speakerMatch = rest.match(/^SPEAKER:\s*(\S+)\s*(.*)/i);
+      if (speakerMatch) {
+        inlineSpeaker = renames[speakerMatch[1]] ?? speakerMatch[1];
+        rest = speakerMatch[2];
       }
 
       const rawText = rest;
       const tokens = applyTextPartsToTokens(rawText, seg.tokens);
       const cleanText = rawText.replace(/\{[^}]+\}/g, '').replace(/\s{2,}/g, ' ').trim();
-      const speaker = currentSpeaker ?? seg.speaker;
+      const speaker = inlineSpeaker ?? currentSpeaker ?? seg.speaker;
 
-      pendingSeg = { ...seg, speaker, cut, cutReason: cutReason || null, text: cleanText, tokens };
+      if (nextSegIsVideoStart) {
+        videoStart = seg.start;
+        nextSegIsVideoStart = false;
+      }
+
+      pendingSeg = { ...seg, speaker, cut, text: cleanText, tokens };
       applied++;
       continue;
     }
@@ -457,11 +620,34 @@ function mergeDocIntoTranscript(transcript, docContent) {
   if (Object.keys(renames).length) {
     console.log(`  Speaker renames: ${Object.entries(renames).map(([k, v]) => `${k} → ${v}`).join(', ')}`);
   }
+  if (videoStart !== transcript.meta.videoStart) console.log(`  Video start: ${videoStart}s`);
+  if (videoEnd !== transcript.meta.videoEnd) console.log(`  Video end: ${videoEnd}s`);
   console.log(`  ${applied} segments merged.`);
-  return { ...transcript, segments: transcript.segments.map(s => byId[s.id] ?? s) };
+  return {
+    ...transcript,
+    meta: { ...transcript.meta, videoStart, videoEnd },
+    segments: transcript.segments.map(s => byId[s.id] ?? s),
+  };
 }
 
 // ─── Pause auto-cut ───────────────────────────────────────────────────────────
+
+/**
+ * Marks disfluency tokens (e.g. "--") as cut:true so their audio is removed
+ * and they appear as {--} in the doc. Applied before merging with existing so
+ * a user can manually override by un-cutting one in the doc.
+ */
+function autoCutDisfluencies(segments) {
+  return segments.map(seg => ({
+    ...seg,
+    tokens: seg.tokens.map(t => isDisfluencyToken(t) ? { ...t, cut: true } : t),
+  }));
+}
+
+// Estimated spoken duration of a word in seconds. The gap between two adjacent
+// token t_dtw values covers the word's audio plus following silence; subtracting
+// this estimate isolates the silence portion for pause-cut threshold checks.
+const WORD_DURATION_ESTIMATE = 0.4;
 
 /**
  * Adds time-range cuts to cuts[] for silence gaps between tokens that exceed
@@ -472,19 +658,19 @@ function autoCutPauses(transcript, threshold) {
   return {
     ...transcript,
     segments: transcript.segments.map(seg => {
-      // Only consider non-cut tokens for gap detection
-      const activeTokens = seg.tokens.filter(t => !t.cut);
+      // Only consider non-cut, non-special tokens for gap detection
+      const activeTokens = seg.tokens.filter(t => !t.cut && !isSpecialToken(t));
       const pauseCuts = [];
 
       for (let i = 0; i < activeTokens.length - 1; i++) {
         const gap = activeTokens[i + 1].t_dtw - activeTokens[i].t_dtw;
-        if (gap > threshold) {
-          // Keep ~20% of gap as natural word tail (capped at 0.2s), cut the rest
-          const tail = Math.min(0.2, gap * 0.2);
+        // gap = word_duration + silence. Subtract estimated word duration to get
+        // the actual silence. Only cut if silence exceeds threshold.
+        const silence = gap - WORD_DURATION_ESTIMATE;
+        if (silence >= threshold) {
           pauseCuts.push({
-            from: activeTokens[i].t_dtw + tail,
+            from: activeTokens[i].t_dtw + WORD_DURATION_ESTIMATE,
             to: activeTokens[i + 1].t_dtw,
-            reason: 'pause',
           });
         }
       }
@@ -492,7 +678,7 @@ function autoCutPauses(transcript, threshold) {
       if (!pauseCuts.length) return seg;
 
       // Merge token-derived cuts with pause cuts, sorted by time
-      const allCuts = [...seg.cuts.filter(c => c.reason !== 'pause'), ...pauseCuts]
+      const allCuts = [...seg.cuts, ...pauseCuts]
         .sort((a, b) => a.from - b.from);
 
       return { ...seg, cuts: allCuts };
@@ -509,11 +695,18 @@ function secondsToVttTs(s) {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec).padStart(6, '0')}`;
 }
 
+function cleanCaptionText(text) {
+  return text.replace(/_[A-Z]+_/g, '').replace(/\s{2,}/g, ' ').trim();
+}
+
 function buildSentencesVtt(segments) {
   const lines = ['WEBVTT', ''];
   for (const seg of segments) {
+    if (seg.cut) continue;
+    const text = cleanCaptionText(seg.text);
+    if (!text) continue;
     lines.push(`${secondsToVttTs(seg.start)} --> ${secondsToVttTs(seg.end)}`);
-    lines.push(seg.text);
+    lines.push(text);
     lines.push('');
   }
   return lines.join('\n');
@@ -579,28 +772,70 @@ async function main() {
 
   const raw = await fs.readJson(rawPath);
 
-  // Merge raw whisper segments into sentences
-  const sentenceSegments = mergeIntoSentences(raw.segments);
+  // Merge raw whisper segments into sentences; auto-cut disfluency tokens (e.g. "--")
+  const sentenceSegments = autoCutDisfluencies(mergeIntoSentences(raw.segments));
   let transcript = { ...raw, segments: sentenceSegments };
 
-  // If transcript.json already exists, preserve manual edits by sentence id
+  // If transcript.json already exists, preserve manual edits.
+  // Match by start time (within 0.5 s) rather than by ID so that
+  // re-segmentation (e.g. new speaker-boundary breaks) doesn't misalign edits.
   if (await fs.pathExists(outputPath)) {
     const existing = await fs.readJson(outputPath);
-    const byId = Object.fromEntries(existing.segments.map(s => [s.id, s]));
+
+    // Build a fast lookup: round start to 100 ms bucket → segment
+    const byRoundedStart = {};
+    for (const s of existing.segments) {
+      byRoundedStart[s.start.toFixed(1)] = s;
+    }
+    function findPrev(seg) {
+      const exact = byRoundedStart[seg.start.toFixed(1)];
+      if (exact) return exact;
+      // Fallback: nearest within 0.5 s
+      let best = null, bestDelta = 0.5;
+      for (const s of existing.segments) {
+        const d = Math.abs(s.start - seg.start);
+        if (d < bestDelta) { bestDelta = d; best = s; }
+      }
+      return best;
+    }
+
     transcript = {
       ...transcript,
       meta: { ...transcript.meta, ...existing.meta },
       segments: transcript.segments.map(seg => {
-        const prev = byId[seg.id];
+        const prev = findPrev(seg);
         if (!prev) return seg;
+
         const prevTokensByTdtw = Object.fromEntries(
           (prev.tokens || []).map(t => [t.t_dtw.toFixed(3), t])
         );
         const tokens = seg.tokens.map(t => {
           const p = prevTokensByTdtw[t.t_dtw.toFixed(3)];
-          return p ? { ...t, text: p.text, cut: p.cut, cutReason: p.cutReason } : t;
+          if (!p) return t;
+          // Always keep the raw token's leading space (BPE word-boundary marker).
+          // Old stored tokens may have had their spaces stripped by a previous
+          // merge-doc run. Apply the user's correction to the non-space part only.
+          const prefix = t.text.startsWith(' ') ? ' ' : '';
+          const correctedWord = p.text.trimStart();
+          return { ...t, text: prefix + correctedWord, cut: p.cut };
         });
-        return { ...seg, speaker: prev.speaker, cut: prev.cut, cutReason: prev.cutReason, text: prev.text, graphics: prev.graphics, tokens };
+
+        // Speaker: prefer the new diarized label unless the user has renamed it
+        // to a real name (anything other than empty or a raw SPEAKER_XX label).
+        const isDefaultSpeaker = !prev.speaker || /^SPEAKER_\d+$/i.test(prev.speaker);
+        const speaker = isDefaultSpeaker ? seg.speaker : prev.speaker;
+
+        // Only carry over prev.text if the segment boundaries still match closely
+        // enough that the saved text applies to this sentence. When a segment has
+        // been re-split (new boundary added mid-sentence) the old merged text is
+        // longer than the new segment — use fresh token text instead.
+        const prevWords = (prev.text || '').split(/\s+/).filter(Boolean).length;
+        const segWords = seg.tokens.filter(t => !isSpecialToken(t) && !t.cut)
+          .map(t => t.text.trim()).filter(Boolean).length;
+        const textFits = prevWords <= segWords * 1.5;
+        const text = textFits ? prev.text : seg.text;
+
+        return { ...seg, speaker, cut: prev.cut, text, graphics: prev.graphics, tokens };
       }),
     };
     console.log(`Merged into existing ${path.basename(outputPath)} — manual edits preserved.`);
@@ -652,10 +887,10 @@ async function main() {
   console.log(`✓ ${sentencesSrtPath}`);
 }
 
-import { fileURLToPath } from 'url';
-const __filename = fileURLToPath(import.meta.url);
-if (process.argv[1] === __filename || process.argv[1].replace(/\\/g, '/') === __filename.replace(/\\/g, '/')) {
+const _argv1 = (process.argv[1] || '').replace(/\\/g, '/');
+if (_argv1.endsWith('/edit-transcript.js') || _argv1.endsWith('/edit-transcript')) {
   main().catch(err => { console.error('❌ Error:', err.message); process.exit(1); });
 }
 
 export default main;
+export { buildTextWithCuts, applyTextPartsToTokens, mergeDocIntoTranscript, buildDoc, deriveCuts, cleanCaptionText, buildSentencesVtt, autoCutPauses, autoCutDisfluencies, WORD_DURATION_ESTIMATE, CUT_BOUNDARY_BIAS, isSpecialToken, isDisfluencyToken };

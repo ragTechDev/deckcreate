@@ -1,5 +1,6 @@
 import { spawn } from 'child_process';
 import path from 'path';
+import os from 'os';
 import fs from 'fs-extra';
 import { fileURLToPath } from 'url';
 
@@ -80,12 +81,44 @@ class Diarizer {
     }
   }
 
+  /**
+   * Convert audio to 16 kHz mono 16-bit PCM WAV — the format silero_vad
+   * requires. 24-bit PCM or non-standard sample rates (e.g. 96 kHz) cause
+   * "Input contains NaN" inside the VAD model.
+   */
+  async _convertForDiarize(srcPath) {
+    const tmpPath = path.join(os.tmpdir(), `diarize_${Date.now()}.wav`);
+    await new Promise((resolve, reject) => {
+      const proc = spawn('ffmpeg', [
+        '-i', srcPath,
+        '-ac', '1',          // mono
+        '-ar', '16000',      // 16 kHz
+        '-sample_fmt', 's16', // 16-bit PCM
+        '-y', tmpPath,
+      ], { stdio: ['ignore', 'ignore', 'pipe'] });
+      let err = '';
+      proc.stderr.on('data', d => { err += d.toString(); });
+      proc.on('close', code => {
+        if (code !== 0) reject(new Error(`ffmpeg conversion failed:\n${err}`));
+        else resolve();
+      });
+      proc.on('error', reject);
+    });
+    return tmpPath;
+  }
+
   async runDiarization() {
     console.log('Running speaker diarization (models download on first run)...');
-    const pythonArgs = [this.pythonBin, this.audioPath];
-    if (this.numSpeakers) pythonArgs.push(String(this.numSpeakers));
 
-    const turns = await spawnPython(this.scriptPath, pythonArgs);
+    const tmpAudio = await this._convertForDiarize(this.audioPath);
+    let turns;
+    try {
+      const pythonArgs = [this.pythonBin, tmpAudio];
+      if (this.numSpeakers) pythonArgs.push(String(this.numSpeakers));
+      turns = await spawnPython(this.scriptPath, pythonArgs);
+    } finally {
+      await fs.remove(tmpAudio).catch(() => {});
+    }
 
     const speakerCount = new Set(turns.map((t) => t.speaker)).size;
     console.log(`  ${speakerCount} speaker(s), ${turns.length} turns.`);

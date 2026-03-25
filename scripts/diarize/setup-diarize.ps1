@@ -64,4 +64,4 @@ Write-Host "Installing $Requirements ..."
 
 Write-Host ''
 Write-Host 'Setup complete. Run diarization with:'
-Write-Host '  npm run diarize -- --python .venv\Scripts\python.exe'
+Write-Host '  npm run diarize -- --num-speakers 3 --python .venv\Scripts\python.exe'

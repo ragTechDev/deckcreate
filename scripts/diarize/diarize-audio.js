@@ -37,10 +37,15 @@ async function resolveArgs(cwd) {
     process.exit(1);
   }
 
+  if (!cli.numSpeakers) {
+    console.error('❌ --num-speakers is required. Example: npm run diarize -- --num-speakers 2');
+    process.exit(1);
+  }
+
   return {
     audioPath,
     diarizationJsonPath,
-    numSpeakers: cli.numSpeakers || null,
+    numSpeakers: cli.numSpeakers,
     pythonBin: cli.pythonBin,
   };
 }

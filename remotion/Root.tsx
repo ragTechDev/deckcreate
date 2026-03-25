@@ -13,8 +13,8 @@ export const RemotionRoot: React.FC = () => {
         width={1920}
         height={1080}
         defaultProps={{
-            src: 'output/synced-output.mp4',
-            transcriptSrc: 'output/transcript.json',
+            src: 'sync/output/synced-output.mp4',
+            transcriptSrc: 'transcribe/output/edit/transcript.json',
         }}
         calculateMetadata={calculateMetadata}
         />

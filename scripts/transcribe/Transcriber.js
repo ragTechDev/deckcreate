@@ -130,7 +130,7 @@ class Transcriber {
   mergeItemsIntoPhrases(transcription) {
     const PHRASE_END = /[.!?]$/;
     const MAX_WORDS = 8;
-    const PAUSE_THRESHOLD = 0.5; // seconds
+    const PAUSE_THRESHOLD = 0.7; // seconds
 
     const phrases = [];
     let bucket = null;

@@ -19,8 +19,8 @@ def check_python_version():
                 'Create a 3.12 venv and pass it with --python:\n'
                 '  py -3.12 -m venv .venv\n'
                 '  .venv\\Scripts\\activate\n'
-                '  pip install -r scripts/requirements.txt\n'
-                '  npm run diarize -- --python .venv\\Scripts\\python.exe'
+                '  pip install -r scripts/diarize/requirements.txt\n'
+                '  npm run diarize -- --num-speakers 3 --python .venv\\Scripts\\python.exe'
             }),
             file=sys.stdout,
         )

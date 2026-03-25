@@ -1,16 +1,14 @@
 import {
   OffthreadVideo,
   Audio,
-  Sequence,
   staticFile,
   CalculateMetadataFunction,
   useVideoConfig,
   delayRender,
   continueRender,
 } from 'remotion';
-import { parseMedia } from '@remotion/media-parser';
 import React, { useState, useEffect } from 'react';
-import { SegmentPlayer, getEffectiveDuration } from './components/SegmentPlayer';
+import { SegmentPlayer, buildSections, getEffectiveDuration } from './components/SegmentPlayer';
 import type { Transcript } from './types/transcript';
 
 type MyCompositionProps = {
@@ -29,8 +27,18 @@ async function fetchTranscript(transcriptSrc: string): Promise<Transcript> {
   return res.json();
 }
 
+/** Returns only the segments within the video window defined by meta.videoStart/End. */
+function getActiveSegments(transcript: Transcript) {
+  const { videoStart, videoEnd } = transcript.meta;
+  return transcript.segments.filter(s => {
+    if (videoStart !== undefined && s.start < videoStart) return false;
+    if (videoEnd !== undefined && s.end > videoEnd) return false;
+    return true;
+  });
+}
+
 function computeEffectiveDuration(transcript: Transcript): number {
-  return transcript.segments
+  return getActiveSegments(transcript)
     .filter(s => !s.cut)
     .reduce((sum, s) => sum + getEffectiveDuration(s), 0);
 }
@@ -39,20 +47,12 @@ export const calculateMetadata: CalculateMetadataFunction<MyCompositionProps> = 
   const fps = 60;
   const fallback = { durationInFrames: 300, fps, width: 1920, height: 1080 };
 
+  if (!props.transcriptSrc) return fallback;
+
   try {
-    const src = staticFile(normalizeStaticPath(props.src));
-    const parsed = await parseMedia({
-      src,
-      fields: { slowDurationInSeconds: true, dimensions: true },
-    });
-
-    if (parsed.dimensions === null) return fallback;
-
-    const durationInFrames = props.transcriptSrc
-      ? Math.max(1, Math.floor(computeEffectiveDuration(await fetchTranscript(props.transcriptSrc)) * fps))
-      : Math.max(1, Math.floor(parsed.slowDurationInSeconds * fps));
-
-    return { durationInFrames, fps, width: parsed.dimensions.width, height: parsed.dimensions.height };
+    const transcript = await fetchTranscript(props.transcriptSrc);
+    const durationInFrames = Math.max(1, Math.floor(computeEffectiveDuration(transcript) * fps));
+    return { durationInFrames, fps, width: 1920, height: 1080 };
   } catch {
     return fallback;
   }
@@ -82,24 +82,11 @@ export const MyComposition = ({
   if (transcriptSrc) {
     if (!transcript) return null;
 
-    let frameOffset = 0;
-    const layout = transcript.segments
-      .filter(s => !s.cut)
-      .map(segment => {
-        const durationFrames = Math.round(getEffectiveDuration(segment) * fps);
-        const from = frameOffset;
-        frameOffset += durationFrames;
-        return { segment, from, durationFrames };
-      })
-      .filter(({ durationFrames }) => durationFrames > 0);
+    const sections = buildSections(getActiveSegments(transcript), fps);
 
     return (
       <>
-        {layout.map(({ segment, from, durationFrames }) => (
-          <Sequence key={segment.id} from={from} durationInFrames={durationFrames}>
-            <SegmentPlayer src={resolvedSrc} segment={segment} />
-          </Sequence>
-        ))}
+        <SegmentPlayer src={resolvedSrc} sections={sections} />
         {audioSrc && (
           <Audio
             src={staticFile(normalizeStaticPath(audioSrc))}

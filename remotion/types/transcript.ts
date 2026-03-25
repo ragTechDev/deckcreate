@@ -3,10 +3,7 @@ export type Token = {
   t_dtw: number;
   text: string;
   cut: boolean;
-  cutReason: CutReason | null;
 };
-
-export type CutReason = 'filler' | 'pause' | 'offtopic' | 'duplicate';
 
 /** Maps 1:1 to a component in remotion/components/graphics/ */
 export type GraphicType = 'LowerThird' | 'Callout' | 'ChapterMarker';
@@ -25,7 +22,6 @@ export type GraphicsCue = {
 export type TimeCut = {
   from: number;
   to: number;
-  reason: CutReason;
 };
 
 export type Segment = {
@@ -37,7 +33,6 @@ export type Segment = {
   text: string;
   /** Cuts the entire segment */
   cut: boolean;
-  cutReason: CutReason | null;
   tokens: Token[];
   /** Derived from token cut flags by edit-transcript. Used by Remotion for time remapping. */
   cuts: TimeCut[];
@@ -49,6 +44,10 @@ export type TranscriptMeta = {
   /** Total duration in seconds */
   duration: number;
   fps: number;
+  /** Video start time in seconds — segments before this are excluded from rendering */
+  videoStart?: number;
+  /** Video end time in seconds — segments after this are excluded from rendering */
+  videoEnd?: number;
 };
 
 export type Transcript = {
