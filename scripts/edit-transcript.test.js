@@ -172,16 +172,26 @@ describe('buildTextWithCuts', () => {
     expect(buildTextWithCuts(s)).toBe('Welcome to ragTech');
   });
 
-  test('uses tokenText when seg.text has fewer words (stale/corrupted seg.text)', () => {
-    // When seg.text is shorter than tokens (e.g. stale from a previous merge),
-    // tokenText is authoritative — shows hidden content so the user can cut it.
-    // In practice, user-deleted words get cut:true via applyTextPartsToTokens, so
-    // this no-cuts + tokWords>segWords path only fires for corrupted seg.text.
+  test('trusts seg.text when user replaced multi-word phrase with fewer words (a lot\'s → award\'s)', () => {
+    // Regression: user corrected Whisper's "a lot's" (2 tokens) to "award's" (1 word).
+    // tokWords.length (6) > segWords.length (5) — must return seg.text, not tokenText.
+    const tokens = [
+      tok(' You\'d', 0.1), tok(' create', 0.2),
+      tok(' a', 0.3), tok(' lot', 0.4), tok("'s", 0.45),
+      tok(' best', 0.5), tok(' podcast', 0.6),
+    ];
+    const s = seg({ text: "You'd create award's best podcast", tokens });
+    expect(buildTextWithCuts(s)).toBe("You'd create award's best podcast");
+  });
+
+  test('trusts seg.text even when it has fewer words than tokens (user correction)', () => {
+    // When the user corrects text such that seg.text has fewer words than what the
+    // tokens produce, seg.text is authoritative — never revert to token reconstruction.
     const s = seg({
       text: 'Hello there',
       tokens: [tok(' Hello', 0.1), tok(' world', 0.2), tok(' there', 0.3)],
     });
-    expect(buildTextWithCuts(s)).toBe('Hello world there');
+    expect(buildTextWithCuts(s)).toBe('Hello there');
   });
 
   test('preserves punctuation from tokens when text is unchanged', () => {
@@ -457,6 +467,29 @@ describe('mergeDocIntoTranscript', () => {
     const rebuiltDoc = buildDoc(merged);
     expect(rebuiltDoc).toContain('Welcome to ragTech');
     expect(rebuiltDoc).not.toContain('torereksek');
+  });
+
+  test('word correction that reduces word count persists through buildDoc round-trip (a lot\'s → award\'s)', () => {
+    // Regression: after the user changes "a lot's" → "award's" in the doc and runs
+    // merge-doc, re-running edit-transcript must still show "award's", not revert to
+    // the original token reconstruction "a lot's".
+    const tokens = [
+      tok(' You\'d', 0.1), tok(' create', 0.2),
+      tok(' a', 0.3), tok(' lot', 0.4), tok("'s", 0.45),
+      tok(' best', 0.5),
+    ];
+    const base = makeTranscript([{ text: "You'd create a lot's best", tokens }]);
+
+    // Simulate the user editing the doc: change "a lot's" → "award's"
+    const doc = `# SPEAKERS\nA: A\n\n---\n\n=== A ===\n\n[1]  You'd create award's best\n`;
+    const merged = mergeDocIntoTranscript(base, doc);
+
+    expect(merged.segments[0].text).toBe("You'd create award's best");
+
+    // Round-trip: buildDoc must emit the corrected text, not revert to token reconstruction
+    const rebuiltDoc = buildDoc(merged);
+    expect(rebuiltDoc).toContain("award's");
+    expect(rebuiltDoc).not.toContain("a lot's");
   });
 
   test('marks segment as cut when CUT is present', () => {

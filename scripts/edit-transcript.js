@@ -175,14 +175,15 @@ function buildTextWithCuts(seg) {
     if (tokWords.length === segWords.length) {
       const normalMatch = segWords.every((w, i) => normalize(w) === normalize(tokWords[i]));
       if (!normalMatch) return seg.text;                             // user changed words
-      // Words match (normalized); use tokenText to include punctuation from tokens
-      return tokenText;
+      // Words match (normalized); return tokenText only when each word is byte-identical
+      // (preserves BPE punctuation). If the user changed punctuation or casing on any
+      // word (e.g. "." → "!"), the exact check fails and we trust seg.text.
+      if (segWords.every((w, i) => w === tokWords[i])) return tokenText;
+      return seg.text;
     }
     // Word counts differ: BPE subword merge if concat matches (e.g. "j inx" → "jinx"), otherwise user edit
     if (normalize(segWords.join('')) === normalize(tokWords.join(''))) return tokenText;
-    // Tokens have more words than seg.text — seg.text is missing content (stale/corrupted).
-    // In the no-cuts path tokens are authoritative, so show the full token reconstruction.
-    if (tokWords.length > segWords.length) return tokenText;
+    // Word count mismatch from a user correction (e.g. "a lot's" → "award's") — trust seg.text.
     return seg.text;
   }
 
