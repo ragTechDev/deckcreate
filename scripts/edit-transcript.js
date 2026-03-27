@@ -336,6 +336,16 @@ function buildInstructionsBlock() {
     '  OVERRIDE SPEAKER Override the speaker for one segment:',
     '                    [10] SPEAKER: Alice  text...',
     '',
+    '  CAMERA          Add a > CAM line after a segment to force a specific shot.',
+    '                  Applies at the start of the segment, or at a specific word:',
+    '                    [22] I\'m Natasha...',
+    '                    > CAM Natasha',
+    '                    [24] And today\'s topic...',
+    '                    > CAM Saloni  at="topic"',
+    '                    > CAM wide',
+    '                  Speaker names must match the SPEAKERS section exactly.',
+    '                  Multiple > CAM lines per segment are allowed.',
+    '',
     '  GRAPHICS        Add a line starting with > after the segment:',
     '                    > LowerThird  at="word"  duration=3  name="Name"  title="Role"',
     '                    > Callout  at="word"  duration=2  text="Quote"',
@@ -389,6 +399,9 @@ function buildDoc(transcript) {
     if (text) segLine += `  ${text}`;
     lines.push(segLine);
 
+    for (const cam of (seg.cameraCues || [])) {
+      lines.push('    ' + buildCameraLine(cam, seg.tokens, seg.start));
+    }
     for (const g of (seg.graphics || [])) {
       lines.push('    ' + buildGraphicLine(g, seg.tokens));
     }
@@ -409,6 +422,63 @@ function parseKv(str) {
     result[m[1]] = m[2] !== undefined ? m[2] : m[3];
   }
   return result;
+}
+
+/**
+ * Parse the text after "> CAM " into a CameraCue.
+ * Format: "SpeakerName" | "wide"  [at="word"]
+ * `segStart` is used as the default `at` when no at= attribute is present.
+ */
+function parseCameraLine(line, tokens, segStart) {
+  const spaceIdx = line.search(/\s/);
+  const target = spaceIdx === -1 ? line : line.slice(0, spaceIdx);
+  const kvStr  = spaceIdx === -1 ? '' : line.slice(spaceIdx);
+  const kv = parseKv(kvStr);
+
+  let at = segStart;
+  if (kv.at !== undefined) {
+    const raw = kv.at;
+    const colonIdx = raw.lastIndexOf(':');
+    let word, occurrence;
+    if (colonIdx > 0 && !isNaN(raw.slice(colonIdx + 1))) {
+      word = raw.slice(0, colonIdx).toLowerCase();
+      occurrence = parseInt(raw.slice(colonIdx + 1)) - 1;
+    } else {
+      word = raw.toLowerCase();
+      occurrence = 0;
+    }
+    const matches = tokens.filter(t => normalize(t.text) === word);
+    const token = matches[occurrence] ?? null;
+    at = token ? token.t_dtw : parseFloat(raw) || segStart;
+  }
+
+  const shot = target.toLowerCase() === 'wide' ? 'wide' : 'closeup';
+  return { shot, ...(shot === 'closeup' ? { speaker: target } : {}), at };
+}
+
+/**
+ * Serialise a CameraCue back to a > CAM doc line.
+ * Omits at= when the cue fires at the very start of the segment.
+ */
+function buildCameraLine(cue, tokens, segStart) {
+  const target = cue.shot === 'wide' ? 'wide' : cue.speaker;
+  if (!tokens.length || Math.abs(cue.at - segStart) < 0.05) {
+    return `> CAM ${target}`;
+  }
+  const nearest = findNearestToken(cue.at, tokens);
+  let atValue;
+  if (nearest) {
+    const word = stripPunctuation(nearest.text);
+    const tokenIdx = tokens.indexOf(nearest);
+    const normalizedWord = word.toLowerCase();
+    const occurrencesBefore = tokens
+      .slice(0, tokenIdx)
+      .filter(t => normalize(t.text) === normalizedWord).length;
+    atValue = occurrencesBefore > 0 ? `"${word}:${occurrencesBefore + 1}"` : `"${word}"`;
+  } else {
+    atValue = String(cue.at);
+  }
+  return `> CAM ${target}  at=${atValue}`;
 }
 
 function parseGraphicLine(line, tokens) {
@@ -574,16 +644,19 @@ function mergeDocIntoTranscript(transcript, docContent) {
   let currentSpeaker = null;
   let pendingSeg = null;
   let pendingGraphicLines = [];
+  let pendingCamLines = [];
   let videoStart = transcript.meta.videoStart;
   let videoEnd = transcript.meta.videoEnd;
   let nextSegIsVideoStart = false;
 
   function flushPending() {
     if (!pendingSeg) return;
-    const graphics = pendingGraphicLines.map(l => parseGraphicLine(l, pendingSeg.tokens));
-    byId[pendingSeg.id] = { ...pendingSeg, graphics };
+    const graphics    = pendingGraphicLines.map(l => parseGraphicLine(l, pendingSeg.tokens));
+    const cameraCues  = pendingCamLines.map(l => parseCameraLine(l, pendingSeg.tokens, pendingSeg.start));
+    byId[pendingSeg.id] = { ...pendingSeg, graphics, cameraCues };
     pendingSeg = null;
     pendingGraphicLines = [];
+    pendingCamLines = [];
   }
 
   for (const line of stripped.split('\n')) {
@@ -608,9 +681,14 @@ function mergeDocIntoTranscript(transcript, docContent) {
       continue;
     }
 
-    // Graphic line: > GraphicType ...
+    // Annotation line: > CAM ... | > GraphicType ...
     if (trimmed.startsWith('>')) {
-      if (pendingSeg) pendingGraphicLines.push(trimmed.slice(1).trim());
+      const annotation = trimmed.slice(1).trim();
+      if (annotation.startsWith('CAM')) {
+        if (pendingSeg) pendingCamLines.push(annotation.slice(3).trim());
+      } else {
+        if (pendingSeg) pendingGraphicLines.push(annotation);
+      }
       continue;
     }
 

@@ -15,6 +15,7 @@ export const RemotionRoot: React.FC = () => {
         defaultProps={{
             src: 'sync/output/synced-output.mp4',
             transcriptSrc: 'transcribe/output/edit/transcript.json',
+            cameraProfilesSrc: 'transcribe/output/camera/camera-profiles.json',
         }}
         calculateMetadata={calculateMetadata}
         />

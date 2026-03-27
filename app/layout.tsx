@@ -32,10 +32,10 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <ColorSchemeScript />
+        <ColorSchemeScript defaultColorScheme="light" />
       </head>
-      <body className={nunito.variable} suppressHydrationWarning>
-        <MantineProvider theme={theme}>
+      <body className={nunito.variable}>
+        <MantineProvider theme={theme} defaultColorScheme="light">
           <AuthProvider>
             <Notifications position="top-right" />
             {children}

@@ -93,7 +93,12 @@ export const SegmentPlayer: React.FC<Props> = ({ src, sections }) => {
       // #t=0, prevents Remotion adding its own time fragment based on trimBefore/trimAfter
       src={`${src}#t=0,`}
       trimBefore={cut.trimBefore}
-      acceptableTimeShiftInSeconds={cut.firstFrameOfSection ? 0.000001 : undefined}
+      // Allow up to 0.1 s of drift on section-start frames — tight enough for clean
+      // cuts but avoids forcing the compositor to decode across a long keyframe gap,
+      // which was the cause of 28 s proxy timeouts on videos with sparse keyframes.
+      acceptableTimeShiftInSeconds={cut.firstFrameOfSection ? 0.1 : undefined}
+      // Give the compositor extra time for large seeks deep into a long video file.
+      delayRenderTimeoutInMilliseconds={60000}
       volume={volume}
     />
   );

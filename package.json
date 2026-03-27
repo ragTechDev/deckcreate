@@ -21,9 +21,11 @@
     "edit-transcript": "node scripts/edit-transcript.js",
     "merge-doc": "node scripts/edit-transcript.js --merge-doc public/transcribe/output/edit/transcript.doc.txt",
     "merge-doc:cut-pauses": "node scripts/edit-transcript.js --merge-doc public/transcribe/output/edit/transcript.doc.txt --auto-cut-pauses 0.5",
+    "setup-camera": "node scripts/camera/setup-camera.js",
     "cut-preview": "node scripts/cut-preview.js",
     "vtt-to-srt": "node scripts/shared/vtt-to-srt.js",
-    "remotion": "npx remotion studio"
+    "remotion": "npx remotion studio",
+    "wizard": "node scripts/wizard.js"
   },
   "dependencies": {
     "@mantine/carousel": "^8.3.15",
@@ -58,7 +60,7 @@
   "devDependencies": {
     "@babel/core": "^7.29.0",
     "@babel/preset-env": "^7.29.0",
-    "@remotion/eslint-plugin": "^4.0.436",
+    "@remotion/eslint-plugin": "4.0.436",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

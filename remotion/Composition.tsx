@@ -9,7 +9,9 @@ import {
 } from 'remotion';
 import React, { useState, useEffect } from 'react';
 import { SegmentPlayer, buildSections, getEffectiveDuration } from './components/SegmentPlayer';
+import { CameraPlayer } from './components/CameraPlayer';
 import type { Transcript } from './types/transcript';
+import type { CameraProfiles } from './types/camera';
 
 type MyCompositionProps = {
   src: string;
@@ -17,6 +19,8 @@ type MyCompositionProps = {
   audioStartFrom?: number;
   /** Path to transcript.json relative to /public, e.g. "output/transcript.json" */
   transcriptSrc?: string;
+  /** Path to camera-profiles.json relative to /public. When set, enables punch-in/punch-out cuts. */
+  cameraProfilesSrc?: string;
 };
 
 const normalizeStaticPath = (src: string) => src.replace(/^\/+/, '');
@@ -58,35 +62,67 @@ export const calculateMetadata: CalculateMetadataFunction<MyCompositionProps> = 
   }
 };
 
+async function fetchCameraProfiles(src: string): Promise<CameraProfiles> {
+  const res = await fetch(staticFile(normalizeStaticPath(src)));
+  if (!res.ok) throw new Error(`Failed to load camera profiles: ${res.status}`);
+  return res.json();
+}
+
 export const MyComposition = ({
   src,
   audioSrc,
   audioStartFrom = 0,
   transcriptSrc,
+  cameraProfilesSrc,
 }: MyCompositionProps) => {
   const { fps } = useVideoConfig();
   const audioStartFromFrames = Math.max(0, Math.round(audioStartFrom * fps));
   const resolvedSrc = staticFile(normalizeStaticPath(src));
 
-  const [transcript, setTranscript] = useState<Transcript | null>(null);
-  const [handle] = useState(() => transcriptSrc ? delayRender('Loading transcript') : null);
+  const [transcript, setTranscript]             = useState<Transcript | null>(null);
+  const [cameraProfiles, setCameraProfiles]     = useState<CameraProfiles | null>(null);
+  const [cameraReady, setCameraReady]           = useState(!cameraProfilesSrc);
+
+  const [transcriptHandle] = useState(() => transcriptSrc    ? delayRender('Loading transcript')       : null);
+  const [cameraHandle]     = useState(() => cameraProfilesSrc ? delayRender('Loading camera profiles') : null);
 
   useEffect(() => {
-    if (!transcriptSrc || !handle) return;
+    if (!transcriptSrc || !transcriptHandle) return;
     fetchTranscript(transcriptSrc)
-      .then(data => { setTranscript(data); continueRender(handle); })
-      .catch(err => { console.error(err); continueRender(handle); });
-  }, [transcriptSrc, handle]);
+      .then(data => { setTranscript(data); continueRender(transcriptHandle); })
+      .catch(err => { console.error(err); continueRender(transcriptHandle); });
+  }, [transcriptSrc, transcriptHandle]);
+
+  useEffect(() => {
+    if (!cameraProfilesSrc || !cameraHandle) return;
+    fetchCameraProfiles(cameraProfilesSrc)
+      .then(data => { setCameraProfiles(data); })
+      .catch(err => { console.warn('Camera profiles not loaded (will render without):', err.message); })
+      .finally(() => { setCameraReady(true); continueRender(cameraHandle); });
+  }, [cameraProfilesSrc, cameraHandle]);
 
   // ── Transcript-driven rendering ─────────────────────────────────────────────
   if (transcriptSrc) {
     if (!transcript) return null;
+    if (!cameraReady) return null;
 
-    const sections = buildSections(getActiveSegments(transcript), fps);
+    const activeSegments = getActiveSegments(transcript);
+    const sections = buildSections(activeSegments, fps);
+
+    const videoEl = cameraProfiles
+      ? (
+        <CameraPlayer
+          src={resolvedSrc}
+          sections={sections}
+          segments={activeSegments}
+          profiles={cameraProfiles}
+        />
+      )
+      : <SegmentPlayer src={resolvedSrc} sections={sections} />;
 
     return (
       <>
-        <SegmentPlayer src={resolvedSrc} sections={sections} />
+        {videoEl}
         {audioSrc && (
           <Audio
             src={staticFile(normalizeStaticPath(audioSrc))}

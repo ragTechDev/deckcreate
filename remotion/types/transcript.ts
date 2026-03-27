@@ -8,6 +8,15 @@ export type Token = {
 /** Maps 1:1 to a component in remotion/components/graphics/ */
 export type GraphicType = 'LowerThird' | 'Callout' | 'ChapterMarker';
 
+export type CameraCue = {
+  /** 'closeup' on a named speaker, or 'wide' for the wide shot */
+  shot: 'closeup' | 'wide';
+  /** Speaker name — only present when shot === 'closeup' */
+  speaker?: string;
+  /** Absolute timestamp in seconds (same coordinate space as t_dtw) */
+  at: number;
+};
+
 export type GraphicsCue = {
   type: GraphicType;
   /** Absolute timestamp in seconds */
@@ -37,6 +46,8 @@ export type Segment = {
   /** Derived from token cut flags by edit-transcript. Used by Remotion for time remapping. */
   cuts: TimeCut[];
   graphics: GraphicsCue[];
+  /** Explicit camera cut overrides — take priority over the pacing algorithm */
+  cameraCues?: CameraCue[];
 };
 
 export type TranscriptMeta = {

@@ -46,6 +46,8 @@ next-env.d.ts
 /public/sync/output/*
 /public/sync/video/*
 /public/transcribe/input/*
+/public/sync/*
+/public/transcribe/*
 
 # Whisper.cpp binary and models (downloaded on first run)
 /whisper.cpp/
