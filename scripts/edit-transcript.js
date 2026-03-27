@@ -175,11 +175,17 @@ function buildTextWithCuts(seg) {
     if (tokWords.length === segWords.length) {
       const normalMatch = segWords.every((w, i) => normalize(w) === normalize(tokWords[i]));
       if (!normalMatch) return seg.text;                             // user changed words
-      // Words match (normalized); return tokenText only when each word is byte-identical
-      // (preserves BPE punctuation). If the user changed punctuation or casing on any
-      // word (e.g. "." → "!"), the exact check fails and we trust seg.text.
-      if (segWords.every((w, i) => w === tokWords[i])) return tokenText;
-      return seg.text;
+      // Words match (normalized). Use tokenText to pick up trailing punctuation that
+      // tokens carry (e.g. "everyone." from a "." token) unless the user explicitly
+      // changed punctuation on a word — detected when a differing seg word itself has
+      // trailing punctuation (e.g. "everyone!" vs "everyone.": user set "!", keep it).
+      // A seg word that simply lacks punctuation the token has (e.g. "everyone" vs
+      // "everyone.") has no trailing punctuation itself, so tokenText wins.
+      const userChangedPunctuation = segWords.some(
+        (w, i) => w !== tokWords[i] && stripPunctuation(w) !== w,
+      );
+      if (userChangedPunctuation) return seg.text;
+      return tokenText;
     }
     // Word counts differ: BPE subword merge if concat matches (e.g. "j inx" → "jinx"), otherwise user edit
     if (normalize(segWords.join('')) === normalize(tokWords.join(''))) return tokenText;

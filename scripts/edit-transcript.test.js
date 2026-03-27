@@ -194,6 +194,24 @@ describe('buildTextWithCuts', () => {
     expect(buildTextWithCuts(s)).toBe('Hello there');
   });
 
+  test('adds trailing punctuation from token when seg.text lacks it (segment 19 regression)', () => {
+    // seg.text has "everyone" (no period) but tokens have a "." token immediately after.
+    // buildTextWithCuts must include "everyone." so the doc shows the period.
+    const s = seg({
+      text: 'Hello everyone Welcome',
+      tokens: [tok(' Hello', 0.1), tok(' everyone', 0.2), tok('.', 0.3), tok(' Welcome', 0.4)],
+    });
+    expect(buildTextWithCuts(s)).toBe('Hello everyone. Welcome');
+  });
+
+  test('adds comma from token when seg.text lacks it', () => {
+    const s = seg({
+      text: 'Hello everyone',
+      tokens: [tok(' Hello', 0.1), tok(',', 0.15), tok(' everyone', 0.2)],
+    });
+    expect(buildTextWithCuts(s)).toBe('Hello, everyone');
+  });
+
   test('preserves punctuation from tokens when text is unchanged', () => {
     const s = seg({
       text: 'Hello, everyone.',
