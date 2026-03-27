@@ -300,6 +300,41 @@ function findNearestToken(atSeconds, tokens) {
   return best;
 }
 
+/**
+ * Finds a phrase (space-separated words) in a segment's token list and returns
+ * the time range {from, to} covering it. `to` is the next token's t_dtw so the
+ * last word isn't clipped; falls back to segEnd when no next token exists.
+ * Returns null if the phrase isn't found.
+ */
+function resolvePhraseToTimeRange(phrase, tokens, segEnd) {
+  const words = phrase.trim().split(/\s+/).map(normalize).filter(Boolean);
+  if (!words.length) return null;
+
+  // Only include word-starting tokens (leading space) or the first non-special token.
+  // BPE sub-tokens like "more" (no leading space after " anymore") have no space and
+  // must be skipped — they are continuation pieces, not separate words, and would
+  // corrupt position-based phrase matching.
+  const firstWordIdx = tokens.findIndex(t => !isSpecialToken(t) && normalize(t.text) !== '');
+  const wordTokens = tokens
+    .map((t, idx) => ({ t, idx }))
+    .filter(({ t, idx }) =>
+      !isSpecialToken(t) &&
+      normalize(t.text) !== '' &&
+      (t.text.startsWith(' ') || idx === firstWordIdx)
+    );
+
+  for (let i = 0; i <= wordTokens.length - words.length; i++) {
+    if (words.every((w, j) => normalize(wordTokens[i + j].t.text) === w)) {
+      const from = wordTokens[i].t.t_dtw;
+      const lastRawIdx = wordTokens[i + words.length - 1].idx;
+      const nextToken = tokens.slice(lastRawIdx + 1).find(t => !isSpecialToken(t));
+      const to = nextToken ? nextToken.t_dtw : (segEnd ?? tokens[lastRawIdx].t_dtw + WORD_DURATION_ESTIMATE);
+      return { from, to };
+    }
+  }
+  return null;
+}
+
 function buildGraphicLine(graphic, tokens) {
   const nearest = findNearestToken(graphic.at, tokens);
   let atValue;
@@ -337,6 +372,19 @@ function buildInstructionsBlock() {
     '',
     '  CUT SEGMENT     Add CUT after the segment number:',
     '                    [3] CUT  original text...',
+    '',
+    '  HOOK SEGMENT    Add > HOOK after a segment to prepend that clip before the',
+    '                  video as a teaser (the clip still plays in its original',
+    '                  position too):',
+    '                    [7]  that exciting moment...',
+    '                    > HOOK',
+    '                  Quote a phrase to hook only those words, not the whole segment:',
+    '                    [7]  that exciting moment...',
+    '                    > HOOK "exciting moment"',
+    '                  Add explicit from-to seconds to override token-derived timing:',
+    '                    > HOOK "exciting moment" 12.450-15.300',
+    '                  Timing is written back by merge-doc so you can always fine-tune it.',
+    '                  Multiple HOOK annotations play in document order.',
     '',
     '  RENAME SPEAKER  Edit the name after the colon in SPEAKERS below.',
     '',
@@ -406,6 +454,14 @@ function buildDoc(transcript) {
     if (text) segLine += `  ${text}`;
     lines.push(segLine);
 
+    if (seg.hook) {
+      let hookLine = '    > HOOK';
+      if (seg.hookPhrase) hookLine += ` "${seg.hookPhrase}"`;
+      if (seg.hookFrom !== undefined && seg.hookTo !== undefined) {
+        hookLine += ` ${seg.hookFrom.toFixed(3)}-${seg.hookTo.toFixed(3)}`;
+      }
+      lines.push(hookLine);
+    }
     for (const cam of (seg.cameraCues || [])) {
       lines.push('    ' + buildCameraLine(cam, seg.tokens, seg.start));
     }
@@ -652,18 +708,36 @@ function mergeDocIntoTranscript(transcript, docContent) {
   let pendingSeg = null;
   let pendingGraphicLines = [];
   let pendingCamLines = [];
+  let pendingHookLine = null;
   let videoStart = transcript.meta.videoStart;
   let videoEnd = transcript.meta.videoEnd;
   let nextSegIsVideoStart = false;
 
   function flushPending() {
     if (!pendingSeg) return;
-    const graphics    = pendingGraphicLines.map(l => parseGraphicLine(l, pendingSeg.tokens));
-    const cameraCues  = pendingCamLines.map(l => parseCameraLine(l, pendingSeg.tokens, pendingSeg.start));
-    byId[pendingSeg.id] = { ...pendingSeg, graphics, cameraCues };
+    const graphics   = pendingGraphicLines.map(l => parseGraphicLine(l, pendingSeg.tokens));
+    const cameraCues = pendingCamLines.map(l => parseCameraLine(l, pendingSeg.tokens, pendingSeg.start));
+    let hook = false, hookPhrase = null, hookFrom, hookTo;
+    if (pendingHookLine !== null) {
+      hook = true;
+      const phraseMatch = pendingHookLine.match(/^"([^"]*)"/);
+      const timingMatch = pendingHookLine.match(/(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)\s*$/);
+      if (phraseMatch) hookPhrase = phraseMatch[1];
+      if (timingMatch) {
+        // Explicit timing overrides token resolution
+        hookFrom = parseFloat(timingMatch[1]);
+        hookTo   = parseFloat(timingMatch[2]);
+      } else if (hookPhrase) {
+        const range = resolvePhraseToTimeRange(hookPhrase, pendingSeg.tokens, pendingSeg.end);
+        if (range) { hookFrom = range.from; hookTo = range.to; }
+        else console.warn(`  ⚠ HOOK phrase not found in segment [${pendingSeg.id}]: "${hookPhrase}" — hooking full segment`);
+      }
+    }
+    byId[pendingSeg.id] = { ...pendingSeg, hook, hookPhrase, hookFrom, hookTo, graphics, cameraCues };
     pendingSeg = null;
     pendingGraphicLines = [];
     pendingCamLines = [];
+    pendingHookLine = null;
   }
 
   for (const line of stripped.split('\n')) {
@@ -688,11 +762,13 @@ function mergeDocIntoTranscript(transcript, docContent) {
       continue;
     }
 
-    // Annotation line: > CAM ... | > GraphicType ...
+    // Annotation line: > CAM ... | > HOOK ... | > GraphicType ...
     if (trimmed.startsWith('>')) {
       const annotation = trimmed.slice(1).trim();
       if (annotation.startsWith('CAM')) {
         if (pendingSeg) pendingCamLines.push(annotation.slice(3).trim());
+      } else if (annotation.startsWith('HOOK')) {
+        if (pendingSeg) pendingHookLine = annotation.slice(4).trim();
       } else {
         if (pendingSeg) pendingGraphicLines.push(annotation);
       }
@@ -859,14 +935,19 @@ function cleanCaptionText(text) {
   return text.replace(/_[A-Z]+_/g, '').replace(/\s{2,}/g, ' ').trim();
 }
 
+function getHookClips(seg) {
+  if (seg.hookFrom !== undefined && seg.hookTo !== undefined) {
+    return [{ start: seg.hookFrom, end: seg.hookTo }];
+  }
+  return getSubClips(seg);
+}
+
 function buildSentencesVtt(segments, meta = {}) {
   const { videoStart, videoEnd } = meta;
   const lines = ['WEBVTT', ''];
   let runningOffset = 0;
-  for (const seg of segments) {
-    if (videoStart !== undefined && seg.end <= videoStart) continue;
-    if (videoEnd !== undefined && seg.start >= videoEnd) continue;
-    if (seg.cut) continue;
+
+  function emitSeg(seg) {
     const clips = getSubClips(seg);
     const duration = clips.reduce((sum, c) => sum + (c.end - c.start), 0);
     const text = cleanCaptionText(seg.text);
@@ -877,6 +958,30 @@ function buildSentencesVtt(segments, meta = {}) {
     }
     runningOffset += duration;
   }
+
+  // Hook segments first (in document order), before the main content
+  for (const seg of segments) {
+    if (!seg.hook || seg.cut) continue;
+    const clips = getHookClips(seg);
+    const duration = clips.reduce((sum, c) => sum + (c.end - c.start), 0);
+    const text = cleanCaptionText(seg.hookPhrase ?? seg.text);
+    if (text) {
+      lines.push(`${secondsToVttTs(runningOffset)} --> ${secondsToVttTs(runningOffset + duration)}`);
+      lines.push(text);
+      lines.push('');
+    }
+    runningOffset += duration;
+  }
+
+  // Main content (respecting videoStart/videoEnd trim, hooks already emitted above)
+  for (const seg of segments) {
+    if (seg.hook) continue;
+    if (videoStart !== undefined && seg.end <= videoStart) continue;
+    if (videoEnd !== undefined && seg.start >= videoEnd) continue;
+    if (seg.cut) continue;
+    emitSeg(seg);
+  }
+
   return lines.join('\n');
 }
 
@@ -1062,4 +1167,4 @@ if (_argv1.endsWith('/edit-transcript.js') || _argv1.endsWith('/edit-transcript'
 }
 
 export default main;
-export { buildTextWithCuts, applyTextPartsToTokens, mergeDocIntoTranscript, buildDoc, deriveCuts, cleanCaptionText, buildSentencesVtt, buildSentencesSrt, getSubClips, autoCutPauses, autoCutDisfluencies, WORD_DURATION_ESTIMATE, CUT_START_BIAS, CUT_END_BIAS, isSpecialToken, isDisfluencyToken };
+export { buildTextWithCuts, applyTextPartsToTokens, mergeDocIntoTranscript, buildDoc, deriveCuts, cleanCaptionText, buildSentencesVtt, buildSentencesSrt, getSubClips, getHookClips, resolvePhraseToTimeRange, autoCutPauses, autoCutDisfluencies, WORD_DURATION_ESTIMATE, CUT_START_BIAS, CUT_END_BIAS, isSpecialToken, isDisfluencyToken };

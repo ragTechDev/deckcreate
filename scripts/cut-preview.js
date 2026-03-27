@@ -47,10 +47,18 @@ async function main() {
 
   const transcript = await fs.readJson(transcriptPath);
 
-  // Collect all sub-clips from non-cut segments
+  // Hook clips first (in document order), then main clips
   const clips = [];
   for (const seg of transcript.segments) {
-    if (seg.cut) continue;
+    if (!seg.hook || seg.cut) continue;
+    if (seg.hookFrom !== undefined && seg.hookTo !== undefined) {
+      clips.push({ start: seg.hookFrom, end: seg.hookTo });
+    } else {
+      clips.push(...getSubClips(seg));
+    }
+  }
+  for (const seg of transcript.segments) {
+    if (seg.hook || seg.cut) continue;
     clips.push(...getSubClips(seg));
   }
 

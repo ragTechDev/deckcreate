@@ -8,6 +8,8 @@ import {
   buildSentencesVtt,
   buildSentencesSrt,
   getSubClips,
+  getHookClips,
+  resolvePhraseToTimeRange,
   autoCutPauses,
   autoCutDisfluencies,
   WORD_DURATION_ESTIMATE,
@@ -718,6 +720,115 @@ describe('buildSentencesVtt', () => {
     const vtt = buildSentencesVtt(segments, { videoEnd: 3 });
     expect(vtt).toContain('before end');
     expect(vtt).not.toContain('after end');
+  });
+});
+
+// ─── resolvePhraseToTimeRange / HOOK phrase ───────────────────────────────────
+
+describe('resolvePhraseToTimeRange', () => {
+  test('finds a single word and returns its t_dtw as from, next token as to', () => {
+    const tokens = [tok(' hello', 1.0), tok(' world', 2.0), tok(' there', 3.0)];
+    const range = resolvePhraseToTimeRange('world', tokens, 5);
+    expect(range.from).toBeCloseTo(2.0);
+    expect(range.to).toBeCloseTo(3.0); // next token's t_dtw
+  });
+
+  test('finds a multi-word phrase', () => {
+    const tokens = [tok(' hello', 1.0), tok(' world', 2.0), tok(' there', 3.0)];
+    const range = resolvePhraseToTimeRange('world there', tokens, 5);
+    expect(range.from).toBeCloseTo(2.0);
+    expect(range.to).toBeCloseTo(5); // no next token → segEnd
+  });
+
+  test('returns null when phrase is not found', () => {
+    const tokens = [tok(' hello', 1.0), tok(' world', 2.0)];
+    expect(resolvePhraseToTimeRange('missing', tokens, 5)).toBeNull();
+  });
+
+  test('phrase matching is case-insensitive and strips punctuation', () => {
+    const tokens = [tok(' Hello,', 1.0), tok(' World!', 2.0), tok(' next', 3.0)];
+    const range = resolvePhraseToTimeRange('hello world', tokens, 5);
+    expect(range).not.toBeNull();
+    expect(range.from).toBeCloseTo(1.0);
+  });
+});
+
+describe('HOOK phrase in buildSentencesVtt', () => {
+  test('hook with phrase uses hookFrom/hookTo for timing', () => {
+    const segments = [
+      seg({ id: 1, start: 0, end: 10, text: 'exciting moment here', cut: false,
+            hook: true, hookPhrase: 'exciting moment', hookFrom: 3.0, hookTo: 5.0 }),
+      seg({ id: 2, start: 10, end: 15, text: 'main content', cut: false }),
+    ];
+    const vtt = buildSentencesVtt(segments);
+    // Hook duration = 5.0 - 3.0 = 2s → first caption 0–2s
+    expect(vtt).toContain('00:00:00.000 --> 00:00:02.000');
+    expect(vtt).toContain('exciting moment');
+    // Main content starts at 2s
+    expect(vtt).toContain('00:00:02.000 --> 00:00:07.000');
+    expect(vtt).toContain('main content');
+  });
+
+  test('hook caption text uses hookPhrase not full segment text', () => {
+    const segments = [
+      seg({ id: 1, start: 0, end: 10, text: 'full segment text here', cut: false,
+            hook: true, hookPhrase: 'segment text', hookFrom: 2.0, hookTo: 4.0 }),
+    ];
+    const vtt = buildSentencesVtt(segments);
+    expect(vtt).toContain('segment text');
+    expect(vtt).not.toContain('full segment text here');
+  });
+
+  test('hook phrase round-trips through mergeDocIntoTranscript', () => {
+    const tokens = [tok(' exciting', 3.0), tok(' moment', 4.0), tok(' here', 5.0)];
+    const base = transcript([
+      seg({ id: 1, start: 0, end: 10, text: 'exciting moment here', tokens }),
+    ]);
+    const doc = '[1]  exciting moment here\n    > HOOK "exciting moment"\n';
+    const result = mergeDocIntoTranscript(base, doc);
+    const s = result.segments[0];
+    expect(s.hook).toBe(true);
+    expect(s.hookPhrase).toBe('exciting moment');
+    expect(s.hookFrom).toBeCloseTo(3.0);
+    expect(s.hookTo).toBeCloseTo(5.0); // next token (here) t_dtw
+  });
+
+  test('explicit timing overrides token resolution', () => {
+    const tokens = [tok(' exciting', 3.0), tok(' moment', 4.0), tok(' here', 5.0)];
+    const base = transcript([
+      seg({ id: 1, start: 0, end: 10, text: 'exciting moment here', tokens }),
+    ]);
+    const doc = '[1]  exciting moment here\n    > HOOK "exciting moment" 3.200-4.800\n';
+    const result = mergeDocIntoTranscript(base, doc);
+    const s = result.segments[0];
+    expect(s.hook).toBe(true);
+    expect(s.hookPhrase).toBe('exciting moment');
+    expect(s.hookFrom).toBeCloseTo(3.2);
+    expect(s.hookTo).toBeCloseTo(4.8);
+  });
+
+  test('explicit timing without phrase sets hookFrom/hookTo and no hookPhrase', () => {
+    const tokens = [tok(' exciting', 3.0), tok(' moment', 4.0), tok(' here', 5.0)];
+    const base = transcript([
+      seg({ id: 1, start: 0, end: 10, text: 'exciting moment here', tokens }),
+    ]);
+    const doc = '[1]  exciting moment here\n    > HOOK 3.200-4.800\n';
+    const result = mergeDocIntoTranscript(base, doc);
+    const s = result.segments[0];
+    expect(s.hook).toBe(true);
+    expect(s.hookPhrase).toBeNull();
+    expect(s.hookFrom).toBeCloseTo(3.2);
+    expect(s.hookTo).toBeCloseTo(4.8);
+  });
+
+  test('buildDoc emits resolved timing so users can fine-tune it', () => {
+    const tokens = [tok(' exciting', 3.0), tok(' moment', 4.0), tok(' here', 5.0)];
+    const base = transcript([
+      seg({ id: 1, start: 0, end: 10, text: 'exciting moment here', tokens,
+            hook: true, hookPhrase: 'exciting moment', hookFrom: 3.0, hookTo: 5.0 }),
+    ]);
+    const doc = buildDoc(base);
+    expect(doc).toContain('> HOOK "exciting moment" 3.000-5.000');
   });
 });
 

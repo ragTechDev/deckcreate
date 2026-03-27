@@ -37,6 +37,18 @@ function computeTransform(
 }
 
 
+/**
+ * The duration a segment contributes to the output timeline.
+ * For phrase hooks this is the hook clip window, not the full segment duration.
+ * Must match the clip length that buildSections emits for the same segment.
+ */
+function getOutputDuration(seg: Segment): number {
+  if (seg.hook && seg.hookFrom !== undefined && seg.hookTo !== undefined) {
+    return seg.hookTo - seg.hookFrom;
+  }
+  return getEffectiveDuration(seg);
+}
+
 // ── Pacing algorithm ──────────────────────────────────────────────────────────
 
 /**
@@ -73,7 +85,7 @@ export function buildCameraShots(
 
   for (const seg of activeSegments) {
     if (seg.cut) continue;
-    const segDur   = Math.round(getEffectiveDuration(seg) * fps);
+    const segDur   = Math.round(getOutputDuration(seg) * fps);
     const segStart = cumFrame;
     cumFrame      += segDur;
 
@@ -153,7 +165,7 @@ function collectCameraOverrides(
 
   for (const seg of activeSegments) {
     if (seg.cut) continue;
-    const segDur = Math.round(getEffectiveDuration(seg) * fps);
+    const segDur = Math.round(getOutputDuration(seg) * fps);
 
     for (const cue of (seg.cameraCues ?? [])) {
       const viewport =

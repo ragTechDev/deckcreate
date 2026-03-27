@@ -48,6 +48,14 @@ export type Segment = {
   graphics: GraphicsCue[];
   /** Explicit camera cut overrides — take priority over the pacing algorithm */
   cameraCues?: CameraCue[];
+  /** When true, this segment is prepended to the video as a hook/teaser */
+  hook?: boolean;
+  /** The specific phrase within the segment used as the hook clip */
+  hookPhrase?: string;
+  /** Start time (seconds) of the hook clip — resolved from hookPhrase tokens */
+  hookFrom?: number;
+  /** End time (seconds) of the hook clip */
+  hookTo?: number;
 };
 
 export type TranscriptMeta = {

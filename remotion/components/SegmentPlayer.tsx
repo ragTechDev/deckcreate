@@ -33,16 +33,33 @@ export function getEffectiveDuration(segment: Segment): number {
   return getSubClips(segment).reduce((sum, c) => sum + (c.sourceEnd - c.sourceStart), 0);
 }
 
-/** Convert all non-cut segments to a flat sections array (frames) for JumpCuts. */
+/** Returns the clip range for a hook segment: phrase window if set, else full segment clips. */
+function getHookSubClips(segment: Segment): SubClip[] {
+  if (segment.hookFrom !== undefined && segment.hookTo !== undefined) {
+    return [{ sourceStart: segment.hookFrom, sourceEnd: segment.hookTo }];
+  }
+  return getSubClips(segment);
+}
+
+function toSections(clips: SubClip[], fps: number): Section[] {
+  return clips.map(c => ({
+    trimBefore: Math.round(c.sourceStart * fps),
+    trimAfter: Math.round(c.sourceEnd * fps),
+  }));
+}
+
+/**
+ * Convert segments to a flat sections array (frames) for JumpCuts.
+ * Hook segments are placed first (in document order), then main segments.
+ */
 export function buildSections(segments: Segment[], fps: number): Section[] {
-  return segments
-    .filter(s => !s.cut)
-    .flatMap(seg =>
-      getSubClips(seg).map(c => ({
-        trimBefore: Math.round(c.sourceStart * fps),
-        trimAfter: Math.round(c.sourceEnd * fps),
-      })),
-    );
+  const hookSections = segments
+    .filter(s => s.hook && !s.cut)
+    .flatMap(seg => toSections(getHookSubClips(seg), fps));
+  const mainSections = segments
+    .filter(s => !s.hook && !s.cut)
+    .flatMap(seg => toSections(getSubClips(seg), fps));
+  return [...hookSections, ...mainSections];
 }
 
 type Props = {

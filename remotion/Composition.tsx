@@ -42,9 +42,16 @@ function getActiveSegments(transcript: Transcript) {
 }
 
 function computeEffectiveDuration(transcript: Transcript): number {
-  return getActiveSegments(transcript)
-    .filter(s => !s.cut)
+  const hookDuration = transcript.segments
+    .filter(s => s.hook && !s.cut)
+    .reduce((sum, s) => {
+      if (s.hookFrom !== undefined && s.hookTo !== undefined) return sum + (s.hookTo - s.hookFrom);
+      return sum + getEffectiveDuration(s);
+    }, 0);
+  const mainDuration = getActiveSegments(transcript)
+    .filter(s => !s.hook && !s.cut)
     .reduce((sum, s) => sum + getEffectiveDuration(s), 0);
+  return hookDuration + mainDuration;
 }
 
 export const calculateMetadata: CalculateMetadataFunction<MyCompositionProps> = async ({ props }) => {
@@ -106,15 +113,19 @@ export const MyComposition = ({
     if (!transcript) return null;
     if (!cameraReady) return null;
 
-    const activeSegments = getActiveSegments(transcript);
-    const sections = buildSections(activeSegments, fps);
+    // Hook segments come first (order matches buildSections and the SRT output),
+    // then main segments within the videoStart/videoEnd window.
+    const hookSegments = transcript.segments.filter(s => s.hook && !s.cut);
+    const mainSegments = getActiveSegments(transcript).filter(s => !s.hook);
+    const orderedSegments = [...hookSegments, ...mainSegments];
+    const sections = buildSections(orderedSegments, fps);
 
     const videoEl = cameraProfiles
       ? (
         <CameraPlayer
           src={resolvedSrc}
           sections={sections}
-          segments={activeSegments}
+          segments={orderedSegments}
           profiles={cameraProfiles}
         />
       )
