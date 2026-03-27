@@ -95,7 +95,7 @@ function deriveCuts(segment) {
         ? token._cutFrom
         : (prevWordToken
             ? prevWordToken.t_dtw + CUT_START_BIAS * (token.t_dtw - prevWordToken.t_dtw)
-            : segment.start);
+            : token.t_dtw);
       lastCutToken = token;
     } else if (cutFrom && isCut) {
       lastCutToken = token;
@@ -831,6 +831,23 @@ function autoCutPauses(transcript, threshold) {
 
 // ─── VTT helpers ──────────────────────────────────────────────────────────────
 
+/**
+ * Returns the list of sub-clips (start/end pairs) for a segment after removing
+ * its cuts — identical logic to cut-preview.js so the VTT timeline matches the
+ * rendered video exactly.
+ */
+function getSubClips(segment) {
+  const clips = [];
+  let cursor = segment.start;
+  const sorted = [...(segment.cuts || [])].sort((a, b) => a.from - b.from);
+  for (const cut of sorted) {
+    if (cut.from > cursor) clips.push({ start: cursor, end: cut.from });
+    cursor = cut.to;
+  }
+  if (cursor < segment.end) clips.push({ start: cursor, end: segment.end });
+  return clips;
+}
+
 function secondsToVttTs(s) {
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
@@ -842,17 +859,29 @@ function cleanCaptionText(text) {
   return text.replace(/_[A-Z]+_/g, '').replace(/\s{2,}/g, ' ').trim();
 }
 
-function buildSentencesVtt(segments) {
+function buildSentencesVtt(segments, meta = {}) {
+  const { videoStart, videoEnd } = meta;
   const lines = ['WEBVTT', ''];
+  let runningOffset = 0;
   for (const seg of segments) {
+    if (videoStart !== undefined && seg.end <= videoStart) continue;
+    if (videoEnd !== undefined && seg.start >= videoEnd) continue;
     if (seg.cut) continue;
+    const clips = getSubClips(seg);
+    const duration = clips.reduce((sum, c) => sum + (c.end - c.start), 0);
     const text = cleanCaptionText(seg.text);
-    if (!text) continue;
-    lines.push(`${secondsToVttTs(seg.start)} --> ${secondsToVttTs(seg.end)}`);
-    lines.push(text);
-    lines.push('');
+    if (text) {
+      lines.push(`${secondsToVttTs(runningOffset)} --> ${secondsToVttTs(runningOffset + duration)}`);
+      lines.push(text);
+      lines.push('');
+    }
+    runningOffset += duration;
   }
   return lines.join('\n');
+}
+
+function buildSentencesSrt(segments, meta = {}) {
+  return convertVttToSrt(buildSentencesVtt(segments, meta));
 }
 
 function parseVtt(content) {
@@ -904,7 +933,6 @@ async function main() {
 
   const rawPath = cli.rawPath || path.join(cwd, 'public', 'transcribe', 'output', 'raw', 'transcript.raw.json');
   const outputPath = cli.outputPath || path.join(cwd, 'public', 'transcribe', 'output', 'edit', 'transcript.json');
-  const sentencesVttPath = outputPath.replace(/\.json$/, '.sentences.vtt');
   const docPath = outputPath.replace(/\.json$/, '.doc.txt');
 
   if (!await fs.pathExists(rawPath)) {
@@ -1017,12 +1045,10 @@ async function main() {
     console.log(`Auto-cut pauses > ${cli.autoCutPauses}s`);
   }
 
-  const sentencesVtt = buildSentencesVtt(transcript.segments);
-  const sentencesSrtPath = sentencesVttPath.replace(/\.vtt$/, '.srt');
+  const sentencesSrtPath = outputPath.replace(/\.json$/, '.sentences.srt');
 
   await fs.writeJson(outputPath, transcript, { spaces: 2 });
-  await fs.writeFile(sentencesVttPath, sentencesVtt, 'utf8');
-  await fs.writeFile(sentencesSrtPath, convertVttToSrt(sentencesVtt), 'utf8');
+  await fs.writeFile(sentencesSrtPath, buildSentencesSrt(transcript.segments, transcript.meta), 'utf8');
   await fs.writeFile(docPath, buildDoc(transcript), 'utf8');
 
   console.log(`✓ ${outputPath}`);
@@ -1036,4 +1062,4 @@ if (_argv1.endsWith('/edit-transcript.js') || _argv1.endsWith('/edit-transcript'
 }
 
 export default main;
-export { buildTextWithCuts, applyTextPartsToTokens, mergeDocIntoTranscript, buildDoc, deriveCuts, cleanCaptionText, buildSentencesVtt, autoCutPauses, autoCutDisfluencies, WORD_DURATION_ESTIMATE, CUT_START_BIAS, CUT_END_BIAS, isSpecialToken, isDisfluencyToken };
+export { buildTextWithCuts, applyTextPartsToTokens, mergeDocIntoTranscript, buildDoc, deriveCuts, cleanCaptionText, buildSentencesVtt, buildSentencesSrt, getSubClips, autoCutPauses, autoCutDisfluencies, WORD_DURATION_ESTIMATE, CUT_START_BIAS, CUT_END_BIAS, isSpecialToken, isDisfluencyToken };

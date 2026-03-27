@@ -6,10 +6,13 @@ import {
   deriveCuts,
   cleanCaptionText,
   buildSentencesVtt,
+  buildSentencesSrt,
+  getSubClips,
   autoCutPauses,
   autoCutDisfluencies,
   WORD_DURATION_ESTIMATE,
-  CUT_BOUNDARY_BIAS,
+  CUT_START_BIAS,
+  CUT_END_BIAS,
   isSpecialToken,
   isDisfluencyToken,
 } from './edit-transcript.js';
@@ -107,10 +110,10 @@ describe('autoCutDisfluencies', () => {
     ]);
     const cuts = deriveCuts(segments[0]);
     expect(cuts).toHaveLength(1);
-    // cutFrom = on@1.0  + CUT_BOUNDARY_BIAS*(--@1.5 - on@1.0)
-    // cutTo   = --@1.5  + CUT_BOUNDARY_BIAS*(Is@2.0 - --@1.5)
-    expect(cuts[0].from).toBeCloseTo(1.0 + CUT_BOUNDARY_BIAS * (1.5 - 1.0));
-    expect(cuts[0].to).toBeCloseTo(1.5 + CUT_BOUNDARY_BIAS * (2.0 - 1.5));
+    // cutFrom = on@1.0  + CUT_START_BIAS*(--@1.5 - on@1.0)
+    // cutTo   = --@1.5  + CUT_END_BIAS*(Is@2.0 - --@1.5)
+    expect(cuts[0].from).toBeCloseTo(1.0 + CUT_START_BIAS * (1.5 - 1.0));
+    expect(cuts[0].to).toBeCloseTo(1.5 + CUT_END_BIAS * (2.0 - 1.5));
   });
 
   test('"--" appears as {--} inline in buildTextWithCuts after auto-cut', () => {
@@ -548,9 +551,9 @@ describe('deriveCuts', () => {
     const cuts = deriveCuts(s);
     expect(cuts).toHaveLength(1);
     // No prevWordToken: cutFrom = um.t_dtw = 0.5
-    // cutTo = um@0.5 + CUT_BOUNDARY_BIAS*(Hello@1.0 - um@0.5)
+    // cutTo = um@0.5 + CUT_END_BIAS*(Hello@1.0 - um@0.5)
     expect(cuts[0].from).toBeCloseTo(0.5);
-    expect(cuts[0].to).toBeCloseTo(0.5 + CUT_BOUNDARY_BIAS * (1.0 - 0.5));
+    expect(cuts[0].to).toBeCloseTo(0.5 + CUT_END_BIAS * (1.0 - 0.5));
   });
 
   test('cut range for trailing cut token uses segment end', () => {
@@ -559,10 +562,10 @@ describe('deriveCuts', () => {
       tokens: [tok(' Hello', 0.5), tok(' um', 1.0, true)],
     });
     const cuts = deriveCuts(s);
-    // cutFrom = Hello@0.5 + CUT_BOUNDARY_BIAS*(um@1.0 - Hello@0.5)
-    // cutTo   = um@1.0   + CUT_BOUNDARY_BIAS*(segment.end=2 - um@1.0)
-    expect(cuts[0].from).toBeCloseTo(0.5 + CUT_BOUNDARY_BIAS * (1.0 - 0.5));
-    expect(cuts[0].to).toBeCloseTo(1.0 + CUT_BOUNDARY_BIAS * (2.0 - 1.0));
+    // cutFrom = Hello@0.5 + CUT_START_BIAS*(um@1.0 - Hello@0.5)
+    // cutTo   = um@1.0   + CUT_END_BIAS*(segment.end=2 - um@1.0)
+    expect(cuts[0].from).toBeCloseTo(0.5 + CUT_START_BIAS * (1.0 - 0.5));
+    expect(cuts[0].to).toBeCloseTo(1.0 + CUT_END_BIAS * (2.0 - 1.0));
   });
 
   test('explicit _cutFrom/_cutTo overrides bias computation', () => {
@@ -652,6 +655,69 @@ describe('buildSentencesVtt', () => {
     // Only one timestamp block should exist (for "Hello")
     const tsCount = (vtt.match(/-->/g) || []).length;
     expect(tsCount).toBe(1);
+  });
+
+  test('timestamps start from 0 regardless of original segment start time', () => {
+    const segments = [
+      seg({ id: 1, start: 5, end: 8, text: 'first', cut: false }),
+    ];
+    const vtt = buildSentencesVtt(segments);
+    expect(vtt).toContain('00:00:00.000 --> 00:00:03.000');
+  });
+
+  test('intra-segment cuts compress the caption duration', () => {
+    // Segment 0–10s with a 4s cut from 3–7s → effective duration = 6s
+    const segments = [
+      seg({ id: 1, start: 0, end: 10, text: 'hello world', cut: false, cuts: [{ from: 3, to: 7 }] }),
+    ];
+    const vtt = buildSentencesVtt(segments);
+    expect(vtt).toContain('00:00:00.000 --> 00:00:06.000');
+  });
+
+  test('later segments are offset by prior segments net duration', () => {
+    // seg1: 0–4s, cut 1–3s → effective 2s (plays 0–2 in output)
+    // seg2: 4–7s, no cuts → effective 3s (plays 2–5 in output)
+    const segments = [
+      seg({ id: 1, start: 0, end: 4, text: 'first', cut: false, cuts: [{ from: 1, to: 3 }] }),
+      seg({ id: 2, start: 4, end: 7, text: 'second', cut: false }),
+    ];
+    const vtt = buildSentencesVtt(segments);
+    expect(vtt).toContain('00:00:00.000 --> 00:00:02.000');
+    expect(vtt).toContain('00:00:02.000 --> 00:00:05.000');
+  });
+
+  test('cut segments do not advance the running offset', () => {
+    // seg1 kept, seg2 cut (3s), seg3 kept → seg3 starts at end of seg1, not seg2
+    const segments = [
+      seg({ id: 1, start: 0, end: 2, text: 'keep', cut: false }),
+      seg({ id: 2, start: 2, end: 5, text: 'removed', cut: true }),
+      seg({ id: 3, start: 5, end: 8, text: 'also keep', cut: false }),
+    ];
+    const vtt = buildSentencesVtt(segments);
+    expect(vtt).toContain('00:00:00.000 --> 00:00:02.000');
+    expect(vtt).toContain('00:00:02.000 --> 00:00:05.000');
+    expect(vtt).not.toContain('removed');
+  });
+
+  test('videoStart excludes segments before it and offsets start from 0', () => {
+    const segments = [
+      seg({ id: 1, start: 0, end: 3, text: 'before start', cut: false }),
+      seg({ id: 2, start: 3, end: 6, text: 'after start', cut: false }),
+    ];
+    const vtt = buildSentencesVtt(segments, { videoStart: 3 });
+    expect(vtt).not.toContain('before start');
+    expect(vtt).toContain('after start');
+    expect(vtt).toContain('00:00:00.000 --> 00:00:03.000');
+  });
+
+  test('videoEnd excludes segments at or after it', () => {
+    const segments = [
+      seg({ id: 1, start: 0, end: 3, text: 'before end', cut: false }),
+      seg({ id: 2, start: 3, end: 6, text: 'after end', cut: false }),
+    ];
+    const vtt = buildSentencesVtt(segments, { videoEnd: 3 });
+    expect(vtt).toContain('before end');
+    expect(vtt).not.toContain('after end');
   });
 });
 
