@@ -384,6 +384,10 @@ function buildInstructionsBlock() {
     '                  Add explicit from-to seconds to override token-derived timing:',
     '                    > HOOK "exciting moment" 12.450-15.300',
     '                  Timing is written back by merge-doc so you can always fine-tune it.',
+    '                  Add char= to show a Techybara mascot alongside the caption:',
+    '                    > HOOK "exciting moment" 12.450-15.300 char=techybara-holding-mic',
+    '                  Add [path] to show a graphic image hovering above the caption:',
+    '                    > HOOK "exciting moment" 12.450-15.300 [public/assets/logo/transparent-bg-logo.png]',
     '                  Multiple HOOK annotations play in document order.',
     '',
     '  RENAME SPEAKER  Edit the name after the colon in SPEAKERS below.',
@@ -460,6 +464,8 @@ function buildDoc(transcript) {
       if (seg.hookFrom !== undefined && seg.hookTo !== undefined) {
         hookLine += ` ${seg.hookFrom.toFixed(3)}-${seg.hookTo.toFixed(3)}`;
       }
+      if (seg.hookChar)    hookLine += ` char=${seg.hookChar}`;
+      if (seg.hookGraphic) hookLine += ` [${seg.hookGraphic}]`;
       lines.push(hookLine);
     }
     for (const cam of (seg.cameraCues || [])) {
@@ -717,12 +723,18 @@ function mergeDocIntoTranscript(transcript, docContent) {
     if (!pendingSeg) return;
     const graphics   = pendingGraphicLines.map(l => parseGraphicLine(l, pendingSeg.tokens));
     const cameraCues = pendingCamLines.map(l => parseCameraLine(l, pendingSeg.tokens, pendingSeg.start));
-    let hook = false, hookPhrase = null, hookFrom, hookTo;
+    let hook = false, hookPhrase = null, hookFrom, hookTo, hookChar = null, hookGraphic = null;
     if (pendingHookLine !== null) {
       hook = true;
-      const phraseMatch = pendingHookLine.match(/^"([^"]*)"/);
-      const timingMatch = pendingHookLine.match(/(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)\s*$/);
-      if (phraseMatch) hookPhrase = phraseMatch[1];
+      const phraseMatch  = pendingHookLine.match(/^"([^"]*)"/);
+      const charMatch    = pendingHookLine.match(/char=([^\s\[]+)/);
+      const graphicMatch = pendingHookLine.match(/\[([^\]]+)\]/);
+      // Strip bracketed graphic path before matching timing to avoid false digit matches
+      const lineForTiming = pendingHookLine.replace(/\[[^\]]*\]/, '');
+      const timingMatch  = lineForTiming.match(/(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)/);
+      if (phraseMatch)  hookPhrase  = phraseMatch[1];
+      if (charMatch)    hookChar    = charMatch[1];
+      if (graphicMatch) hookGraphic = graphicMatch[1];
       if (timingMatch) {
         // Explicit timing overrides token resolution
         hookFrom = parseFloat(timingMatch[1]);
@@ -733,7 +745,7 @@ function mergeDocIntoTranscript(transcript, docContent) {
         else console.warn(`  ⚠ HOOK phrase not found in segment [${pendingSeg.id}]: "${hookPhrase}" — hooking full segment`);
       }
     }
-    byId[pendingSeg.id] = { ...pendingSeg, hook, hookPhrase, hookFrom, hookTo, graphics, cameraCues };
+    byId[pendingSeg.id] = { ...pendingSeg, hook, hookPhrase, hookFrom, hookTo, hookChar, hookGraphic, graphics, cameraCues };
     pendingSeg = null;
     pendingGraphicLines = [];
     pendingCamLines = [];

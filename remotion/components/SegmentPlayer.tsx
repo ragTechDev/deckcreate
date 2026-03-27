@@ -33,12 +33,13 @@ export function getEffectiveDuration(segment: Segment): number {
   return getSubClips(segment).reduce((sum, c) => sum + (c.sourceEnd - c.sourceStart), 0);
 }
 
-/** Returns the clip range for a hook segment: phrase window if set, else full segment clips. */
+/** Returns the clip range for a hook segment: phrase window if set, else the raw segment
+ *  (no cuts applied — hook clips play uninterrupted so the music stays in sync). */
 function getHookSubClips(segment: Segment): SubClip[] {
   if (segment.hookFrom !== undefined && segment.hookTo !== undefined) {
     return [{ sourceStart: segment.hookFrom, sourceEnd: segment.hookTo }];
   }
-  return getSubClips(segment);
+  return [{ sourceStart: segment.start, sourceEnd: segment.end }];
 }
 
 function toSections(clips: SubClip[], fps: number): Section[] {

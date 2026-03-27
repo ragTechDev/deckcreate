@@ -56,6 +56,10 @@ export type Segment = {
   hookFrom?: number;
   /** End time (seconds) of the hook clip */
   hookTo?: number;
+  /** Techybara asset filename (no extension) to show alongside this hook clip */
+  hookChar?: string;
+  /** Image path relative to /public to display above captions during this hook clip */
+  hookGraphic?: string;
 };
 
 export type TranscriptMeta = {
