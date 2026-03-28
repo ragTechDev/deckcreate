@@ -11,6 +11,7 @@ function parseArgs() {
     if (args[i] === '--audio' && args[i + 1]) result.audioPath = args[++i];
     else if (args[i] === '--output-dir' && args[i + 1]) result.outputDir = args[++i];
     else if (args[i] === '--model' && args[i + 1]) result.model = args[++i];
+    else if (args[i] === '--timestamp-offset' && args[i + 1]) result.timestampOffset = parseFloat(args[++i]);
   }
   return result;
 }
@@ -34,19 +35,20 @@ async function resolveArgs(cwd) {
     process.exit(1);
   }
 
-  return { audioPath, outputDir, model: cli.model };
+  return { audioPath, outputDir, model: cli.model, timestampOffset: cli.timestampOffset || 0 };
 }
 
 async function main() {
   const cwd = process.cwd();
-  const { audioPath, outputDir, model } = await resolveArgs(cwd);
+  const { audioPath, outputDir, model, timestampOffset } = await resolveArgs(cwd);
 
   console.log('\nTranscription');
   console.log(`  Audio:      ${audioPath}`);
   console.log(`  Output dir: ${outputDir}`);
+  if (timestampOffset) console.log(`  Offset:     -${timestampOffset}s`);
   console.log('');
 
-  const transcriber = new Transcriber({ audioPath, outputDir, model });
+  const transcriber = new Transcriber({ audioPath, outputDir, model, timestampOffset });
 
   try {
     await transcriber.init();

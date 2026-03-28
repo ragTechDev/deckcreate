@@ -1,6 +1,7 @@
 import {
   OffthreadVideo,
   Audio,
+  Loop,
   Sequence,
   staticFile,
   CalculateMetadataFunction,
@@ -9,10 +10,12 @@ import {
   continueRender,
   useCurrentFrame,
 } from 'remotion';
+import { getAudioDurationInSeconds } from '@remotion/media-utils';
 import React, { useState, useEffect, useMemo } from 'react';
 import { SegmentPlayer, buildSections, getEffectiveDuration } from './components/SegmentPlayer';
 import { CameraPlayer } from './components/CameraPlayer';
 import { HookOverlay } from './components/HookOverlay';
+import { PodcastIntroComposition, INTRO_DURATION_FRAMES } from './components/PodcastIntro';
 import { loadNunito } from './loadFonts';
 import type { Transcript, Segment } from './types/transcript';
 import type { CameraProfiles } from './types/camera';
@@ -34,6 +37,8 @@ type MyCompositionProps = {
    * Set to empty string "" to disable hook music.
    */
   hookMusicSrc?: string;
+  /** Duration of the hook music track in seconds — set by calculateMetadata for looping. */
+  hookMusicDurationSecs?: number;
 };
 
 const normalizeStaticPath = (src: string) => src.replace(/^\/+/, '');
@@ -54,17 +59,19 @@ function getActiveSegments(transcript: Transcript) {
   });
 }
 
+const INTRO_DURATION_SECS = INTRO_DURATION_FRAMES / 60;
+
 function computeEffectiveDuration(transcript: Transcript): number {
-  const hookDuration = transcript.segments
-    .filter(s => s.hook && !s.cut)
-    .reduce((sum, s) => {
-      if (s.hookFrom !== undefined && s.hookTo !== undefined) return sum + (s.hookTo - s.hookFrom);
-      return sum + (s.end - s.start); // hooks play uncut
-    }, 0);
+  const hooks = transcript.segments.filter(s => s.hook && !s.cut);
+  const hookDuration = hooks.reduce((sum, s) => {
+    if (s.hookFrom !== undefined && s.hookTo !== undefined) return sum + (s.hookTo - s.hookFrom);
+    return sum + (s.end - s.start);
+  }, 0);
+  const introDuration = hooks.length > 0 ? INTRO_DURATION_SECS : 0;
   const mainDuration = getActiveSegments(transcript)
     .filter(s => !s.hook && !s.cut)
     .reduce((sum, s) => sum + getEffectiveDuration(s), 0);
-  return hookDuration + mainDuration;
+  return hookDuration + introDuration + mainDuration;
 }
 
 export const calculateMetadata: CalculateMetadataFunction<MyCompositionProps> = async ({ props }) => {
@@ -76,7 +83,16 @@ export const calculateMetadata: CalculateMetadataFunction<MyCompositionProps> = 
   try {
     const transcript = await fetchJson<Transcript>(props.transcriptSrc);
     const durationInFrames = Math.max(1, Math.floor(computeEffectiveDuration(transcript) * fps));
-    return { durationInFrames, fps, width: 1920, height: 1080 };
+    let overrideProps: MyCompositionProps = transcript.meta.videoSrc
+      ? { ...props, src: transcript.meta.videoSrc }
+      : { ...props };
+    if (props.hookMusicSrc) {
+      const hookMusicDurationSecs = await getAudioDurationInSeconds(
+        staticFile(normalizeStaticPath(props.hookMusicSrc)),
+      ).catch(() => 0);
+      overrideProps = { ...overrideProps, hookMusicDurationSecs };
+    }
+    return { durationInFrames, fps, width: 1920, height: 1080, props: overrideProps };
   } catch {
     return fallback;
   }
@@ -89,6 +105,7 @@ type TranscriptCompositionProps = {
   resolvedSrc:   string;
   audioSrc?:     string;
   hookMusicSrc?: string;
+  hookMusicDurationSecs: number;
   audioStartFromFrames: number;
   transcript:    Transcript;
   cameraProfiles: CameraProfiles | null;
@@ -99,13 +116,13 @@ const TranscriptComposition: React.FC<TranscriptCompositionProps> = ({
   resolvedSrc,
   audioSrc,
   hookMusicSrc,
+  hookMusicDurationSecs,
   audioStartFromFrames,
   transcript,
   cameraProfiles,
   brand,
 }) => {
   const { fps } = useVideoConfig();
-  const frame = useCurrentFrame();
 
   const hookSegments = useMemo(
     () => transcript.segments.filter(s => s.hook && !s.cut),
@@ -117,47 +134,49 @@ const TranscriptComposition: React.FC<TranscriptCompositionProps> = ({
     return [...hookSegments, ...mainSegments];
   }, [transcript, hookSegments]);
 
-  const sections = useMemo(() => buildSections(orderedSegments, fps), [orderedSegments, fps]);
+  const { hookSections, mainSections } = useMemo(() => buildSections(orderedSegments, fps), [orderedSegments, fps]);
 
-  const totalHookFrames = useMemo(() =>
-    hookSegments.reduce((sum, s) => {
-      const dur = (s.hookFrom !== undefined && s.hookTo !== undefined)
-        ? s.hookTo - s.hookFrom
-        : s.end - s.start; // hooks play uncut
-      return sum + Math.round(dur * fps);
-    }, 0),
-  [hookSegments, fps]);
+  const totalHookFrames = hookSections.reduce((sum, s) => sum + s.trimAfter - s.trimBefore, 0);
+  const hasHooks        = hookSegments.length > 0;
+  // PodcastIntro plays between hooks and main content (only when there are hooks)
+  const introFrames     = hasHooks ? INTRO_DURATION_FRAMES : 0;
 
   const videoEl = cameraProfiles
     ? (
       <CameraPlayer
         src={resolvedSrc}
-        sections={sections}
+        hookSections={hookSections}
+        mainSections={mainSections}
+        mainOffset={introFrames}
         segments={orderedSegments}
         profiles={cameraProfiles}
       />
     )
-    : <SegmentPlayer src={resolvedSrc} sections={sections} />;
+    : <SegmentPlayer src={resolvedSrc} hookSections={hookSections} mainSections={mainSections} mainOffset={introFrames} />;
 
   return (
     <>
       {videoEl}
 
-      {/* Hook overlay: pill, karaoke captions, logo, Techybara character.
-          HookOverlay returns null when no hook is active, so it stays mounted
-          for stable frame transitions. */}
-      {hookSegments.length > 0 && (
+      {/* Hook overlay: pill, captions, logo, Techybara character.
+          Stays mounted for stable frame transitions; returns null outside hook frames. */}
+      {hasHooks && (
         <HookOverlay hookSegments={hookSegments} brand={brand} />
       )}
 
-      {/* Hook intro music — Sequence limits playback to hook frames only.
-          Place your track at public/sounds/hook-music.mp3. */}
-      {!!hookMusicSrc && hookSegments.length > 0 && (
+      {/* Hook music — looped so it continues if total hook duration exceeds one track length */}
+      {!!hookMusicSrc && hasHooks && hookMusicDurationSecs > 0 && (
         <Sequence from={0} durationInFrames={totalHookFrames}>
-          <Audio
-            src={staticFile(normalizeStaticPath(hookMusicSrc))}
-            volume={0.35}
-          />
+          <Loop durationInFrames={Math.round(hookMusicDurationSecs * fps)}>
+            <Audio src={staticFile(normalizeStaticPath(hookMusicSrc))} volume={0.07} />
+          </Loop>
+        </Sequence>
+      )}
+
+      {/* PodcastIntro — plays immediately after hooks, before main episode */}
+      {hasHooks && (
+        <Sequence from={totalHookFrames} durationInFrames={INTRO_DURATION_FRAMES}>
+          <PodcastIntroComposition brandSrc="brand.json" />
         </Sequence>
       )}
 
@@ -182,6 +201,7 @@ export const MyComposition = ({
   cameraProfilesSrc,
   brandSrc = 'brand.json',
   hookMusicSrc = 'sounds/hook-music.mp3',
+  hookMusicDurationSecs = 0,
 }: MyCompositionProps) => {
   const { fps } = useVideoConfig();
   const audioStartFromFrames = Math.max(0, Math.round(audioStartFrom * fps));
@@ -232,6 +252,7 @@ export const MyComposition = ({
         resolvedSrc={resolvedSrc}
         audioSrc={audioSrc}
         hookMusicSrc={hookMusicSrc}
+        hookMusicDurationSecs={hookMusicDurationSecs}
         audioStartFromFrames={audioStartFromFrames}
         transcript={transcript}
         cameraProfiles={cameraProfiles}

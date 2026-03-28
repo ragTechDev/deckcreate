@@ -13,6 +13,8 @@ function parseArgs() {
     else if (args[i] === '--merge-vtt' && args[i + 1]) result.vttPath = args[++i];
     else if (args[i] === '--merge-doc' && args[i + 1]) result.docPath = args[++i];
     else if (args[i] === '--auto-cut-pauses' && args[i + 1]) result.autoCutPauses = parseFloat(args[++i]);
+    else if (args[i] === '--timestamp-offset' && args[i + 1]) result.timestampOffset = parseFloat(args[++i]);
+    else if (args[i] === '--video-src' && args[i + 1]) result.videoSrc = args[++i];
   }
   return result;
 }
@@ -310,25 +312,36 @@ function resolvePhraseToTimeRange(phrase, tokens, segEnd) {
   const words = phrase.trim().split(/\s+/).map(normalize).filter(Boolean);
   if (!words.length) return null;
 
-  // Only include word-starting tokens (leading space) or the first non-special token.
-  // BPE sub-tokens like "more" (no leading space after " anymore") have no space and
-  // must be skipped — they are continuation pieces, not separate words, and would
-  // corrupt position-based phrase matching.
-  const firstWordIdx = tokens.findIndex(t => !isSpecialToken(t) && normalize(t.text) !== '');
-  const wordTokens = tokens
-    .map((t, idx) => ({ t, idx }))
-    .filter(({ t, idx }) =>
-      !isSpecialToken(t) &&
-      normalize(t.text) !== '' &&
-      (t.text.startsWith(' ') || idx === firstWordIdx)
-    );
+  // Group BPE sub-tokens into word-level groups: a new group starts at each
+  // leading-space token (or the very first non-special token). Continuation
+  // tokens (no leading space, e.g. "'t" after " wouldn") are merged into the
+  // preceding group. This ensures contractions like "wouldn't" are matched as
+  // a single word rather than the truncated stem " wouldn".
+  const wordGroups = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (isSpecialToken(t) || normalize(t.text) === '') continue;
+    if (t.text.startsWith(' ') || wordGroups.length === 0) {
+      wordGroups.push({ text: t.text, t_dtw: t.t_dtw, endIdx: i });
+    } else {
+      // Continuation sub-token: append to previous group's text
+      wordGroups[wordGroups.length - 1].text += t.text;
+      wordGroups[wordGroups.length - 1].endIdx = i;
+    }
+  }
 
-  for (let i = 0; i <= wordTokens.length - words.length; i++) {
-    if (words.every((w, j) => normalize(wordTokens[i + j].t.text) === w)) {
-      const from = wordTokens[i].t.t_dtw;
-      const lastRawIdx = wordTokens[i + words.length - 1].idx;
-      const nextToken = tokens.slice(lastRawIdx + 1).find(t => !isSpecialToken(t));
-      const to = nextToken ? nextToken.t_dtw : (segEnd ?? tokens[lastRawIdx].t_dtw + WORD_DURATION_ESTIMATE);
+  for (let i = 0; i <= wordGroups.length - words.length; i++) {
+    if (words.every((w, j) => normalize(wordGroups[i + j].text) === w)) {
+      const from = wordGroups[i].t_dtw;
+      const lastWord = wordGroups[i + words.length - 1];
+      const lastEndIdx = lastWord.endIdx;
+      const nextToken = tokens.slice(lastEndIdx + 1).find(t => !isSpecialToken(t));
+      const rawTo = nextToken ? nextToken.t_dtw : (segEnd ?? lastWord.t_dtw + WORD_DURATION_ESTIMATE);
+      // Ensure `to` is at least one WORD_DURATION_ESTIMATE past the last word's
+      // own timestamp. When the next token shares the same (or very close) timestamp
+      // as the last word — common with punctuation tokens — rawTo would equal
+      // lastWord.t_dtw, clipping the last word entirely from the hook clip.
+      const to = Math.max(rawTo, lastWord.t_dtw + WORD_DURATION_ESTIMATE);
       return { from, to };
     }
   }
@@ -370,8 +383,8 @@ function buildInstructionsBlock() {
     '                  Fine-tune cut timing:  {you know | 12.50, 14.20}',
     '                  (seconds from start of audio — overrides auto-detection)',
     '',
-    '  CUT SEGMENT     Add CUT after the segment number:',
-    '                    [3] CUT  original text...',
+    '  CUT SEGMENT     Wrap the whole line in curly braces:',
+    '                    {[3]  original text...}',
     '',
     '  HOOK SEGMENT    Add > HOOK after a segment to prepend that clip before the',
     '                  video as a teaser (the clip still plays in its original',
@@ -452,10 +465,10 @@ function buildDoc(transcript) {
 
     if (videoStart !== undefined && seg.start === videoStart) lines.push('> START');
 
-    let segLine = `[${seg.id}]`;
-    if (seg.cut) segLine += ` CUT`;
     const text = cleanCaptionText(buildTextWithCuts(seg));
+    let segLine = `[${seg.id}]`;
     if (text) segLine += `  ${text}`;
+    if (seg.cut) segLine = `{${segLine}}`;
     lines.push(segLine);
 
     if (seg.hook) {
@@ -631,16 +644,28 @@ function applyTextPartsToTokens(rawText, tokens) {
       continue;
     }
 
-    const wordTokens = updated
-      .map((t, idx) => ({ t, idx }))
-      .filter(({ t }) => !isSpecialToken(t) && normalize(t.text) !== '');
+    // Group BPE sub-tokens into whole words before matching so that contractions
+    // like "I'm" (tokenised as [" I", "'m"]) match {I'm} written in the doc.
+    const wordGroups = [];
+    for (let gi = 0; gi < updated.length; gi++) {
+      const t = updated[gi];
+      if (isSpecialToken(t) || normalize(t.text) === '') continue;
+      if (t.text.startsWith(' ') || wordGroups.length === 0) {
+        wordGroups.push({ text: t.text, firstIdx: gi, lastIdx: gi, lastTdtw: t.t_dtw });
+      } else {
+        const g = wordGroups[wordGroups.length - 1];
+        g.text += t.text;
+        g.lastIdx = gi;
+        g.lastTdtw = t.t_dtw;
+      }
+    }
 
-    for (let i = 0; i <= wordTokens.length - cutWords.length; i++) {
-      const matches = cutWords.every((w, j) => normalize(wordTokens[i + j].t.text) === w);
+    for (let i = 0; i <= wordGroups.length - cutWords.length; i++) {
+      const matches = cutWords.every((w, j) => normalize(wordGroups[i + j].text) === w);
       if (matches) {
-        const firstIdx = wordTokens[i].idx;
-        const lastWordIdx = wordTokens[i + cutWords.length - 1].idx;
-        const lastTdtw = updated[lastWordIdx].t_dtw;
+        const firstIdx = wordGroups[i].firstIdx;
+        const lastWordIdx = wordGroups[i + cutWords.length - 1].lastIdx;
+        const lastTdtw = wordGroups[i + cutWords.length - 1].lastTdtw;
 
         // Extend past adjacent tokens that are BPE continuations (no leading space)
         // or share the same t_dtw (Whisper duplicate tokens at identical timestamps).
@@ -787,8 +812,10 @@ function mergeDocIntoTranscript(transcript, docContent) {
       continue;
     }
 
-    // Segment line: [N]  text  or  [N] CUT  text  or  [N] CUT:reason  text
-    const segMatch = trimmed.match(/^\[(\d+)\](.*)/);
+    // Segment line: [N]  text  or  {[N]  text}  or  [N] CUT  text  (legacy)
+    const braceSegMatch = trimmed.match(/^\{(\[(\d+)\].*)\}$/);
+    const segMatch = braceSegMatch ? braceSegMatch[1].match(/^\[(\d+)\](.*)/) : trimmed.match(/^\[(\d+)\](.*)/);
+    const isBraceCut = !!braceSegMatch;
     if (segMatch) {
       flushPending();
       const id = parseInt(segMatch[1]);
@@ -796,10 +823,11 @@ function mergeDocIntoTranscript(transcript, docContent) {
       if (!seg) continue;
 
       let rest = segMatch[2].trim();
-      let cut = false;
+      let cut = isBraceCut;
       let inlineSpeaker = null;
 
-      const cutMatch = rest.match(/^CUT(?::\w+)?\s*(.*)/i);
+      // Legacy syntax: [N] CUT  text
+      const cutMatch = !isBraceCut ? rest.match(/^CUT(?::\w+)?\s*(.*)/i) : null;
       if (cutMatch) {
         cut = true;
         rest = cutMatch[1];
@@ -1148,6 +1176,26 @@ async function main() {
     const docContent = (await fs.readFile(cli.docPath, 'utf8')).replace(/\r\n/g, '\n');
     transcript = mergeDocIntoTranscript(transcript, docContent);
     console.log(`Applied doc edits.`);
+  }
+
+  // Store video source path in meta so Remotion can resolve the correct video file
+  if (cli.videoSrc) {
+    transcript = { ...transcript, meta: { ...transcript.meta, videoSrc: cli.videoSrc } };
+  }
+
+  // Apply timestamp offset to all t_dtw values and segment boundaries
+  if (cli.timestampOffset > 0) {
+    const off = cli.timestampOffset;
+    transcript = {
+      ...transcript,
+      segments: transcript.segments.map(seg => ({
+        ...seg,
+        start: Math.max(0, seg.start - off),
+        end: Math.max(0, seg.end - off),
+        tokens: seg.tokens.map(t => ({ ...t, t_dtw: Math.max(0, t.t_dtw - off) })),
+      })),
+    };
+    console.log(`Applied timestamp offset: -${off}s`);
   }
 
   // Always re-derive cuts[] from token flags

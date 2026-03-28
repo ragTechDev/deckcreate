@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { AbsoluteFill, useCurrentFrame, useVideoConfig } from 'remotion';
-import { SegmentPlayer, getEffectiveDuration, buildSections } from './SegmentPlayer';
+import { SegmentPlayer, getEffectiveDuration, buildSections, Section } from './SegmentPlayer';
 import type { Segment } from '../types/transcript';
 import type { CameraProfiles, CameraShot, CropViewport } from '../types/camera';
 import type { CameraCue } from '../types/transcript';
@@ -43,8 +43,14 @@ function computeTransform(
  * Must match the clip length that buildSections emits for the same segment.
  */
 function getOutputDuration(seg: Segment): number {
-  if (seg.hook && seg.hookFrom !== undefined && seg.hookTo !== undefined) {
-    return seg.hookTo - seg.hookFrom;
+  if (seg.hook) {
+    // Hooks with a phrase window play only that window; hooks without one play
+    // the full raw segment UNCUT (getHookSubClips ignores cuts[] for these so
+    // the music stays in sync). Use raw end-start to match SegmentPlayer exactly.
+    if (seg.hookFrom !== undefined && seg.hookTo !== undefined) {
+      return seg.hookTo - seg.hookFrom;
+    }
+    return seg.end - seg.start;
   }
   return getEffectiveDuration(seg);
 }
@@ -226,12 +232,14 @@ function applyOverrides(shots: CameraShot[], overrides: OverrideEvent[]): Camera
 
 type Props = {
   src: string;
-  sections: ReturnType<typeof buildSections>;
+  hookSections: Section[];
+  mainSections: Section[];
+  mainOffset?: number;
   segments: Segment[];
   profiles: CameraProfiles;
 };
 
-export const CameraPlayer: React.FC<Props> = ({ src, sections, segments, profiles }) => {
+export const CameraPlayer: React.FC<Props> = ({ src, hookSections, mainSections, mainOffset = 0, segments, profiles }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
@@ -240,13 +248,45 @@ export const CameraPlayer: React.FC<Props> = ({ src, sections, segments, profile
   const outW = profiles.outputWidth;
   const outH = profiles.outputHeight;
 
-  // Build shot timeline once, then splice in any explicit > CAM overrides
+  // Total hook duration in output frames — shots for main content start here in
+  // buildCameraShots's timeline, but in the composition they start mainOffset
+  // frames later (the intro plays in between). We shift them after building.
+  const hookOutputFrames = useMemo(
+    () => segments
+      .filter(s => s.hook && !s.cut)
+      .reduce((sum, s) => sum + Math.round(getOutputDuration(s) * fps), 0),
+    [segments, fps],
+  );
+
+  // Build shot timeline once, then splice in any explicit > CAM overrides.
+  // If mainOffset > 0, shift every main-content shot forward by mainOffset so
+  // the composition-frame lookup stays in sync with the actual playback position.
   const shots = useMemo(() => {
     const pacing    = buildCameraShots(segments, profiles, fps);
     const overrides = collectCameraOverrides(segments, profiles, fps);
-    return applyOverrides(pacing, overrides);
+    const applied   = applyOverrides(pacing, overrides);
+    if (mainOffset === 0) return applied;
+    // Split any shot that straddles the hook/main boundary so the main portion
+    // gets shifted by mainOffset. A shot that starts in hook territory but ends
+    // in main territory would otherwise remain unshifted, leaving a gap and
+    // causing the wrong viewport to appear during early main-content frames.
+    const result: CameraShot[] = [];
+    for (const shot of applied) {
+      if (shot.endFrame <= hookOutputFrames) {
+        // Entirely within hook territory — no change
+        result.push(shot);
+      } else if (shot.startFrame >= hookOutputFrames) {
+        // Entirely within main territory — shift by mainOffset
+        result.push({ ...shot, startFrame: shot.startFrame + mainOffset, endFrame: shot.endFrame + mainOffset });
+      } else {
+        // Spans the boundary — split into hook portion (unchanged) and main portion (shifted)
+        result.push({ startFrame: shot.startFrame, endFrame: hookOutputFrames, viewport: shot.viewport });
+        result.push({ startFrame: hookOutputFrames + mainOffset, endFrame: shot.endFrame + mainOffset, viewport: shot.viewport });
+      }
+    }
+    return result;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [segments, profiles, fps]);
+  }, [segments, profiles, fps, hookOutputFrames, mainOffset]);
 
   // Find current shot
   const currentShot = useMemo(() => {
@@ -281,7 +321,7 @@ export const CameraPlayer: React.FC<Props> = ({ src, sections, segments, profile
           transform: `scale(${scale}) translate(${tx}%, ${ty}%)`,
         }}
       >
-        <SegmentPlayer src={src} sections={sections} />
+        <SegmentPlayer src={src} hookSections={hookSections} mainSections={mainSections} mainOffset={mainOffset} />
       </div>
     </AbsoluteFill>
   );

@@ -4,6 +4,8 @@ import {
   staticFile, useCurrentFrame, useVideoConfig,
   spring, interpolate,
 } from 'remotion';
+import { createTikTokStyleCaptions } from '@remotion/captions';
+import type { Caption } from '@remotion/captions';
 import { whip } from '@remotion/sfx';
 import type { Segment, Token } from '../types/transcript';
 import type { Brand } from '../types/brand';
@@ -12,62 +14,54 @@ import type { Brand } from '../types/brand';
 
 function isSpecialToken(t: Token) { return /_[A-Z]+_/.test(t.text.trim()); }
 
-function extractCaptionWords(
+/**
+ * Converts segment tokens to Caption objects for createTikTokStyleCaptions.
+ *
+ * Groups BPE sub-tokens (continuation pieces with no leading space, e.g. "'t"
+ * after " wouldn") into whole words before building captions. Without grouping,
+ * contractions like "wouldn't" appear as only the stem " wouldn" because the
+ * suffix "'t" has no leading space and was previously discarded.
+ */
+function buildCaptions(
   tokens: Token[],
   sourceStart: number,
   sourceEnd: number,
-): { text: string; sourceTime: number }[] {
-  const firstIdx = tokens.findIndex(t => !isSpecialToken(t) && t.text.trim() !== '');
-  return tokens
-    .filter((t, idx) => {
-      if (isSpecialToken(t)) return false;
-      const norm = t.text.trim().replace(/^[^\w']+|[^\w']+$/g, '');
-      if (!norm) return false;
-      return t.text.startsWith(' ') || idx === firstIdx;
-    })
-    .filter(t => t.t_dtw >= sourceStart && t.t_dtw < sourceEnd)
-    .map(t => ({ text: t.text.trim().replace(/^[^\w']+|[^\w']+$/g, ''), sourceTime: t.t_dtw }))
-    .filter(w => w.text.length > 0);
-}
-
-// ── Clause builder ─────────────────────────────────────────────────────────────
-
-type Word = { text: string; sourceTime: number };
-type Clause = { words: Word[]; wordStart: number; wordEnd: number };
-
-/**
- * Groups words into clauses at natural pause points (gap > GAP_S) or when a
- * clause would exceed MAX_WORDS. Returns clauses with absolute word-index ranges.
- */
-function buildClauses(words: Word[]): Clause[] {
-  if (!words.length) return [];
-  const GAP_S    = 0.45;
-  const MAX_WORDS = 7;
-  const clauses: Clause[] = [];
-  let start = 0;
-
-  for (let i = 0; i < words.length; i++) {
-    const isLast     = i === words.length - 1;
-    const gapToNext  = isLast ? Infinity : words[i + 1].sourceTime - words[i].sourceTime;
-    const clauseLen  = i - start + 1;
-
-    if (gapToNext > GAP_S || clauseLen >= MAX_WORDS || isLast) {
-      clauses.push({ words: words.slice(start, i + 1), wordStart: start, wordEnd: i + 1 });
-      start = i + 1;
+): Caption[] {
+  // Group BPE sub-tokens into word-level groups
+  const wordGroups: { text: string; t_dtw: number }[] = [];
+  for (const t of tokens) {
+    if (isSpecialToken(t) || t.text.trim() === '') continue;
+    if (t.text.startsWith(' ') || wordGroups.length === 0) {
+      wordGroups.push({ text: t.text, t_dtw: t.t_dtw });
+    } else {
+      // Continuation sub-token: append to previous group
+      wordGroups[wordGroups.length - 1].text += t.text;
     }
   }
-  return clauses;
+
+  // Filter to the hook window. Use a 0.5 s buffer past sourceEnd so words
+  // whose t_dtw lands exactly at the boundary (or slightly past due to Whisper
+  // timestamp drift) are not silently dropped from captions.
+  const inRange = wordGroups.filter(w => w.t_dtw >= sourceStart && w.t_dtw < sourceEnd + 0.5);
+  return inRange.map((w, i) => ({
+    text: w.text,
+    startMs: Math.round(w.t_dtw * 1000),
+    endMs: Math.round((i + 1 < inRange.length ? inRange[i + 1].t_dtw : sourceEnd) * 1000),
+    timestampMs: Math.round(w.t_dtw * 1000),
+    confidence: null,
+  }));
 }
 
 // ── Per-hook segment timing ────────────────────────────────────────────────────
+
+type Page = ReturnType<typeof createTikTokStyleCaptions>['pages'][number];
 
 type HookTiming = {
   seg: Segment;
   outputStartFrame: number;
   outputEndFrame: number;
   sourceStart: number;
-  words: Word[];
-  clauses: Clause[];
+  pages: Page[];
 };
 
 function buildHookTimings(segments: Segment[], fps: number): HookTiming[] {
@@ -78,15 +72,12 @@ function buildHookTimings(segments: Segment[], fps: number): HookTiming[] {
     const sourceStart = seg.hookFrom ?? seg.start;
     const sourceEnd   = seg.hookTo   ?? seg.end;
     const dur         = Math.round((sourceEnd - sourceStart) * fps);
-    const words       = extractCaptionWords(seg.tokens, sourceStart, sourceEnd);
-    timings.push({
-      seg,
-      outputStartFrame: cum,
-      outputEndFrame:   cum + dur,
-      sourceStart,
-      words,
-      clauses: buildClauses(words),
+    const captions    = buildCaptions(seg.tokens, sourceStart, sourceEnd);
+    const { pages }   = createTikTokStyleCaptions({
+      captions,
+      combineTokensWithinMilliseconds: 1200,
     });
+    timings.push({ seg, outputStartFrame: cum, outputEndFrame: cum + dur, sourceStart, pages });
     cum += dur;
   }
   return timings;
@@ -94,9 +85,9 @@ function buildHookTimings(segments: Segment[], fps: number): HookTiming[] {
 
 // ── Layout constants (1920 × 1080) ────────────────────────────────────────────
 
-const GRAPHIC_HEIGHT = 30;   // reduced to 1/3 of original 90px
-const GRAPHIC_TOP    = 630;  // top of floating graphic (above captions)
-const CAPTION_TOP    = 720;  // top of caption text block
+const GRAPHIC_HEIGHT = 30;
+const GRAPHIC_TOP    = 630;
+const CAPTION_TOP    = 720;
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -111,7 +102,6 @@ export const HookOverlay: React.FC<Props> = ({ hookSegments, brand }) => {
 
   const timings = useMemo(() => buildHookTimings(hookSegments, fps), [hookSegments, fps]);
 
-  // Frames at which a hook-with-graphic begins — used to fire the whip SFX
   const whipFrames = useMemo(
     () => timings.filter(t => t.seg.hookGraphic).map(t => t.outputStartFrame),
     [timings],
@@ -139,27 +129,27 @@ export const HookOverlay: React.FC<Props> = ({ hookSegments, brand }) => {
 
   const { colors, typography, logo } = brand;
 
-  // Per-frame derived values (computed outside conditional to keep hook count stable)
-  const localFrame    = active ? frame - active.outputStartFrame : 0;
-  const sourceTime    = active ? active.sourceStart + localFrame / fps : 0;
-  const floatY        = Math.sin((frame / fps) * Math.PI * 0.72) * 10;
-  // Techybara oval float — Y leads X by 90° to trace a small ellipse
-  const charFloatY    = Math.sin((frame / fps) * Math.PI * 0.55) * 8;
-  const charFloatX    = Math.cos((frame / fps) * Math.PI * 0.55) * 4;
+  // Per-frame derived values (computed unconditionally to keep hook count stable)
+  const localFrame = active ? frame - active.outputStartFrame : 0;
+  const sourceTime = active ? active.sourceStart + localFrame / fps : 0;
+  const currentMs  = sourceTime * 1000;
 
-  let activeWordIdx = -1;
-  if (active) {
-    for (let i = active.words.length - 1; i >= 0; i--) {
-      if (active.words[i].sourceTime <= sourceTime) { activeWordIdx = i; break; }
-    }
-  }
+  const floatY     = Math.sin((frame / fps) * Math.PI * 0.72) * 10;
+  const charFloatY = Math.sin((frame / fps) * Math.PI * 0.55) * 8;
+  const charFloatX = Math.cos((frame / fps) * Math.PI * 0.55) * 4;
 
-  const currentClause = active
-    ? (active.clauses.find(c => activeWordIdx >= c.wordStart && activeWordIdx < c.wordEnd)
-        ?? active.clauses[0]
-        ?? null)
+  // Find active page: the last page whose startMs has passed
+  const activePage = active
+    ? (active.pages.findLast(p => currentMs >= p.startMs) ?? null)
     : null;
-  const activeInClause = currentClause ? activeWordIdx - currentClause.wordStart : -1;
+
+  // Fade in each new page over 6 frames to soften page switches
+  const pageStartMs     = activePage?.startMs ?? 0;
+  const pageStartFrame  = active
+    ? active.outputStartFrame + Math.round((pageStartMs / 1000 - active.sourceStart) * fps)
+    : 0;
+  const framesIntoPage  = frame - pageStartFrame;
+  const pageOpacity     = interpolate(framesIntoPage, [0, 6], [0, 1], { extrapolateRight: 'clamp' });
 
   const hasChar    = !!active?.seg.hookChar;
   const hasGraphic = !!active?.seg.hookGraphic;
@@ -245,45 +235,26 @@ export const HookOverlay: React.FC<Props> = ({ hookSegments, brand }) => {
             />
           )}
 
-          {/* ── Clause-by-clause captions — centered, lower third ────────── */}
-          {currentClause && (
+          {/* ── Page-at-a-time captions — centered, lower third ──────────── */}
+          {activePage && (
             <div style={{
-              position:       'absolute',
-              top:            CAPTION_TOP,
-              left:           0,
-              width:          '100%',
-              display:        'flex',
-              flexWrap:       'wrap',
-              justifyContent: 'center',
-              alignItems:     'baseline',
-              gap:            '4px 16px',
-              padding:        '0 120px',
-              boxSizing:      'border-box',
+              position:   'absolute',
+              top:        CAPTION_TOP,
+              left:       0,
+              width:      '100%',
+              textAlign:  'center',
+              padding:    '0 120px',
+              boxSizing:  'border-box',
+              fontFamily: typography.fontFamily,
+              fontWeight: typography.weights.black,
+              fontSize:   96,
+              lineHeight: 1.25,
+              color:      colors.text.primary,
+              textShadow: '0 3px 20px rgba(0,0,0,0.95), 0 0 6px rgba(0,0,0,0.8)',
+              opacity:    pageOpacity,
+              whiteSpace: 'pre-wrap',
             }}>
-              {currentClause.words.map((word, i) => {
-                const isCurrent = i === activeInClause;
-                const isPast    = i <  activeInClause;
-                return (
-                  <span
-                    key={currentClause.wordStart + i}
-                    style={{
-                      display:    'inline-block',
-                      fontFamily: typography.fontFamily,
-                      fontWeight: isCurrent ? typography.weights.black : typography.weights.bold,
-                      fontSize:   isCurrent ? 108 : 96,
-                      lineHeight: 1.2,
-                      color: isCurrent
-                        ? colors.secondary
-                        : isPast
-                        ? colors.text.primary
-                        : `${colors.text.primary}50`,
-                      textShadow: '0 3px 20px rgba(0,0,0,0.95), 0 0 6px rgba(0,0,0,0.8)',
-                    }}
-                  >
-                    {word.text}
-                  </span>
-                );
-              })}
+              {activePage.text.trim()}
             </div>
           )}
 

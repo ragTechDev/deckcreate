@@ -71,6 +71,8 @@ export type TranscriptMeta = {
   videoStart?: number;
   /** Video end time in seconds — segments after this are excluded from rendering */
   videoEnd?: number;
+  /** Path to the source video relative to /public — overrides the composition's src prop */
+  videoSrc?: string;
 };
 
 export type Transcript = {

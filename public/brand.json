@@ -1,14 +1,14 @@
 {
   "colors": {
-    "primary":    "#5B4FE8",
-    "secondary":  "#F5A623",
-    "accent":     "#E84F8B",
-    "background": "#0F0F1A",
-    "surface":    "#1C1C2E",
+    "primary":    "#eebf89",
+    "secondary":  "#9cd2d0",
+    "accent":     "#ffa3a6",
+    "background": "#fff3c2",
+    "surface":    "#1c1006",
     "text": {
       "primary":   "#FFFFFF",
       "secondary": "#B0B0CC",
-      "onPrimary": "#FFFFFF"
+      "onPrimary": "#0F0F1A"
     },
     "palette": ["#fff3c2", "#9cd2d0", "#ffa3a6", "#eebf89"]
   },

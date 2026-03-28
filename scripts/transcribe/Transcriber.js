@@ -5,7 +5,7 @@ import fs from 'fs-extra';
 import { installWhisperCpp, downloadWhisperModel, transcribe } from '@remotion/install-whisper-cpp';
 
 const WHISPER_VERSION = '1.5.5';
-const DEFAULT_MODEL = 'tiny.en';
+const DEFAULT_MODEL = 'medium.en';
 
 function spawnProcess(cmd, args) {
   return new Promise((resolve, reject) => {
@@ -35,6 +35,7 @@ class Transcriber {
     this.outputDir = options.outputDir;
     this.model = options.model || DEFAULT_MODEL;
     this.whisperDir = options.whisperDir || path.join(process.cwd(), 'whisper.cpp');
+    this.timestampOffset = options.timestampOffset || 0; // seconds to subtract from all timestamps
     this.tempDir = null;
   }
 
@@ -81,7 +82,7 @@ class Transcriber {
       console.log('  Installing whisper.cpp (one-time setup)...');
       await installWhisperCpp({ to: this.whisperDir, version: WHISPER_VERSION });
     }
-    const modelPath = path.join(this.whisperDir, 'models', `ggml-${this.model}.bin`);
+    const modelPath = path.join(this.whisperDir, `ggml-${this.model}.bin`);
     if (!await fs.pathExists(modelPath)) {
       console.log(`  Downloading model "${this.model}" (one-time download)...`);
       await downloadWhisperModel({ model: this.model, folder: this.whisperDir });
@@ -111,9 +112,10 @@ class Transcriber {
         continue;
       }
       for (let i = 0; i < tokens.length; i++) {
-        const startMs = tokens[i].t_dtw * 10;           // centiseconds → ms
+        const offsetMs = this.timestampOffset * 1000;
+        const startMs = Math.max(0, tokens[i].t_dtw * 10 - offsetMs);           // centiseconds → ms, minus offset
         const endMs = i + 1 < tokens.length
-          ? tokens[i + 1].t_dtw * 10
+          ? Math.max(0, tokens[i + 1].t_dtw * 10 - offsetMs)
           : item.offsets.to;
         const word = tokens[i].text.trim();
         if (!word) continue;
@@ -169,10 +171,11 @@ class Transcriber {
   buildJson(transcription) {
     const phrases = this.mergeItemsIntoPhrases(transcription);
 
+    const off = this.timestampOffset;
     const segments = phrases.map((phrase, i) => ({
       id: i + 1,
-      start: phrase.start / 1000,
-      end: phrase.end / 1000,
+      start: Math.max(0, phrase.start / 1000 - off),
+      end: Math.max(0, phrase.end / 1000 - off),
       speaker: '',
       text: phrase.words.reduce((acc, w) => {
         const stripped = w.replace(/^[^\w']+|[^\w']+$/g, '');
@@ -183,7 +186,7 @@ class Transcriber {
       cutReason: null,
       // t_dtw is in centiseconds (1/100 s) per whisper.cpp convention
       tokens: phrase.tokens.map(t => ({
-        t_dtw: t.t_dtw / 100,
+        t_dtw: Math.max(0, t.t_dtw / 100 - off),
         text: t.text,
         cut: false,
         cutReason: null,
@@ -210,7 +213,18 @@ class Transcriber {
     const wavPath = await this.convertToWav16k();
 
     console.log('Step 3/4: Transcribing with Whisper (this may take a while)...');
-    const { transcription } = await this.runWhisper(wavPath);
+    const whisperStart = Date.now();
+    const heartbeat = setInterval(() => {
+      const s = Math.floor((Date.now() - whisperStart) / 1000);
+      const m = Math.floor(s / 60);
+      console.log(`  Still transcribing... [${m}m ${String(s % 60).padStart(2, '0')}s elapsed]`);
+    }, 15000);
+    let transcription;
+    try {
+      ({ transcription } = await this.runWhisper(wavPath));
+    } finally {
+      clearInterval(heartbeat);
+    }
 
     console.log('Step 4/4: Writing outputs...');
     const vttPath = path.join(this.outputDir, 'transcript.raw.vtt');

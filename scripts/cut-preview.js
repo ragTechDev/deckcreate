@@ -33,16 +33,30 @@ async function main() {
 
   const transcriptPath = cli.transcriptPath
     || path.join(cwd, 'public', 'transcribe', 'output', 'edit', 'transcript.json');
+  const videoExts = ['.mp4', '.mov', '.mkv'];
+  async function findVideo(...dirs) {
+    for (const dir of dirs) {
+      if (!await fs.pathExists(dir)) continue;
+      const files = await fs.readdir(dir);
+      const match = files.find(f => videoExts.includes(path.extname(f).toLowerCase()));
+      if (match) return path.join(dir, match);
+    }
+    return null;
+  }
   const videoPath = cli.videoPath
-    || path.join(cwd, 'public', 'sync', 'output', 'synced-output.mp4');
+    || await findVideo(
+      path.join(cwd, 'public', 'sync', 'output'),
+      path.join(cwd, 'public', 'transcribe', 'input'),
+    );
   const outputPath = cli.outputPath
     || path.join(cwd, 'public', 'transcribe', 'output', 'edit', 'preview-cut.mp4');
 
   if (!await fs.pathExists(transcriptPath)) {
     console.error(`❌ Transcript not found: ${transcriptPath}`); process.exit(1);
   }
-  if (!await fs.pathExists(videoPath)) {
-    console.error(`❌ Video not found: ${videoPath}`); process.exit(1);
+  if (!videoPath || !await fs.pathExists(videoPath)) {
+    console.error('❌ Video not found. Place a video in public/sync/output/ or public/transcribe/input/, or pass --video <path>.');
+    process.exit(1);
   }
 
   const transcript = await fs.readJson(transcriptPath);

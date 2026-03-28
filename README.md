@@ -10,6 +10,12 @@ npm run wizard
 
 The wizard guides you through every step interactively: it asks what files you have, how many speakers, then runs each stage in sequence — waiting for you to review each output before moving on. Transcription and diarization are run in parallel automatically.
 
+Modes:
+1. **Separate video + audio (need sync)** — aligns audio to video before transcribing
+2. **Separate video + audio (already in sync)** — skips sync, uses audio directly
+3. **Single video file** — extracts audio from the video
+4. **Audio only** — transcription only, no video output
+
 ---
 
 ## Manual steps (reference)
@@ -27,6 +33,47 @@ Aligns recorded audio with the camera feed and outputs `public/transcribe/sync/o
 npm run transcribe
 ```
 Runs Whisper on the synced audio and produces `public/transcribe/output/raw/transcript.raw.json`.
+
+If you already know the timestamp offset for this recording (see step 2a), you can bake it in at this stage:
+```
+npm run transcribe -- --timestamp-offset 0.5
+```
+
+**Model selection**
+
+The default model is `medium.en`. Larger models are more accurate but significantly slower on CPU:
+
+| Model | Speed (≈36 min audio, CPU) | Accuracy |
+|-------|---------------------------|----------|
+| `tiny.en` | ~5 min | Low |
+| `small.en` | ~20–30 min | Good — best speed/accuracy balance |
+| `medium.en` | ~60–120 min | High |
+
+To use a different model:
+```
+npm run transcribe -- --model small.en
+```
+
+The model is downloaded automatically on first use and cached in `whisper.cpp/`. Transcription runs on CPU — expect real-time or slower depending on your machine. The wizard prints a heartbeat every 15 seconds while Whisper is running so you can confirm it is still working.
+
+### 2a. Check caption alignment (recommended on first recording)
+
+Whisper's token-level timestamps (`t_dtw`) can be slightly late — typically 0.3–0.6 s — causing captions to lag behind the audio. Use the alignment test tool to measure the offset before editing:
+
+1. Start a local server:
+   ```
+   cd public/transcribe && npx serve . -p 3001
+   ```
+2. Open `http://localhost:3001/caption_test.html` in your browser.
+3. Follow the on-screen instructions:
+   - Scrub the audio to exactly when a word begins speaking.
+   - Note the timestamp shown in green.
+   - Enter the word and time in the form — the page looks up the Whisper timestamp and calculates the offset.
+   - Repeat with a second word at least 5 minutes later.
+   - The page shows the average offset and the exact command to run.
+4. If an offset is found, apply it in step 7 (`merge-doc`) or re-run transcription with `--timestamp-offset`.
+
+> The wizard runs this check automatically and carries the offset through to subsequent steps.
 
 ### 3. Diarize (speaker detection)
 `--num-speakers` is required — the model does not work well without a fixed speaker count.
@@ -65,6 +112,12 @@ Applies doc edits back to `transcript.json`.
 To also auto-cut silences longer than 0.5 s:
 ```
 npm run merge-doc:cut-pauses
+```
+
+If you measured a timestamp offset (see step 2a), pass it here:
+```
+npm run merge-doc -- --timestamp-offset 0.5
+npm run merge-doc:cut-pauses -- --timestamp-offset 0.5
 ```
 
 ### 8. Camera setup — punch-in/punch-out cuts (optional)
