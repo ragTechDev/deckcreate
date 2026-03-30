@@ -12,6 +12,7 @@ import {
   resolvePhraseToTimeRange,
   autoCutPauses,
   autoCutDisfluencies,
+  rebalanceBoundaryTokens,
   WORD_DURATION_ESTIMATE,
   CUT_START_BIAS,
   CUT_END_BIAS,
@@ -931,5 +932,117 @@ describe('autoCutPauses', () => {
     // cut=true segment still goes through autoCutPauses (segment-level cut is
     // handled by composition, not here) — function should still work without error
     expect(() => autoCutPauses(t, THRESHOLD)).not.toThrow();
+  });
+});
+
+// ─── applyTextPartsToTokens: missing-token synthesis ─────────────────────────
+
+describe('applyTextPartsToTokens: LCS alignment when word count differs', () => {
+  test('synthesizes a token for a Whisper-dropped function word', () => {
+    // Whisper DTW did not emit a token for "in", but the doc has it.
+    // visibleWords=['in','the','age'] vs twg=['the','age'] → D > G → LCS path.
+    // 'the' and 'age' should match their tokens; 'in' should get a synthetic token
+    // with t_dtw interpolated before 'the'.
+    const tokens = [
+      tok(' the', 0.5),
+      tok(' age', 0.7),
+    ];
+    const result = applyTextPartsToTokens('in the age', tokens);
+    // Result should have 3 entries: synthetic 'in', then 'the', 'age'
+    expect(result).toHaveLength(3);
+    const inTok  = result.find(t => t.text.trim() === 'in');
+    const theTok = result.find(t => t.text.trim() === 'the');
+    const ageTok = result.find(t => t.text.trim() === 'age');
+    expect(inTok).toBeDefined();
+    expect(inTok.cut).toBe(false);
+    // Synthetic token should be positioned before 'the'
+    expect(result.indexOf(inTok)).toBeLessThan(result.indexOf(theTok));
+    // t_dtw should be interpolated between 0 and 0.5
+    expect(inTok.t_dtw).toBeGreaterThanOrEqual(0);
+    expect(inTok.t_dtw).toBeLessThanOrEqual(0.5);
+    // Existing tokens should keep their t_dtw
+    expect(theTok.t_dtw).toBe(0.5);
+    expect(ageTok.t_dtw).toBe(0.7);
+  });
+
+  test('synthesizes a token at the start when the first word has no token', () => {
+    const tokens = [tok(' world', 0.4)];
+    const result = applyTextPartsToTokens('hello world', tokens);
+    expect(result).toHaveLength(2);
+    const helloTok = result.find(t => t.text.trim() === 'hello');
+    const worldTok = result.find(t => t.text.trim() === 'world');
+    expect(helloTok).toBeDefined();
+    expect(helloTok.t_dtw).toBeLessThanOrEqual(0.4);
+    expect(result.indexOf(helloTok)).toBeLessThan(result.indexOf(worldTok));
+  });
+
+  test('still applies text corrections for matched words in LCS path', () => {
+    // Doc has 'world earth sky', tokens only have 'earth' and 'sky' ('world' missing).
+    // 'earth' and 'sky' should be corrected to match the doc spellings (no-op here
+    // since they already match), and 'world' should be synthesized.
+    const tokens = [tok(' earth', 0.3), tok(' sky', 0.6)];
+    const result = applyTextPartsToTokens('world earth sky', tokens);
+    expect(result).toHaveLength(3);
+    expect(result.some(t => t.text.trim() === 'world')).toBe(true);
+    expect(result.some(t => t.text.trim() === 'earth')).toBe(true);
+    expect(result.some(t => t.text.trim() === 'sky')).toBe(true);
+  });
+
+  test('equal word/token count still uses positional alignment (spelling correction)', () => {
+    // Original behaviour must be preserved for the equal-count case so that
+    // Whisper spelling quirks (e.g. "wrold") are corrected by the doc text.
+    const tokens = [tok(' wrold', 0.1), tok(' earth', 0.2)];
+    const result = applyTextPartsToTokens('world earth', tokens);
+    expect(result[0].text).toBe(' world');
+    expect(result[1].text).toBe(' earth');
+  });
+});
+
+// ─── rebalanceBoundaryTokens ─────────────────────────────────────────────────
+
+describe('rebalanceBoundaryTokens', () => {
+  function seg(id, start, end, tokens) {
+    return { id, start, end, tokens: tokens.map(([text, t_dtw]) => ({ text, t_dtw, cut: false, cutReason: null })) };
+  }
+
+  test('moves a trailing token whose t_dtw > seg.end into the next sentence', () => {
+    // Mirrors segs 69/70: " AI" at 292.74 is in seg 69 but > seg69.end=292.48.
+    const s1 = seg(1, 287.0, 292.48, [[' coding', 292.1], [' AI', 292.74]]);
+    const s2 = seg(2, 292.48, 296.77, [[' tools', 293.08], [' out', 293.34]]);
+    const [r1, r2] = rebalanceBoundaryTokens([s1, s2]);
+    // " AI" should be moved to s2
+    expect(r1.tokens.map(t => t.text)).toEqual([' coding']);
+    expect(r2.tokens[0].text).toBe(' AI');
+    expect(r2.tokens.map(t => t.text)).toEqual([' AI', ' tools', ' out']);
+  });
+
+  test('does not move tokens that are within their segment range', () => {
+    const s1 = seg(1, 0, 1.0, [[' hello', 0.5], [' world', 0.9]]);
+    const s2 = seg(2, 1.0, 2.0, [[' foo', 1.2]]);
+    const [r1, r2] = rebalanceBoundaryTokens([s1, s2]);
+    expect(r1.tokens).toHaveLength(2);
+    expect(r2.tokens).toHaveLength(1);
+  });
+
+  test('only moves consecutive trailing out-of-range tokens (stops at first in-range)', () => {
+    // First token in-range, last token out-of-range → only last moved
+    const s1 = seg(1, 0, 1.0, [[' a', 0.5], [' b', 0.8], [' c', 1.1]]);
+    const s2 = seg(2, 1.0, 2.0, [[' d', 1.5]]);
+    const [r1, r2] = rebalanceBoundaryTokens([s1, s2]);
+    expect(r1.tokens.map(t => t.text)).toEqual([' a', ' b']);
+    expect(r2.tokens[0].text).toBe(' c');
+  });
+
+  test('skips special tokens when walking backwards', () => {
+    const s1 = seg(1, 0, 1.0, [
+      [' hello', 0.5],
+      ['[_BEG_]', 0],   // special token — should be skipped, not treated as in-range stop
+      [' late', 1.2],
+    ]);
+    const s2 = seg(2, 1.0, 2.0, [[' world', 1.5]]);
+    const [r1, r2] = rebalanceBoundaryTokens([s1, s2]);
+    // ' late' moved; [_BEG_] stays in s1 (special tokens are not moved)
+    expect(r1.tokens.some(t => t.text === ' late')).toBe(false);
+    expect(r2.tokens[0].text).toBe(' late');
   });
 });

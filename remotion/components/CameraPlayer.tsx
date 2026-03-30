@@ -44,13 +44,18 @@ function computeTransform(
  */
 function getOutputDuration(seg: Segment): number {
   if (seg.hook) {
-    // Hooks with a phrase window play only that window; hooks without one play
-    // the full raw segment UNCUT (getHookSubClips ignores cuts[] for these so
-    // the music stays in sync). Use raw end-start to match SegmentPlayer exactly.
+    // Phrase-bounded hooks play exactly their defined window (no extension).
     if (seg.hookFrom !== undefined && seg.hookTo !== undefined) {
       return seg.hookTo - seg.hookFrom;
     }
-    return seg.end - seg.start;
+    // Unbounded hooks play the full raw segment, extended by 0.5 s when any
+    // token drifts past seg.end — must match getHookSubClips in SegmentPlayer.
+    const baseEnd = seg.end;
+    const hasLateToken = seg.tokens.some(
+      t => t.t_dtw > baseEnd && t.t_dtw < baseEnd + 0.5
+        && !/_[A-Z]+_/.test(t.text.trim()) && t.text.trim() !== '',
+    );
+    return (hasLateToken ? baseEnd + 0.5 : baseEnd) - seg.start;
   }
   return getEffectiveDuration(seg);
 }

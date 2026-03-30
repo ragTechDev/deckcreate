@@ -315,7 +315,14 @@ class AudioSyncer {
       '-filter_complex', audioFilter,
       '-map', '0:v:0',
       '-map', '[a_out]',
-      '-c:v', 'copy',
+      // Re-encode video so keyframes land every 1 s (g=fps). Stream-copying
+      // preserves the original recording's sparse keyframe structure, which
+      // can leave gaps of 10–30 s between keyframes. Remotion's OffthreadVideo
+      // must seek into the middle of the file for hook clips; without nearby
+      // keyframes it snaps to the preceding one and plays from there, causing
+      // the hook to start many seconds before the intended frame.
+      '-c:v', 'libx264', '-crf', '18', '-preset', 'fast',
+      '-g', '60', '-keyint_min', '60', '-sc_threshold', '0',
       '-c:a', 'aac', '-ar', '48000', '-b:a', '192k',
       '-movflags', '+faststart',
       this.outputPath,

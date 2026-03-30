@@ -7,15 +7,6 @@ export const RemotionRoot: React.FC = () => {
   return (
     <>
         <Composition
-        id="PodcastIntro"
-        component={PodcastIntroComposition}
-        durationInFrames={INTRO_DURATION_FRAMES}
-        fps={60}
-        width={1920}
-        height={1080}
-        defaultProps={{ brandSrc: 'brand.json' }}
-        />
-        <Composition
         id="ragTechVodcast"
         component={MyComposition}
         durationInFrames={300}
@@ -23,7 +14,7 @@ export const RemotionRoot: React.FC = () => {
         width={1920}
         height={1080}
         defaultProps={{
-            src: 'input/video/synced-output.mp4',
+            src: 'input/video/synced-output-rekf.mp4',
             transcriptSrc: 'transcribe/output/edit/transcript.json',
             cameraProfilesSrc: 'transcribe/output/camera/camera-profiles.json',
             hookMusicSrc: 'sounds/jazz-cafe-music.mp3',

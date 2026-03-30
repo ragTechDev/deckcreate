@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Caption Alignment Test</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #111; color: #e0e0e0; font-family: monospace; padding: 32px; max-width: 860px; margin: 0 auto; }
+    h1 { font-size: 18px; color: #fff; margin-bottom: 24px; }
+    h2 { font-size: 13px; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+
+    section { margin-bottom: 32px; }
+
+    /* Player */
+    audio { width: 100%; margin-bottom: 12px; }
+    #playback { display: flex; gap: 24px; align-items: baseline; margin-bottom: 8px; }
+    #current-time { font-size: 28px; color: #0f0; font-weight: bold; }
+    #caption-box { font-size: 20px; color: #fff; min-height: 32px; }
+
+    /* Steps */
+    .steps { counter-reset: step; list-style: none; padding: 0; }
+    .steps li { counter-increment: step; padding: 8px 0 8px 32px; position: relative; color: #aaa; font-size: 13px; line-height: 1.6; }
+    .steps li::before { content: counter(step); position: absolute; left: 0; top: 8px; background: #333; color: #fff; width: 20px; height: 20px; border-radius: 50%; text-align: center; line-height: 20px; font-size: 11px; }
+    code { background: #1e1e1e; border: 1px solid #333; padding: 2px 6px; border-radius: 3px; color: #7ec8e3; font-size: 12px; }
+
+    /* Measurements */
+    .measurement { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 6px; padding: 16px; margin-bottom: 12px; }
+    .measurement label { font-size: 12px; color: #888; display: block; margin-bottom: 4px; }
+    .measurement input { background: #222; border: 1px solid #333; color: #fff; padding: 6px 10px; border-radius: 4px; font-family: monospace; font-size: 13px; }
+    .measurement input[type=text] { width: 200px; }
+    .measurement input[type=number] { width: 120px; }
+    .btn { background: #2a2a2a; border: 1px solid #444; color: #ccc; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-family: monospace; font-size: 12px; }
+    .btn:hover { background: #333; color: #fff; }
+    .btn-add { background: #1a3a1a; border-color: #2a5a2a; color: #6f6; }
+    .btn-add:hover { background: #233; color: #0f0; }
+    .result { margin-top: 10px; font-size: 13px; line-height: 1.8; }
+    .result .label { color: #888; }
+    .result .val { color: #fff; }
+    .result .offset-val { color: #f90; font-weight: bold; }
+    .result .ok { color: #0f0; }
+    .row { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
+
+    /* Output */
+    #output { display: none; }
+    #output .avg { font-size: 22px; color: #f90; font-weight: bold; margin: 8px 0 16px; }
+    .cmd-box { background: #0a0a0a; border: 1px solid #333; border-radius: 4px; padding: 12px 16px; margin-bottom: 12px; }
+    .cmd-box .cmd-label { font-size: 11px; color: #666; margin-bottom: 6px; }
+    .cmd-box code { background: none; border: none; padding: 0; color: #7ec8e3; font-size: 13px; display: block; }
+    .copy-btn { float: right; font-size: 11px; padding: 2px 8px; }
+  </style>
+</head>
+<body>
+  <h1>Caption Alignment Test</h1>
+
+  <!-- Player -->
+  <section>
+    <audio id="audio" controls>
+      <source src="input/synced-output.wav" type="audio/wav">
+    </audio>
+    <div id="playback">
+      <span id="current-time">0.000s</span>
+      <span id="caption-box">—</span>
+    </div>
+  </section>
+
+  <!-- Instructions -->
+  <section>
+    <h2>How to measure</h2>
+    <ol class="steps">
+      <li>Play the audio above. The captions shown are from the raw VTT (Whisper output).</li>
+      <li>Find a word you can clearly hear start — consonant-heavy words like <em>statistics</em>, <em>cabbage</em>, <em>coding</em> work well.</li>
+      <li>Scrub the audio to the exact moment the word begins in the recording. Note the time shown in green above — that is your <strong>actual audio time</strong>.</li>
+      <li>Enter the word and that time in the form below. The page will find its timestamp in the raw transcript.</li>
+      <li>Repeat with a second word from a different part of the audio (ideally 5+ min later).</li>
+    </ol>
+  </section>
+
+  <!-- Measurements -->
+  <section>
+    <h2>Measurements</h2>
+    <div id="measurements"></div>
+    <button class="btn btn-add" onclick="addMeasurement()">+ Add measurement</button>
+  </section>
+
+  <!-- Result -->
+  <section id="output">
+    <h2>Offset result</h2>
+    <div id="avg-display" class="avg"></div>
+    <div id="commands"></div>
+  </section>
+
+  <script>
+    // ── Data ──────────────────────────────────────────────────────────────────
+    let rawTokens = [];  // [{text, t_dtw}]
+    let vttCues = [];    // [{start, end, text}]
+
+    async function loadData() {
+      try {
+        const [jsonRes, vttRes] = await Promise.all([
+          fetch('output/raw/transcript.raw.json'),
+          fetch('output/raw/transcript.raw.vtt'),
+        ]);
+        const json = await jsonRes.json();
+        const vtt  = await vttRes.text();
+        rawTokens = json.segments.flatMap(seg => seg.tokens.filter(t => t.t_dtw >= 0 && t.text.trim()));
+        vttCues   = parseVtt(vtt);
+      } catch (e) {
+        console.error('Could not load transcript data:', e);
+      }
+    }
+
+    function parseVtt(vtt) {
+      const cues = [];
+      const blocks = vtt.trim().split(/\n\n+/);
+      for (const block of blocks) {
+        const lines = block.trim().split('\n');
+        const timeLine = lines.find(l => l.includes('-->'));
+        if (!timeLine) continue;
+        const m = timeLine.match(/(\d+):(\d+):(\d+)[.,](\d+)\s+-->\s+(\d+):(\d+):(\d+)[.,](\d+)/);
+        if (!m) continue;
+        const start = +m[1]*3600 + +m[2]*60 + +m[3] + +m[4]/1000;
+        let   end   = +m[5]*3600 + +m[6]*60 + +m[7] + +m[8]/1000;
+        const idx   = lines.indexOf(timeLine);
+        const text  = lines.slice(idx + 1).join(' ').trim();
+        if (!text) continue;
+        // Many Whisper DTW cues have end <= start — normalise to a minimum window
+        if (end <= start) end = start + 0.5;
+        cues.push({ start, end, text });
+      }
+      // Sort by start time and fill gaps: each cue ends when the next one begins
+      cues.sort((a, b) => a.start - b.start);
+      for (let i = 0; i < cues.length - 1; i++) {
+        cues[i].end = Math.max(cues[i].end, cues[i + 1].start);
+      }
+      return cues;
+    }
+
+    // Find the best matching token for a word string
+    function findToken(word) {
+      const norm = w => w.toLowerCase().replace(/[^a-z']/g, '');
+      const target = norm(word);
+      if (!target) return null;
+      return rawTokens.find(t => norm(t.text) === target) || null;
+    }
+
+    // ── Player ────────────────────────────────────────────────────────────────
+    const audio = document.getElementById('audio');
+    const timeEl = document.getElementById('current-time');
+    const captionEl = document.getElementById('caption-box');
+
+    function tick() {
+      const t = audio.currentTime;
+      timeEl.textContent = t.toFixed(3) + 's';
+      // Binary search for the active cue
+      let lo = 0, hi = vttCues.length - 1, cue = null;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (t < vttCues[mid].start)      hi = mid - 1;
+        else if (t >= vttCues[mid].end)  lo = mid + 1;
+        else { cue = vttCues[mid]; break; }
+      }
+      captionEl.textContent = cue ? cue.text : '—';
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+
+    // ── Measurements ─────────────────────────────────────────────────────────
+    let measureCount = 0;
+    const measurements = [];  // [{word, audioTime, vttTime, offset}]
+
+    function addMeasurement() {
+      measureCount++;
+      const id = measureCount;
+      const container = document.getElementById('measurements');
+      const div = document.createElement('div');
+      div.className = 'measurement';
+      div.id = `m-${id}`;
+      div.innerHTML = `
+        <div class="row">
+          <div>
+            <label>Word</label>
+            <input type="text" id="word-${id}" placeholder="e.g. statistics" />
+          </div>
+          <div>
+            <label>Your measured audio time (s)</label>
+            <input type="number" id="atime-${id}" placeholder="e.g. 390.157" step="0.001" />
+          </div>
+          <div style="padding-bottom:2px">
+            <button class="btn" onclick="measure(${id})">Find in transcript</button>
+          </div>
+        </div>
+        <div class="result" id="result-${id}"></div>
+      `;
+      container.appendChild(div);
+    }
+
+    function measure(id) {
+      const word = document.getElementById(`word-${id}`).value.trim();
+      const audioTime = parseFloat(document.getElementById(`atime-${id}`).value);
+      const resultEl = document.getElementById(`result-${id}`);
+
+      if (!word || isNaN(audioTime)) {
+        resultEl.innerHTML = '<span style="color:#f44">Enter both a word and a time.</span>';
+        return;
+      }
+
+      const token = findToken(word);
+      if (!token) {
+        resultEl.innerHTML = `<span style="color:#f44">Word "<b>${word}</b>" not found in transcript.raw.json</span>`;
+        return;
+      }
+
+      const vttTime = token.t_dtw;
+      const offset = vttTime - audioTime;
+
+      // Save
+      const existing = measurements.findIndex(m => m.id === id);
+      const entry = { id, word, audioTime, vttTime, offset };
+      if (existing >= 0) measurements[existing] = entry;
+      else measurements.push(entry);
+
+      const sign = offset >= 0 ? '+' : '';
+      const color = Math.abs(offset) < 0.05 ? '#0f0' : '#f90';
+      resultEl.innerHTML = `
+        <span class="label">Word: </span><span class="val">${token.text.trim()}</span> &nbsp;
+        <span class="label">Audio: </span><span class="val">${audioTime.toFixed(3)}s</span> &nbsp;
+        <span class="label">Transcript (t_dtw): </span><span class="val">${vttTime.toFixed(3)}s</span> &nbsp;
+        <span class="label">Offset: </span><span style="color:${color};font-weight:bold">${sign}${offset.toFixed(3)}s</span>
+      `;
+
+      updateOutput();
+    }
+
+    function updateOutput() {
+      if (measurements.length < 1) return;
+      const avg = measurements.reduce((s, m) => s + m.offset, 0) / measurements.length;
+      const rounded = Math.round(avg * 1000) / 1000;
+
+      const outputEl = document.getElementById('output');
+      outputEl.style.display = 'block';
+
+      document.getElementById('avg-display').textContent =
+        measurements.length === 1
+          ? `Offset: ${rounded >= 0 ? '+' : ''}${rounded}s (from 1 measurement)`
+          : `Average offset: ${rounded >= 0 ? '+' : ''}${rounded}s (from ${measurements.length} measurements)`;
+
+      const sign = rounded >= 0 ? '' : '';
+      const absVal = Math.abs(rounded);
+
+      if (absVal < 0.02) {
+        document.getElementById('commands').innerHTML =
+          `<p style="color:#0f0;font-size:13px">Offset is negligible — no correction needed.</p>`;
+        return;
+      }
+
+      document.getElementById('commands').innerHTML = `
+        <div class="cmd-box">
+          <div class="cmd-label">Apply to this recording (re-run edit-transcript):</div>
+          <button class="btn copy-btn" onclick="copy(this, 'cmd1')">copy</button>
+          <code id="cmd1">npm run merge-doc -- --timestamp-offset ${absVal}</code>
+        </div>
+        <div class="cmd-box">
+          <div class="cmd-label">If re-running transcription from scratch:</div>
+          <button class="btn copy-btn" onclick="copy(this, 'cmd2')">copy</button>
+          <code id="cmd2">npm run transcribe -- --timestamp-offset ${absVal}</code>
+        </div>
+      `;
+    }
+
+    function copy(btn, id) {
+      navigator.clipboard.writeText(document.getElementById(id).textContent);
+      btn.textContent = 'copied';
+      setTimeout(() => btn.textContent = 'copy', 1500);
+    }
+
+    // ── Init ──────────────────────────────────────────────────────────────────
+    loadData().then(() => {
+      addMeasurement();
+      addMeasurement();
+    });
+  </script>
+</body>
+</html>

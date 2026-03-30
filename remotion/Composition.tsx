@@ -61,11 +61,25 @@ function getActiveSegments(transcript: Transcript) {
 
 const INTRO_DURATION_SECS = INTRO_DURATION_FRAMES / 60;
 
+/** Returns the effective end time for a hook clip, extending by 0.5 s when
+ *  any token drifts past the segment boundary. Must match getHookSubClips in
+ *  SegmentPlayer and buildHookTimings in HookOverlay. */
+function hookClipEnd(s: Segment): number {
+  const baseEnd = s.hookTo ?? s.end;
+  // Only extend unbounded hooks (no explicit hookTo). Must match SegmentPlayer and HookOverlay.
+  const hasLateToken = (s.hookTo === undefined || s.hookTo === null)
+    && s.tokens.some(
+      t => t.t_dtw > baseEnd && t.t_dtw < baseEnd + 0.5
+        && !/_[A-Z]+_/.test(t.text.trim()) && t.text.trim() !== '',
+    );
+  return hasLateToken ? baseEnd + 0.5 : baseEnd;
+}
+
 function computeEffectiveDuration(transcript: Transcript): number {
   const hooks = transcript.segments.filter(s => s.hook && !s.cut);
   const hookDuration = hooks.reduce((sum, s) => {
-    if (s.hookFrom !== undefined && s.hookTo !== undefined) return sum + (s.hookTo - s.hookFrom);
-    return sum + (s.end - s.start);
+    const start = s.hookFrom ?? s.start;
+    return sum + (hookClipEnd(s) - start);
   }, 0);
   const introDuration = hooks.length > 0 ? INTRO_DURATION_SECS : 0;
   const mainDuration = getActiveSegments(transcript)

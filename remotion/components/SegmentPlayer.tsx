@@ -36,12 +36,23 @@ export function getEffectiveDuration(segment: Segment): number {
 }
 
 /** Returns the clip range for a hook segment: phrase window if set, else the raw segment
- *  (no cuts applied — hook clips play uninterrupted so the music stays in sync). */
+ *  (no cuts applied — hook clips play uninterrupted so the music stays in sync).
+ *
+ *  The clip end is extended by 0.5 s when any token drifts past the segment
+ *  boundary, matching buildCaptions' filter window in HookOverlay so the video
+ *  frame is still visible when those late captions first appear. */
 function getHookSubClips(segment: Segment): SubClip[] {
-  if (segment.hookFrom !== undefined && segment.hookTo !== undefined) {
-    return [{ sourceStart: segment.hookFrom, sourceEnd: segment.hookTo }];
-  }
-  return [{ sourceStart: segment.start, sourceEnd: segment.end }];
+  const sourceStart = segment.hookFrom ?? segment.start;
+  const baseEnd     = segment.hookTo   ?? segment.end;
+  // Only extend unbounded hooks (no explicit hookTo). Phrase-bounded hooks play
+  // exactly their defined window so post-phrase tokens don't leak in.
+  const hasLateToken = (segment.hookTo === undefined || segment.hookTo === null)
+    && segment.tokens.some(
+      t => t.t_dtw > baseEnd && t.t_dtw < baseEnd + 0.5
+        && !/_[A-Z]+_/.test(t.text.trim()) && t.text.trim() !== '',
+    );
+  const sourceEnd = hasLateToken ? baseEnd + 0.5 : baseEnd;
+  return [{ sourceStart, sourceEnd }];
 }
 
 function toSections(clips: SubClip[], fps: number): Section[] {

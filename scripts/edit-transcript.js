@@ -159,6 +159,42 @@ function mergeIntoSentences(segments) {
     }
   }
 
+  return rebalanceBoundaryTokens(sentences);
+}
+
+/**
+ * Post-merge pass: move any trailing word tokens whose t_dtw > sentence.end into
+ * the front of the next sentence's token array.
+ *
+ * Root cause: Whisper's DTW alignment sometimes assigns a token to a timestamp
+ * slightly past the raw segment boundary it belongs to. When mergeIntoSentences
+ * concatenates tokens from consecutive raw segments, those drifted tokens end up
+ * in the CURRENT sentence even though their timestamp belongs to the NEXT one.
+ * At render time, buildCaptions uses a 0.5 s buffer past sourceEnd, so drifted
+ * tokens appear in the current hook clip AND the next one — producing phrases
+ * like "coding AI" at the end of clip N and "AI tools" at the start of clip N+1.
+ *
+ * Moving the token into the next sentence ensures each token is rendered only once,
+ * in the clip whose time range actually contains its t_dtw.
+ */
+function rebalanceBoundaryTokens(sentences) {
+  for (let i = 0; i < sentences.length - 1; i++) {
+    const curr = sentences[i];
+    const next = sentences[i + 1];
+    // Walk backwards from the end of curr's tokens, collecting trailing word
+    // tokens whose t_dtw exceeds curr.end. Stop as soon as we hit an in-range token.
+    const toMove = [];
+    for (let ti = curr.tokens.length - 1; ti >= 0; ti--) {
+      const t = curr.tokens[ti];
+      if (isSpecialToken(t) || normalize(t.text) === '') continue;
+      if (t.t_dtw > curr.end) {
+        toMove.unshift(...curr.tokens.splice(ti, 1));
+      } else {
+        break; // first token that IS within range — stop
+      }
+    }
+    if (toMove.length > 0) next.tokens.unshift(...toMove);
+  }
   return sentences;
 }
 
@@ -691,19 +727,108 @@ function applyTextPartsToTokens(rawText, tokens) {
   // Apply word-level text corrections: align visible (non-cut) words from doc
   // with non-cut, non-special tokens and update token.text so corrections persist.
   const visibleWords = rawText.replace(/\{[^}]+\}/g, ' ').replace(/\s+/g, ' ').trim().split(/\s+/).filter(Boolean);
-  const nonCutNonSpecialIndices = updated.reduce((acc, t, i) => {
-    if (!t.cut && !isSpecialToken(t)) acc.push(i);
-    return acc;
-  }, []);
-  if (visibleWords.length === nonCutNonSpecialIndices.length) {
-    visibleWords.forEach((word, wi) => {
-      const idx = nonCutNonSpecialIndices[wi];
-      // Preserve the original leading space so joinTokenTexts can still detect
-      // word boundaries (Whisper BPE marks word starts with a leading space).
-      const origText = updated[idx].text;
-      const prefix = origText.startsWith(' ') ? ' ' : '';
-      updated[idx] = { ...updated[idx], text: prefix + word };
-    });
+
+  // Build word groups from non-cut, non-special tokens (BPE-aware, same approach as
+  // wordGroups built for cut matching above). Each group represents one visible word.
+  const twg = []; // token word groups: { normText, firstIdx, lastIdx }
+  for (let i = 0; i < updated.length; i++) {
+    const t = updated[i];
+    if (isSpecialToken(t) || t.cut || normalize(t.text) === '') continue;
+    if (t.text.startsWith(' ') || twg.length === 0) {
+      twg.push({ normText: normalize(t.text), firstIdx: i, lastIdx: i });
+    } else {
+      twg[twg.length - 1].normText += normalize(t.text);
+      twg[twg.length - 1].lastIdx = i;
+    }
+  }
+
+  if (visibleWords.length > 0 && twg.length > 0) {
+    if (visibleWords.length === twg.length) {
+      // Counts match: use the original positional alignment.
+      // This is the common case — it handles Whisper spelling quirks (e.g. "wrold"
+      // in a token when the doc has the correct spelling "world") without requiring
+      // the doc word and the token to normalize to the same string.
+      visibleWords.forEach((word, wi) => {
+        const idx = twg[wi].firstIdx;
+        const prefix = updated[idx].text.startsWith(' ') ? ' ' : '';
+        updated[idx] = { ...updated[idx], text: prefix + word };
+      });
+    } else {
+      // Counts differ: use LCS alignment.
+      // When doc has MORE words than tokens (D > G), Whisper's DTW dropped a word.
+      // Find the longest common subsequence so the matching words still get text
+      // corrections, and synthesize new tokens for the unmatched doc words so they
+      // receive a t_dtw and appear in captions.
+      // When doc has FEWER words (D < G), some tokens have no corresponding doc word
+      // (e.g. user removed text without adding a cut marker). LCS pairs the surviving
+      // doc words to the correct tokens rather than positionally misaligning them.
+      const D = visibleWords.length, G = twg.length;
+      const dp = Array.from({ length: D + 1 }, () => new Array(G + 1).fill(0));
+      for (let i = 1; i <= D; i++) {
+        for (let j = 1; j <= G; j++) {
+          dp[i][j] = normalize(visibleWords[i - 1]) === twg[j - 1].normText
+            ? dp[i - 1][j - 1] + 1
+            : Math.max(dp[i - 1][j], dp[i][j - 1]);
+        }
+      }
+      // Backtrack to get (docIdx, groupIdx) matched pairs
+      const pairs = [];
+      for (let i = D, j = G; i > 0 && j > 0;) {
+        if (normalize(visibleWords[i - 1]) === twg[j - 1].normText) {
+          pairs.unshift({ docIdx: i - 1, groupIdx: j - 1 });
+          i--; j--;
+        } else if (dp[i - 1][j] >= dp[i][j - 1]) { i--; } else { j--; }
+      }
+
+      const docToGrp = new Map(pairs.map(p => [p.docIdx, p.groupIdx]));
+
+      // Apply text corrections for matched words (preserving leading space for BPE)
+      for (const { docIdx, groupIdx } of pairs) {
+        const idx = twg[groupIdx].firstIdx;
+        const prefix = updated[idx].text.startsWith(' ') ? ' ' : '';
+        updated[idx] = { ...updated[idx], text: prefix + visibleWords[docIdx] };
+      }
+
+      // Synthesize tokens for doc words that have no matching token (Whisper DTW drop).
+      // Work backwards so splices don't shift indices of earlier insertions.
+      for (let di = visibleWords.length - 1; di >= 0; di--) {
+        if (docToGrp.has(di)) continue;
+
+        // Find neighbouring matched groups for t_dtw interpolation
+        let prevTdtw = null, nextTdtw = null;
+        for (let pi = di - 1; pi >= 0; pi--) {
+          if (docToGrp.has(pi)) { prevTdtw = updated[twg[docToGrp.get(pi)].lastIdx].t_dtw; break; }
+        }
+        for (let ni = di + 1; ni < visibleWords.length; ni++) {
+          if (docToGrp.has(ni)) { nextTdtw = updated[twg[docToGrp.get(ni)].firstIdx].t_dtw; break; }
+        }
+        const t_dtw = prevTdtw !== null && nextTdtw !== null
+          ? (prevTdtw + nextTdtw) / 2
+          : prevTdtw !== null ? prevTdtw + 0.05
+          : nextTdtw !== null ? Math.max(0, nextTdtw - 0.05)
+          : 0;
+
+        // Insertion point: right after the prev matched group's last token
+        let prevGrpIdx = null, nextGrpIdx = null;
+        for (let pi = di - 1; pi >= 0; pi--) {
+          if (docToGrp.has(pi)) { prevGrpIdx = docToGrp.get(pi); break; }
+        }
+        for (let ni = di + 1; ni < visibleWords.length; ni++) {
+          if (docToGrp.has(ni)) { nextGrpIdx = docToGrp.get(ni); break; }
+        }
+        const insertAt = prevGrpIdx !== null ? twg[prevGrpIdx].lastIdx + 1
+          : nextGrpIdx !== null             ? twg[nextGrpIdx].firstIdx
+          : updated.length;
+
+        updated.splice(insertAt, 0, { t_dtw, text: ' ' + visibleWords[di], cut: false, cutReason: null });
+
+        // Shift twg firstIdx/lastIdx for all groups after the insertion point
+        for (const g of twg) {
+          if (g.firstIdx >= insertAt) g.firstIdx++;
+          if (g.lastIdx >= insertAt) g.lastIdx++;
+        }
+      }
+    }
   }
 
   return updated;
@@ -1227,4 +1352,4 @@ if (_argv1.endsWith('/edit-transcript.js') || _argv1.endsWith('/edit-transcript'
 }
 
 export default main;
-export { buildTextWithCuts, applyTextPartsToTokens, mergeDocIntoTranscript, buildDoc, deriveCuts, cleanCaptionText, buildSentencesVtt, buildSentencesSrt, getSubClips, getHookClips, resolvePhraseToTimeRange, autoCutPauses, autoCutDisfluencies, WORD_DURATION_ESTIMATE, CUT_START_BIAS, CUT_END_BIAS, isSpecialToken, isDisfluencyToken };
+export { buildTextWithCuts, applyTextPartsToTokens, mergeDocIntoTranscript, buildDoc, deriveCuts, cleanCaptionText, buildSentencesVtt, buildSentencesSrt, getSubClips, getHookClips, resolvePhraseToTimeRange, autoCutPauses, autoCutDisfluencies, rebalanceBoundaryTokens, WORD_DURATION_ESTIMATE, CUT_START_BIAS, CUT_END_BIAS, isSpecialToken, isDisfluencyToken };

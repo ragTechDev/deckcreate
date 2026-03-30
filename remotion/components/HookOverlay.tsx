@@ -39,17 +39,34 @@ function buildCaptions(
     }
   }
 
+  // Remove consecutive duplicate word groups (same text AND same timestamp).
+  // These are boundary artefacts produced when mergeIntoSentences carries the
+  // last token of a Whisper raw segment into the next merged sentence.
+  const deduped = wordGroups.filter(
+    (w, i) => i === 0 || !(w.text === wordGroups[i - 1].text && w.t_dtw === wordGroups[i - 1].t_dtw),
+  );
+
   // Filter to the hook window. Use a 0.5 s buffer past sourceEnd so words
   // whose t_dtw lands exactly at the boundary (or slightly past due to Whisper
   // timestamp drift) are not silently dropped from captions.
-  const inRange = wordGroups.filter(w => w.t_dtw >= sourceStart && w.t_dtw < sourceEnd + 0.5);
-  return inRange.map((w, i) => ({
-    text: w.text,
-    startMs: Math.round(w.t_dtw * 1000),
-    endMs: Math.round((i + 1 < inRange.length ? inRange[i + 1].t_dtw : sourceEnd) * 1000),
-    timestampMs: Math.round(w.t_dtw * 1000),
-    confidence: null,
-  }));
+  const inRange = deduped.filter(w => w.t_dtw >= sourceStart && w.t_dtw < sourceEnd + 0.5);
+  return inRange.map((w, i) => {
+    const startMs = Math.round(w.t_dtw * 1000);
+    const rawEndMs = Math.round(
+      (i + 1 < inRange.length ? inRange[i + 1].t_dtw : sourceEnd) * 1000,
+    );
+    // Guard: endMs must be at least 50 ms past startMs. When a token's t_dtw
+    // drifts past sourceEnd (common for the last word in a Whisper segment),
+    // rawEndMs = round(sourceEnd * 1000) can be less than startMs, producing a
+    // zero- or negative-duration caption that createTikTokStyleCaptions drops.
+    return {
+      text: w.text,
+      startMs,
+      endMs: Math.max(rawEndMs, startMs + 50),
+      timestampMs: startMs,
+      confidence: null,
+    };
+  });
 }
 
 // ── Per-hook segment timing ────────────────────────────────────────────────────
@@ -70,9 +87,21 @@ function buildHookTimings(segments: Segment[], fps: number): HookTiming[] {
   for (const seg of segments) {
     if (!seg.hook || seg.cut) continue;
     const sourceStart = seg.hookFrom ?? seg.start;
-    const sourceEnd   = seg.hookTo   ?? seg.end;
+    const baseEnd     = seg.hookTo   ?? seg.end;
+    const captions    = buildCaptions(seg.tokens, sourceStart, baseEnd);
+    // If the last caption word drifted past baseEnd (Whisper DTW timing can
+    // land slightly after the segment boundary), extend the clip so the
+    // composition clock actually reaches that word's startMs before the hook
+    // switches to the next segment. Must match getHookSubClips in SegmentPlayer
+    // so the video and caption windows stay in sync.
+    const lastCapMs   = captions.length > 0 ? captions[captions.length - 1].startMs : -Infinity;
+    // Only extend unbounded hooks (no explicit hookTo). Phrase-bounded hooks play
+    // exactly their defined window — extending them pulls in post-phrase tokens.
+    const sourceEnd   = (seg.hookTo === undefined || seg.hookTo === null)
+      && lastCapMs > Math.round(baseEnd * 1000)
+      ? baseEnd + 0.5
+      : baseEnd;
     const dur         = Math.round((sourceEnd - sourceStart) * fps);
-    const captions    = buildCaptions(seg.tokens, sourceStart, sourceEnd);
     const { pages }   = createTikTokStyleCaptions({
       captions,
       combineTokensWithinMilliseconds: 1200,
