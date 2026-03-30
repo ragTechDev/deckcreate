@@ -16,6 +16,36 @@ Modes:
 3. **Single video file** — extracts audio from the video
 4. **Audio only** — transcription only, no video output
 
+## Python setup for diarization + forced alignment (Windows)
+
+`diarize` and `align` require Python 3.9–3.12 (use 3.12).
+
+From repo root:
+
+```
+py -3.12 -m venv .venv
+.\.venv\Scripts\activate
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -r scripts/diarize/requirements.txt
+python -m pip install whisperx faster-whisper
+```
+
+Verify:
+
+```
+python --version
+python -c "import whisperx; print('whisperx ok')"
+```
+
+If your shell resolves `python` to `...WindowsApps\python` (or shows permission denied), use the interpreter path explicitly:
+
+```
+npm run diarize -- --num-speakers 2 --python .venv\Scripts\python.exe
+npm run align -- --python .venv\Scripts\python.exe
+```
+
+The wizard now runs `align` automatically after transcription, before speaker assignment/editing.
+
 ---
 
 ## Manual steps (reference)
@@ -87,6 +117,17 @@ Outputs `public/transcribe/output/raw/diarization.json`.
 npm run assign-speakers
 ```
 Labels each transcript segment with the detected speaker and updates `transcript.raw.json`.
+
+### 4a. Forced alignment (WhisperX, CPU-local)
+```
+npm run align
+```
+Refines `segments[].start/end` and `segments[].tokens[].t_dtw` inside `public/transcribe/output/raw/transcript.raw.json`.
+
+Use a specific Python interpreter when needed:
+```
+npm run align -- --python .venv\Scripts\python.exe
+```
 
 ### 5. Edit transcript
 ```

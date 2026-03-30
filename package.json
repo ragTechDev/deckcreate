@@ -16,6 +16,7 @@
     "generate:transcript": "node scripts/carousel/CaptionExtractor.js",
     "sync": "node scripts/sync/sync-audio-video.js",
     "transcribe": "node scripts/transcribe/transcribe-audio.js",
+    "align": "node scripts/align/align-transcript.js",
     "diarize": "node scripts/diarize/diarize-audio.js",
     "assign-speakers": "node scripts/diarize/assign-speakers.js",
     "edit-transcript": "node scripts/edit-transcript.js",

@@ -291,11 +291,32 @@ async function detectExistingWork() {
     fs.pathExists(p('public', 'transcribe', 'output', 'edit', 'transcript.doc.txt')),
     fs.pathExists(p('public', 'transcribe', 'output', 'edit', 'transcript.json')),
   ]);
+
+  let alignedTranscript = false;
+  if (rawTranscript) {
+    try {
+      const rawJson = await fs.readJson(p('public', 'transcribe', 'output', 'raw', 'transcript.raw.json'));
+      alignedTranscript = !!rawJson?.meta?.alignment?.provider;
+    } catch {
+      alignedTranscript = false;
+    }
+  }
+
   const inputDir = p('public', 'transcribe', 'input');
   const audioInInput = !!(await findFileIn(inputDir, ['.wav', '.mp3', '.aac', '.m4a']));
   const videoInInputPath = await findFileIn(inputDir, ['.mp4', '.mov', '.mkv']);
   const videoInInput = !!videoInInputPath;
-  return { syncedVideo, rawTranscript, diarization, transcriptDoc, transcriptJson, audioInInput, videoInInput, videoInInputPath };
+  return {
+    syncedVideo,
+    rawTranscript,
+    alignedTranscript,
+    diarization,
+    transcriptDoc,
+    transcriptJson,
+    audioInInput,
+    videoInInput,
+    videoInInputPath,
+  };
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -318,6 +339,7 @@ async function main() {
     console.log('  Found existing work from a previous session:');
     if (existing.transcriptJson) console.log('    ✓ Edits applied        — transcript.json');
     if (existing.transcriptDoc)  console.log('    ✓ Doc generated        — transcript.doc.txt');
+    if (existing.alignedTranscript) console.log('    ✓ Forced alignment     — transcript.raw.json timings');
     if (existing.rawTranscript)  console.log('    ✓ Transcription done   — transcript.raw.json');
     if (existing.diarization)    console.log('    ✓ Diarization done     — diarization.json');
     if (existing.audioInInput)   console.log('    ✓ Audio ready          — transcribe/input/');
@@ -524,6 +546,60 @@ async function main() {
   } else if (resumeStep < 2) {
     console.log('\n  ── Transcribe ────────────────────────────────────────');
     await runStep('npm run transcribe', 'npm', transcribeArgs, rawTranscriptPath);
+  }
+
+  // ── STEP: Forced alignment (after transcribe, before assignment/editing) ──
+  const shouldRunAlignment = resumeStep < 3 && !(resumeStep >= 2 && existing.alignedTranscript);
+  if (shouldRunAlignment) {
+    console.log('\n  ── Forced alignment (WhisperX, CPU-local) ────────────');
+    let alignArgs = ['run', 'align'];
+    let alignOk = false;
+
+    while (!alignOk) {
+      try {
+        await spawnStep('npm', alignArgs);
+        console.log(`  ✓ Done — ${rawTranscriptPath}`);
+        alignOk = true;
+        break;
+      } catch (err) {
+        const errText = err.message || '';
+        const isPythonNotFound = /python not found|command missing|ENOENT|WindowsApps\\python|permission denied/i.test(errText);
+        const isPythonWrongVersion = /requires python 3\.9-3\.12|requires python 3\.9–3\.12|python 3\.(1[3-9]|[2-9][0-9])/i.test(errText);
+        const isWhisperxMissing = /WhisperX is not installed|No module named ['"]whisperx['"]|could not import whisperx/i.test(errText);
+
+        if (isPythonNotFound || isPythonWrongVersion || isWhisperxMissing) {
+          console.log('\n  ✗ Forced alignment could not run with the current Python interpreter.');
+          console.log('  Use a Python 3.12 virtual environment for alignment.\n');
+          console.log('  1. Create and activate a venv (if not done already):\n');
+          console.log('       py -3.12 -m venv .venv');
+          console.log('       .venv\\Scripts\\activate');
+          console.log('       python -m pip install --upgrade pip setuptools wheel');
+          console.log('       python -m pip install whisperx faster-whisper\n');
+          console.log('  2. Enter the Python path from that venv.');
+          console.log('     If you used the commands above, it is:');
+          console.log('       .venv\\Scripts\\python.exe  (press Enter to use this default)\n');
+
+          const pythonPath = (await ask('  Python path [.venv\\Scripts\\python.exe]: ')).trim()
+            || '.venv\\Scripts\\python.exe';
+          alignArgs = ['run', 'align', '--', '--python', pythonPath];
+
+          console.log('\n  → Re-running alignment...');
+          continue;
+        }
+
+        console.error(`\n  ✗ Forced alignment failed: ${err.message}`);
+        const retry = await confirm('  Retry alignment?');
+        if (!retry) break;
+      }
+    }
+
+    if (!alignOk) {
+      console.log('  Continuing without forced alignment. You can run it later with:');
+      console.log('    npm run align -- --python .venv\\Scripts\\python.exe');
+    }
+  } else if (resumeStep >= 2 && existing.alignedTranscript) {
+    console.log('\n  ── Forced alignment ───────────────────────────────────');
+    console.log('  (Already applied — skipping)');
   }
 
   // ── STEP: Caption alignment test (optional) ──────────────────────────────
