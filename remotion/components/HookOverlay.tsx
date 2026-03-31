@@ -14,6 +14,18 @@ import type { Brand } from '../types/brand';
 
 function isSpecialToken(t: Token) { return /_[A-Z]+_/.test(t.text.trim()); }
 
+function isContractionSuffixTokenText(text: string) {
+  return /^'(m|s|t|re|ve|ll|d)$/i.test(text.trim());
+}
+
+function isNumericTokenText(text: string) {
+  return /^\d+$/.test(text.trim());
+}
+
+function isPunctuationOnlyTokenText(text: string) {
+  return /^[^\w\s']+$/.test(text.trim());
+}
+
 /**
  * Converts segment tokens to Caption objects for createTikTokStyleCaptions.
  *
@@ -26,30 +38,66 @@ function buildCaptions(
   tokens: Token[],
   sourceStart: number,
   sourceEnd: number,
+  endBufferSeconds: number,
 ): Caption[] {
   // Group BPE sub-tokens into word-level groups
   const wordGroups: { text: string; t_dtw: number }[] = [];
   for (const t of tokens) {
     if (isSpecialToken(t) || t.text.trim() === '') continue;
-    if (t.text.startsWith(' ') || wordGroups.length === 0) {
+    const trimmed = t.text.trim();
+    const punctuationOnly = isPunctuationOnlyTokenText(trimmed);
+    if (wordGroups.length === 0) {
+      if (punctuationOnly) continue;
       wordGroups.push({ text: t.text, t_dtw: t.t_dtw });
     } else {
-      // Continuation sub-token: append to previous group
-      wordGroups[wordGroups.length - 1].text += t.text;
+      const prev = wordGroups[wordGroups.length - 1];
+      const prevTrimmed = prev.text.trim();
+
+      if (punctuationOnly) {
+        if (!prevTrimmed.endsWith(trimmed)) {
+          prev.text += trimmed;
+        }
+        continue;
+      }
+
+      const bothNumeric = isNumericTokenText(prevTrimmed) && isNumericTokenText(trimmed);
+      const isNumericDuplicate = bothNumeric
+        && (prevTrimmed.endsWith(trimmed) || trimmed.endsWith(prevTrimmed));
+      const shouldMergeShortNumericParts = bothNumeric
+        && prevTrimmed.length <= 2
+        && trimmed.length <= 2;
+      const shouldAttach = !t.text.startsWith(' ')
+        || isContractionSuffixTokenText(trimmed)
+        || shouldMergeShortNumericParts;
+
+      if (isNumericDuplicate) {
+        continue;
+      }
+
+      if (shouldAttach) {
+        // Continuation sub-token: append to previous group
+        prev.text += t.text;
+      } else {
+        wordGroups.push({ text: t.text, t_dtw: t.t_dtw });
+      }
     }
   }
 
   // Remove consecutive duplicate word groups (same text AND same timestamp).
   // These are boundary artefacts produced when mergeIntoSentences carries the
   // last token of a Whisper raw segment into the next merged sentence.
-  const deduped = wordGroups.filter(
-    (w, i) => i === 0 || !(w.text === wordGroups[i - 1].text && w.t_dtw === wordGroups[i - 1].t_dtw),
-  );
+  const deduped = wordGroups.filter((w, i) => {
+    if (i === 0) return true;
+    const prev = wordGroups[i - 1];
+    const sameTime = w.t_dtw === prev.t_dtw;
+    const sameToken = w.text.trim() === prev.text.trim();
+    return !(sameTime && sameToken);
+  });
 
   // Filter to the hook window. Use a 0.5 s buffer past sourceEnd so words
   // whose t_dtw lands exactly at the boundary (or slightly past due to Whisper
   // timestamp drift) are not silently dropped from captions.
-  const inRange = deduped.filter(w => w.t_dtw >= sourceStart && w.t_dtw < sourceEnd + 0.5);
+  const inRange = deduped.filter(w => w.t_dtw >= sourceStart && w.t_dtw < sourceEnd + endBufferSeconds);
   return inRange.map((w, i) => {
     const startMs = Math.round(w.t_dtw * 1000);
     const rawEndMs = Math.round(
@@ -72,6 +120,9 @@ function buildCaptions(
 // ── Per-hook segment timing ────────────────────────────────────────────────────
 
 type Page = ReturnType<typeof createTikTokStyleCaptions>['pages'][number];
+const HOOK_TAIL_PAD_UNBOUNDED_SECONDS = 0.16;
+const HOOK_TAIL_PAD_BOUNDED_SECONDS = 0.02;
+const HOOK_BRIDGE_MAX_GAP_SECONDS = 1.0;
 
 type HookTiming = {
   seg: Segment;
@@ -84,24 +135,44 @@ type HookTiming = {
 function buildHookTimings(segments: Segment[], fps: number): HookTiming[] {
   const timings: HookTiming[] = [];
   let cum = 0;
-  for (const seg of segments) {
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
     if (!seg.hook || seg.cut) continue;
     const sourceStart = seg.hookFrom ?? seg.start;
     const baseEnd     = seg.hookTo   ?? seg.end;
-    const captions    = buildCaptions(seg.tokens, sourceStart, baseEnd);
-    // If the last caption word drifted past baseEnd (Whisper DTW timing can
-    // land slightly after the segment boundary), extend the clip so the
-    // composition clock actually reaches that word's startMs before the hook
-    // switches to the next segment. Must match getHookSubClips in SegmentPlayer
-    // so the video and caption windows stay in sync.
-    const lastCapMs   = captions.length > 0 ? captions[captions.length - 1].startMs : -Infinity;
-    // Only extend unbounded hooks (no explicit hookTo). Phrase-bounded hooks play
-    // exactly their defined window — extending them pulls in post-phrase tokens.
-    const sourceEnd   = (seg.hookTo === undefined || seg.hookTo === null)
-      && lastCapMs > Math.round(baseEnd * 1000)
-      ? baseEnd + 0.5
-      : baseEnd;
-    const dur         = Math.round((sourceEnd - sourceStart) * fps);
+    const isBoundedHook = seg.hookTo !== undefined && seg.hookTo !== null;
+    const captions    = buildCaptions(seg.tokens, sourceStart, baseEnd, isBoundedHook ? 0 : 0.5);
+    // Extend only unbounded hooks (no explicit hookTo) when tokens drift past
+    // the segment end. Must match SegmentPlayer/Composition/CameraPlayer.
+    let sourceEnd = baseEnd;
+    if (seg.hookTo === undefined || seg.hookTo === null) {
+      const latestSpokenToken = seg.tokens
+        .filter(t => !isSpecialToken(t) && t.text.trim() !== '')
+        .reduce((max, t) => Math.max(max, t.t_dtw), -Infinity);
+      if (latestSpokenToken > baseEnd) {
+        const drift = latestSpokenToken - baseEnd;
+        const extension = Math.min(1.5, drift + 0.4);
+        sourceEnd = baseEnd + extension;
+      }
+    }
+    const next = segments[i + 1];
+    const nextHookStart = next && next.hook && !next.cut ? (next.hookFrom ?? next.start) : undefined;
+    const hasSpokenTokenAfterEnd = seg.tokens.some(
+      (t) => !isSpecialToken(t)
+        && t.text.trim() !== ''
+        && t.t_dtw > sourceEnd + 0.02,
+    );
+    const endsAtSegmentTail = !hasSpokenTokenAfterEnd;
+    const canBridgeToNextHook = nextHookStart !== undefined
+      && nextHookStart > sourceEnd
+      && nextHookStart - sourceEnd <= HOOK_BRIDGE_MAX_GAP_SECONDS;
+    if (endsAtSegmentTail && canBridgeToNextHook) {
+      sourceEnd = nextHookStart;
+    }
+    sourceEnd += isBoundedHook ? HOOK_TAIL_PAD_BOUNDED_SECONDS : HOOK_TAIL_PAD_UNBOUNDED_SECONDS;
+    const startFrame = Math.floor(sourceStart * fps);
+    const endFrame = Math.ceil(sourceEnd * fps);
+    const dur = Math.max(1, endFrame - startFrame);
     const { pages }   = createTikTokStyleCaptions({
       captions,
       combineTokensWithinMilliseconds: 1200,

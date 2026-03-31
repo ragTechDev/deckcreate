@@ -1,16 +1,17 @@
 import React, { useMemo } from 'react';
 import { AbsoluteFill, useCurrentFrame, useVideoConfig } from 'remotion';
-import { SegmentPlayer, getEffectiveDuration, buildSections, Section } from './SegmentPlayer';
+import { SegmentPlayer, getEffectiveDuration, Section } from './SegmentPlayer';
 import type { Segment } from '../types/transcript';
 import type { CameraProfiles, CameraShot, CropViewport } from '../types/camera';
-import type { CameraCue } from '../types/transcript';
 
 // ── Pacing constants ──────────────────────────────────────────────────────────
 
 const MIN_WIDE_S      = 1.5;   // minimum wide-shot duration before cutting to closeup
-const MIN_CLOSEUP_S   = 3.0;   // minimum closeup duration before cutting away
 const MAX_CLOSEUP_S   = 20.0;  // force return to wide after this long in closeup
 const PERIODIC_WIDE_S = 45.0;  // insert a wide every ~45 s of total closeup time
+const HOOK_TAIL_PAD_UNBOUNDED_SECONDS = 0.16;
+const HOOK_TAIL_PAD_BOUNDED_SECONDS = 0.02;
+const HOOK_BRIDGE_MAX_GAP_SECONDS = 1.0;
 
 // ── Transform helpers ─────────────────────────────────────────────────────────
 
@@ -42,20 +43,51 @@ function computeTransform(
  * For phrase hooks this is the hook clip window, not the full segment duration.
  * Must match the clip length that buildSections emits for the same segment.
  */
-function getOutputDuration(seg: Segment): number {
+function getOutputDuration(seg: Segment, nextHookStart?: number): number {
   if (seg.hook) {
     // Phrase-bounded hooks play exactly their defined window (no extension).
     if (seg.hookFrom !== undefined && seg.hookTo !== undefined) {
-      return seg.hookTo - seg.hookFrom;
+      const sourceStart = seg.hookFrom;
+      let sourceEnd = seg.hookTo;
+      const hasSpokenTokenAfterEnd = seg.tokens.some(
+        (t) => !/_[A-Z]+_/.test(t.text.trim())
+          && t.text.trim() !== ''
+          && t.t_dtw > sourceEnd + 0.02,
+      );
+      const endsAtSegmentTail = !hasSpokenTokenAfterEnd;
+      const canBridgeToNextHook = nextHookStart !== undefined
+        && nextHookStart > sourceEnd
+        && nextHookStart - sourceEnd <= HOOK_BRIDGE_MAX_GAP_SECONDS;
+      if (endsAtSegmentTail && canBridgeToNextHook) {
+        sourceEnd = nextHookStart;
+      }
+      return (sourceEnd + HOOK_TAIL_PAD_BOUNDED_SECONDS) - sourceStart;
     }
-    // Unbounded hooks play the full raw segment, extended by 0.5 s when any
-    // token drifts past seg.end — must match getHookSubClips in SegmentPlayer.
+    // Unbounded hooks play the full raw segment, extended when spoken tokens
+    // drift past seg.end — must match getHookSubClips in SegmentPlayer.
     const baseEnd = seg.end;
-    const hasLateToken = seg.tokens.some(
-      t => t.t_dtw > baseEnd && t.t_dtw < baseEnd + 0.5
-        && !/_[A-Z]+_/.test(t.text.trim()) && t.text.trim() !== '',
+    const latestSpokenToken = seg.tokens
+      .filter(t => !/_[A-Z]+_/.test(t.text.trim()) && t.text.trim() !== '')
+      .reduce((max, t) => Math.max(max, t.t_dtw), -Infinity);
+    let sourceEnd = baseEnd;
+    if (latestSpokenToken > baseEnd) {
+      const drift = latestSpokenToken - baseEnd;
+      const extension = Math.min(1.5, drift + 0.4);
+      sourceEnd = baseEnd + extension;
+    }
+    const hasSpokenTokenAfterEnd = seg.tokens.some(
+      (t) => !/_[A-Z]+_/.test(t.text.trim())
+        && t.text.trim() !== ''
+        && t.t_dtw > sourceEnd + 0.02,
     );
-    return (hasLateToken ? baseEnd + 0.5 : baseEnd) - seg.start;
+    const endsAtSegmentTail = !hasSpokenTokenAfterEnd;
+    const canBridgeToNextHook = nextHookStart !== undefined
+      && nextHookStart > sourceEnd
+      && nextHookStart - sourceEnd <= HOOK_BRIDGE_MAX_GAP_SECONDS;
+    if (endsAtSegmentTail && canBridgeToNextHook) {
+      sourceEnd = nextHookStart;
+    }
+    return (sourceEnd + HOOK_TAIL_PAD_UNBOUNDED_SECONDS) - seg.start;
   }
   return getEffectiveDuration(seg);
 }
@@ -72,7 +104,6 @@ export function buildCameraShots(
   fps: number,
 ): CameraShot[] {
   const MIN_WIDE_F    = Math.round(MIN_WIDE_S    * fps);
-  const MIN_CLOSEUP_F = Math.round(MIN_CLOSEUP_S * fps);
   const MAX_CLOSEUP_F = Math.round(MAX_CLOSEUP_S * fps);
   const PERIODIC_F    = Math.round(PERIODIC_WIDE_S * fps);
 
@@ -96,7 +127,9 @@ export function buildCameraShots(
 
   for (const seg of activeSegments) {
     if (seg.cut) continue;
-    const segDur   = Math.round(getOutputDuration(seg) * fps);
+    const next = activeSegments.find((cand) => cand.hook && !cand.cut && cand.id > seg.id);
+    const nextHookStart = next ? (next.hookFrom ?? next.start) : undefined;
+    const segDur   = Math.round(getOutputDuration(seg, nextHookStart) * fps);
     const segStart = cumFrame;
     cumFrame      += segDur;
 
@@ -290,7 +323,6 @@ export const CameraPlayer: React.FC<Props> = ({ src, hookSections, mainSections,
       }
     }
     return result;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [segments, profiles, fps, hookOutputFrames, mainOffset]);
 
   // Find current shot

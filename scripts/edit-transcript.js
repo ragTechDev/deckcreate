@@ -66,6 +66,14 @@ function fixContractions(text) {
   return text.replace(/ '(m|s|t|re|ve|ll|d)\b/gi, "'$1");
 }
 
+function isContractionSuffixTokenText(text) {
+  return /^'(m|s|t|re|ve|ll|d)$/i.test(text.trim());
+}
+
+function isNumericTokenText(text) {
+  return /^\d+$/.test(text.trim());
+}
+
 // ─── Cut derivation ───────────────────────────────────────────────────────────
 
 // How far (0–1) to bias cut boundaries towards the adjacent spoken words.
@@ -357,12 +365,41 @@ function resolvePhraseToTimeRange(phrase, tokens, segEnd) {
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
     if (isSpecialToken(t) || normalize(t.text) === '') continue;
-    if (t.text.startsWith(' ') || wordGroups.length === 0) {
+    const trimmed = t.text.trim();
+    if (wordGroups.length === 0) {
       wordGroups.push({ text: t.text, t_dtw: t.t_dtw, endIdx: i });
     } else {
-      // Continuation sub-token: append to previous group's text
-      wordGroups[wordGroups.length - 1].text += t.text;
-      wordGroups[wordGroups.length - 1].endIdx = i;
+      const prev = wordGroups[wordGroups.length - 1];
+      const prevTrimmed = prev.text.trim();
+      const bothNumeric = isNumericTokenText(prevTrimmed) && isNumericTokenText(trimmed);
+      const isNumericDuplicate = bothNumeric
+        && (prevTrimmed.endsWith(trimmed) || trimmed.endsWith(prevTrimmed));
+      const shouldMergeShortNumericParts = bothNumeric
+        && prevTrimmed.length <= 2
+        && trimmed.length <= 2;
+      const shouldAttach = !t.text.startsWith(' ')
+        // Some Whisper variants emit contraction suffixes with a leading space
+        // (e.g. " 's"). Keep them attached to the previous word.
+        || isContractionSuffixTokenText(trimmed)
+        // Numbers are sometimes split as separate short spaced tokens (e.g.
+        // "20" "26"). Merge those parts so phrase hooks can match years.
+        || shouldMergeShortNumericParts;
+
+      if (isNumericDuplicate) {
+        // Whisper can emit a duplicate numeric suffix token right after a full
+        // number (e.g. "2026" then "26"). Treat it as a duplicate, not a new
+        // word, otherwise phrase matching for "2026 what" fails.
+        prev.endIdx = i;
+        continue;
+      }
+
+      if (shouldAttach) {
+        // Continuation sub-token: append to previous group's text
+        prev.text += t.text;
+        prev.endIdx = i;
+      } else {
+        wordGroups.push({ text: t.text, t_dtw: t.t_dtw, endIdx: i });
+      }
     }
   }
 
@@ -419,8 +456,9 @@ function buildInstructionsBlock() {
     '                  Fine-tune cut timing:  {you know | 12.50, 14.20}',
     '                  (seconds from start of audio — overrides auto-detection)',
     '',
-    '  CUT SEGMENT     Wrap the whole line in curly braces:',
-    '                    {[3]  original text...}',
+    '  CUT SEGMENT     Prefix the segment id with a minus sign:',
+    '                    -[3]  original text...',
+    '                  (legacy {[3] ...} and [3] CUT ... still work)',
     '',
     '  HOOK SEGMENT    Add > HOOK after a segment to prepend that clip before the',
     '                  video as a teaser (the clip still plays in its original',
@@ -502,9 +540,8 @@ function buildDoc(transcript) {
     if (videoStart !== undefined && seg.start === videoStart) lines.push('> START');
 
     const text = cleanCaptionText(buildTextWithCuts(seg));
-    let segLine = `[${seg.id}]`;
+    let segLine = `${seg.cut ? '-' : ''}[${seg.id}]`;
     if (text) segLine += `  ${text}`;
-    if (seg.cut) segLine = `{${segLine}}`;
     lines.push(segLine);
 
     if (seg.hook) {
@@ -636,7 +673,12 @@ function parseGraphicLine(line, tokens) {
 
 function applyTextPartsToTokens(rawText, tokens) {
   // Reset cut flags and any stored time overrides — doc is the source of truth.
-  const updated = tokens.map(({ _cutFrom, _cutTo, ...t }) => ({ ...t, cut: false }));
+  const updated = tokens.map((token) => {
+    const clean = { ...token };
+    delete clean._cutFrom;
+    delete clean._cutTo;
+    return { ...clean, cut: false };
+  });
 
   // Find every {span} marker and search for it in word tokens only.
   // Supports optional explicit time override: {text | from, to}
@@ -651,6 +693,11 @@ function applyTextPartsToTokens(rawText, tokens) {
   let m;
   while ((m = re.exec(rawText)) !== null) {
     const content = m[1];
+    const markerWordPos = rawText
+      .slice(0, m.index)
+      .replace(/\{[^}]*\}/g, ' ')
+      .split(/\s+/)
+      .filter(Boolean).length;
 
     // Parse optional explicit time override: {text | from, to}
     let textSpan = content;
@@ -696,31 +743,38 @@ function applyTextPartsToTokens(rawText, tokens) {
       }
     }
 
+    const candidateStarts = [];
     for (let i = 0; i <= wordGroups.length - cutWords.length; i++) {
       const matches = cutWords.every((w, j) => normalize(wordGroups[i + j].text) === w);
-      if (matches) {
-        const firstIdx = wordGroups[i].firstIdx;
-        const lastWordIdx = wordGroups[i + cutWords.length - 1].lastIdx;
-        const lastTdtw = wordGroups[i + cutWords.length - 1].lastTdtw;
+      if (matches) candidateStarts.push(i);
+    }
 
-        // Extend past adjacent tokens that are BPE continuations (no leading space)
-        // or share the same t_dtw (Whisper duplicate tokens at identical timestamps).
-        let cutEndIdx = lastWordIdx;
-        let k = lastWordIdx + 1;
-        while (k < updated.length && !isSpecialToken(updated[k])) {
-          if (!updated[k].text.startsWith(' ') || updated[k].t_dtw === lastTdtw) {
-            cutEndIdx = k; k++;
-          } else { break; }
-        }
+    if (candidateStarts.length > 0) {
+      const chosenStart = candidateStarts.reduce((best, cand) => {
+        const bestDelta = Math.abs(best - markerWordPos);
+        const candDelta = Math.abs(cand - markerWordPos);
+        return candDelta < bestDelta ? cand : best;
+      }, candidateStarts[0]);
+      const firstIdx = wordGroups[chosenStart].firstIdx;
+      const lastWordIdx = wordGroups[chosenStart + cutWords.length - 1].lastIdx;
+      const lastTdtw = wordGroups[chosenStart + cutWords.length - 1].lastTdtw;
 
-        for (let k = firstIdx; k <= cutEndIdx; k++) {
-          if (!isSpecialToken(updated[k])) updated[k] = { ...updated[k], cut: true };
-        }
-        // Store explicit time overrides on the boundary tokens so deriveCuts can use them.
-        if (explicitFrom !== null) updated[firstIdx] = { ...updated[firstIdx], _cutFrom: explicitFrom };
-        if (explicitTo !== null) updated[cutEndIdx] = { ...updated[cutEndIdx], _cutTo: explicitTo };
-        break;
+      // Extend past adjacent tokens that are BPE continuations (no leading space)
+      // or share the same t_dtw (Whisper duplicate tokens at identical timestamps).
+      let cutEndIdx = lastWordIdx;
+      let k = lastWordIdx + 1;
+      while (k < updated.length && !isSpecialToken(updated[k])) {
+        if (!updated[k].text.startsWith(' ') || updated[k].t_dtw === lastTdtw) {
+          cutEndIdx = k; k++;
+        } else { break; }
       }
+
+      for (let k = firstIdx; k <= cutEndIdx; k++) {
+        if (!isSpecialToken(updated[k])) updated[k] = { ...updated[k], cut: true };
+      }
+      // Store explicit time overrides on the boundary tokens so deriveCuts can use them.
+      if (explicitFrom !== null) updated[firstIdx] = { ...updated[firstIdx], _cutFrom: explicitFrom };
+      if (explicitTo !== null) updated[cutEndIdx] = { ...updated[cutEndIdx], _cutTo: explicitTo };
     }
   }
 
@@ -937,10 +991,14 @@ function mergeDocIntoTranscript(transcript, docContent) {
       continue;
     }
 
-    // Segment line: [N]  text  or  {[N]  text}  or  [N] CUT  text  (legacy)
+    // Segment line: [N] text, -[N] text, {[N] text}, or [N] CUT text (legacy)
     const braceSegMatch = trimmed.match(/^\{(\[(\d+)\].*)\}$/);
-    const segMatch = braceSegMatch ? braceSegMatch[1].match(/^\[(\d+)\](.*)/) : trimmed.match(/^\[(\d+)\](.*)/);
+    const minusSegMatch = trimmed.match(/^-\[(\d+)\](.*)/);
+    const segMatch = braceSegMatch
+      ? braceSegMatch[1].match(/^\[(\d+)\](.*)/)
+      : (minusSegMatch || trimmed.match(/^\[(\d+)\](.*)/));
     const isBraceCut = !!braceSegMatch;
+    const isMinusCut = !!minusSegMatch;
     if (segMatch) {
       flushPending();
       const id = parseInt(segMatch[1]);
@@ -948,7 +1006,7 @@ function mergeDocIntoTranscript(transcript, docContent) {
       if (!seg) continue;
 
       let rest = segMatch[2].trim();
-      let cut = isBraceCut;
+      let cut = isBraceCut || isMinusCut;
       let inlineSpeaker = null;
 
       // Legacy syntax: [N] CUT  text
