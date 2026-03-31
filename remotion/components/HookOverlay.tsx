@@ -26,6 +26,16 @@ function isPunctuationOnlyTokenText(text: string) {
   return /^[^\w\s']+$/.test(text.trim());
 }
 
+function appendPunctuationDedup(prevText: string, punctuationToken: string) {
+  let next = prevText;
+  for (const ch of punctuationToken) {
+    if (!next.trim().endsWith(ch)) {
+      next += ch;
+    }
+  }
+  return next;
+}
+
 /**
  * Converts segment tokens to Caption objects for createTikTokStyleCaptions.
  *
@@ -40,10 +50,21 @@ function buildCaptions(
   sourceEnd: number,
   endBufferSeconds: number,
 ): Caption[] {
+  const dedupedTokens: Token[] = [];
+  const seenTokenAtMoment = new Set<string>();
+  for (let i = tokens.length - 1; i >= 0; i--) {
+    const t = tokens[i];
+    if (isSpecialToken(t) || t.text.trim() === '') continue;
+    const key = `${t.t_dtw}|${t.text.trim().toLowerCase()}`;
+    if (seenTokenAtMoment.has(key)) continue;
+    seenTokenAtMoment.add(key);
+    dedupedTokens.push(t);
+  }
+  dedupedTokens.reverse();
+
   // Group BPE sub-tokens into word-level groups
   const wordGroups: { text: string; t_dtw: number }[] = [];
-  for (const t of tokens) {
-    if (isSpecialToken(t) || t.text.trim() === '') continue;
+  for (const t of dedupedTokens) {
     const trimmed = t.text.trim();
     const punctuationOnly = isPunctuationOnlyTokenText(trimmed);
     if (wordGroups.length === 0) {
@@ -54,9 +75,7 @@ function buildCaptions(
       const prevTrimmed = prev.text.trim();
 
       if (punctuationOnly) {
-        if (!prevTrimmed.endsWith(trimmed)) {
-          prev.text += trimmed;
-        }
+        prev.text = appendPunctuationDedup(prev.text, trimmed);
         continue;
       }
 
@@ -66,11 +85,17 @@ function buildCaptions(
       const shouldMergeShortNumericParts = bothNumeric
         && prevTrimmed.length <= 2
         && trimmed.length <= 2;
-      const shouldAttach = !t.text.startsWith(' ')
+      const sameMomentContinuation = !t.text.startsWith(' ')
+        && Math.abs(t.t_dtw - prev.t_dtw) <= 0.01;
+      const shouldAttach = sameMomentContinuation
         || isContractionSuffixTokenText(trimmed)
         || shouldMergeShortNumericParts;
 
       if (isNumericDuplicate) {
+        continue;
+      }
+
+      if (shouldAttach && prevTrimmed.endsWith(trimmed)) {
         continue;
       }
 
