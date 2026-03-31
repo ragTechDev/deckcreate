@@ -161,22 +161,38 @@ export default function CameraPage() {
   // ── Load data ───────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    Promise.all([
-      fetch('/transcribe/output/camera/detections.json').then(r => r.ok ? r.json() : []),
-      fetch('/transcribe/output/edit/transcript.json').then(r => r.json()),
-    ])
-      .then(([dets, transcript]) => {
-        setRawDetections(dets as Detection[]);
-        const names = [
-          ...new Set<string>(
-            (transcript.segments as { speaker: string }[])
-              .map(s => s.speaker).filter(Boolean)
-          ),
-        ].sort();
-        setSpeakers(names);
-      })
-      .catch(err => setError(String(err)))
-      .finally(() => setLoading(false));
+    (async () => {
+      try {
+        const detectionsRes = await fetch('/transcribe/output/camera/detections.json');
+        const transcriptRes = await fetch('/transcribe/output/edit/transcript.json');
+
+        const dets: Detection[] = detectionsRes.ok ? await detectionsRes.json() : [];
+        setRawDetections(dets);
+
+        if (transcriptRes.ok) {
+          const transcript = await transcriptRes.json();
+          const names = [
+            ...new Set<string>(
+              (transcript.segments as { speaker: string }[])
+                .map(s => s.speaker).filter(Boolean),
+            ),
+          ].sort();
+          setSpeakers(names);
+        } else {
+          setSpeakers([]);
+        }
+
+        if (!detectionsRes.ok) {
+          setError('Detections file not found. Run camera setup first, or draw boxes manually.');
+        } else if (!transcriptRes.ok) {
+          setError('Transcript not found. You can still position boxes, but speaker list will be empty until transcript is generated.');
+        }
+      } catch (err) {
+        setError(String(err));
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, []);
 
   // ── Initialise boxes once the real image size is known ───────────────────────
@@ -551,7 +567,7 @@ export default function CameraPage() {
               ))}
 
               {boxes.length > 0 && speakers.length === 0 && (
-                <Alert color="yellow" size="xs">
+                <Alert color="yellow">
                   No speakers in transcript yet. Run <code>npm run assign-speakers</code> first.
                 </Alert>
               )}

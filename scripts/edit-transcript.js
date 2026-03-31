@@ -1395,6 +1395,7 @@ async function main() {
 
   const sentencesSrtPath = outputPath.replace(/\.json$/, '.sentences.srt');
 
+  await fs.ensureDir(path.dirname(outputPath));
   await fs.writeJson(outputPath, transcript, { spaces: 2 });
   await fs.writeFile(sentencesSrtPath, buildSentencesSrt(transcript.segments, transcript.meta), 'utf8');
   await fs.writeFile(docPath, buildDoc(transcript), 'utf8');

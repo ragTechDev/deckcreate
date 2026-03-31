@@ -2,6 +2,68 @@
 
 Video podcast editing and carousel generation pipeline.
 
+## Prerequisites
+
+### Option 1: Run locally (without containers)
+
+**Required:**
+- **Node.js** (v18 or later)
+- **ffmpeg** — required for audio extraction and video processing
+  - macOS: `brew install ffmpeg`
+  - Ubuntu/Debian: `sudo apt-get install ffmpeg`
+  - Windows: Download from [ffmpeg.org](https://ffmpeg.org/download.html)
+- **Python 3.9–3.12** (use 3.12) — required for diarization and forced alignment
+  - See [Python setup section](#python-setup-for-diarization--forced-alignment-windows) below
+
+**Verify installation:**
+```bash
+ffmpeg -version
+python --version
+node --version
+```
+
+### Option 2: Run using Docker
+
+All prerequisites (ffmpeg, Python, Node.js, dependencies) are included in the Docker container.
+
+**Required:**
+- Docker and Docker Compose
+
+**Run the wizard:**
+```bash
+docker-compose run --rm --service-ports wizard
+```
+
+**Run other commands:**
+```bash
+docker-compose run --rm app npm run transcribe
+docker-compose run --rm app npm run remotion
+```
+
+**Caption alignment test in Docker:**
+
+When the wizard prompts for the caption alignment test, it starts a server on port 3001 in the container. Use `--service-ports` (shown above) so that port is published to the host, then open:
+```
+http://localhost:3001/caption_test.html
+```
+
+The page reads audio from `public/transcribe/input/` (auto-detects `audio.wav` first), and shows a status line under the player if no playable file is found.
+
+The wizard will wait for you to complete the test in your browser before continuing.
+
+**Camera angle step in Docker:**
+
+The wizard includes an optional camera-angle setup step (speaker closeup cuts). When prompted, open:
+```
+http://localhost:3000/camera
+```
+
+This works in Docker when the wizard is started with `--service-ports` (as shown above).
+
+See [docker-compose.yml](docker-compose.yml) for all available services.
+
+---
+
 ## Quick start — Video Editing
 
 ```

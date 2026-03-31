@@ -14,7 +14,7 @@ export const RemotionRoot: React.FC = () => {
         width={1920}
         height={1080}
         defaultProps={{
-            src: 'input/video/synced-output-rekf.mp4',
+            src: 'sync/output/synced-output.mp4',
             transcriptSrc: 'transcribe/output/edit/transcript.json',
             cameraProfilesSrc: 'transcribe/output/camera/camera-profiles.json',
             hookMusicSrc: 'sounds/jazz-cafe-music.mp3',

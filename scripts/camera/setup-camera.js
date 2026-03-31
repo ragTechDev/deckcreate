@@ -79,6 +79,34 @@ function extractFrame(videoPath, timestamp, outputPath) {
   });
 }
 
+async function detectFacesWithFallback({ pythonBin, videoPath, videoStart, framePath, numSpeakers }) {
+  const offsets = [0, 0.6, 1.2, 2.0, -0.6, -1.2];
+  let best = { faces: [], timestamp: Math.max(0, videoStart) };
+
+  for (const offset of offsets) {
+    const timestamp = Math.max(0, Number(videoStart) + offset);
+    try {
+      await extractFrame(videoPath, timestamp, framePath);
+      const faces = await runDetectFaces(pythonBin, framePath, numSpeakers);
+
+      if (faces.length > best.faces.length) {
+        best = { faces, timestamp };
+      }
+
+      if (numSpeakers && faces.length >= numSpeakers) {
+        return { ...best, complete: true };
+      }
+      if (!numSpeakers && faces.length > 0) {
+        return { ...best, complete: true };
+      }
+    } catch (err) {
+      console.warn(`  ⚠ Face detection probe failed at t=${timestamp.toFixed(2)}s: ${err.message}`);
+    }
+  }
+
+  return { ...best, complete: false };
+}
+
 function runDetectFaces(pythonBin, framePath, numSpeakers) {
   const scriptPath = path.join(__dirname, 'detect-faces.py');
   const pyArgs = [scriptPath, framePath];
@@ -173,10 +201,23 @@ async function main() {
     await fs.writeJson(detectPath, [], { spaces: 2 });
   } else {
     console.log('\nDetecting faces (mediapipe models download on first run)...');
-    const faces = await runDetectFaces(pythonBin, framePath, numSpeakers);
+    const detection = await detectFacesWithFallback({
+      pythonBin,
+      videoPath,
+      videoStart,
+      framePath,
+      numSpeakers,
+    });
+    const faces = detection.faces;
+    if (faces.length > 0) {
+      console.log(`  Best frame: t=${detection.timestamp.toFixed(2)}s`);
+    }
     console.log(`  ${faces.length} face(s) detected.`);
     await fs.writeJson(detectPath, faces, { spaces: 2 });
     console.log(`  Saved: ${detectPath}`);
+    if (!detection.complete && faces.length === 0) {
+      console.log('  ⚠ No faces auto-detected. Continue in /camera and draw boxes manually.');
+    }
   }
 
   // 5. Launch Next.js dev server (skip if --detect-only)

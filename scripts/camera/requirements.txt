@@ -1,2 +1,2 @@
-mediapipe
-pillow
+mediapipe==0.10.14
+pillow==10.4.0

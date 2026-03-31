@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { OffthreadVideo, Sequence, useCurrentFrame, useVideoConfig } from 'remotion';
+import { OffthreadVideo, Sequence, useCurrentFrame, useVideoConfig, getRemotionEnvironment } from 'remotion';
 import type { Segment, TimeCut } from '../types/transcript';
 
 type SubClip = { sourceStart: number; sourceEnd: number };
@@ -144,6 +144,7 @@ const SectionGroupPlayer: React.FC<{
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
+  const isStudio = getRemotionEnvironment().isStudio;
   const debugTiming = isTimingDebugEnabled();
   const lastLoggedSectionRef = useRef<number>(-1);
   const totalFrames = sections.reduce((sum, s) => sum + (s.trimAfter - s.trimBefore), 0);
@@ -201,12 +202,13 @@ const SectionGroupPlayer: React.FC<{
   return (
     <>
       <OffthreadVideo
-        pauseWhenBuffering
+        pauseWhenBuffering={!isStudio}
         // #t=0, prevents Remotion adding its own time fragment based on trimBefore/trimAfter
         src={`${src}#t=0,`}
         trimBefore={cut.trimBefore}
-        // Disable time-shift snapping; any drift can shave off word starts/ends.
-        acceptableTimeShiftInSeconds={0}
+        // Studio preview: allow slight drift for smoother playback under heavy jump-cuts.
+        // Final render: keep strict timing.
+        acceptableTimeShiftInSeconds={isStudio ? 0.35 : 0}
         // Give the compositor extra time for large seeks deep into a long video file.
         delayRenderTimeoutInMilliseconds={120000}
         volume={effectiveVolume}

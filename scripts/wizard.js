@@ -80,6 +80,24 @@ async function runStep(label, cmd, args, outputPath) {
   }
 }
 
+function isDockerEnv() {
+  return fs.existsSync('/.dockerenv') || process.env.DOCKER === '1';
+}
+
+async function waitForHttp(url, timeoutMs = 30000, intervalMs = 500) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const res = await fetch(url, { method: 'GET' });
+      if (res.ok) return true;
+    } catch {
+      // not ready yet
+    }
+    await new Promise(r => setTimeout(r, intervalMs));
+  }
+  return false;
+}
+
 /** Run one step, streaming prefixed output. Resolves/rejects with captured stderr. */
 function runStep_parallel(label, cmd, args) {
   return new Promise((resolve, reject) => {
@@ -371,7 +389,11 @@ async function main() {
     multiSpeaker = numSpeakers > 1;
   } else {
     // Resuming — infer from existing files
-    mode = existing.videoInInput ? 3 : 4;
+    // Prefer any available video source (transcribe/input or sync/output)
+    // so downstream video-dependent steps (camera/remotion) remain enabled.
+    if (existing.videoInInput) mode = 3;
+    else if (existing.syncedVideo) mode = 1;
+    else mode = 4;
     multiSpeaker = existing.diarization;
     numSpeakers = multiSpeaker ? 2 : 1; // exact count only matters for a fresh diarize run
 
@@ -610,7 +632,7 @@ async function main() {
     console.log('\n  ── Caption alignment test ────────────────────────────');
     console.log('  Starting local server for caption_test.html...\n');
 
-    const serveProc = spawn('npx', ['serve', 'public/transcribe', '-p', '3001', '--no-clipboard'], {
+    const serveProc = spawn('npx', ['serve', 'public/transcribe', '--listen', 'tcp://0.0.0.0:3001', '--no-clipboard'], {
       cwd,
       shell: process.platform === 'win32',
       detached: true,
@@ -740,19 +762,43 @@ async function main() {
         console.log('  You can draw boxes manually in the GUI.');
       }
 
-      // Spawn dev server detached so we can still read stdin
-      const devServer = spawn('npm', ['run', 'dev'], {
+      // Spawn dev server and capture logs so startup failures are visible.
+      let devLog = '';
+      let devExitedCode = null;
+      const devServer = spawn('npm', ['run', 'dev', '--', '--hostname', '0.0.0.0', '--port', '3000'], {
         cwd,
         shell: process.platform === 'win32',
-        detached: true,
-        stdio: 'ignore',
+        stdio: ['ignore', 'pipe', 'pipe'],
       });
-      devServer.unref();
+      const appendDevLog = (chunk) => {
+        devLog += chunk.toString();
+        if (devLog.length > 6000) devLog = devLog.slice(-6000);
+      };
+      devServer.stdout.on('data', appendDevLog);
+      devServer.stderr.on('data', appendDevLog);
+      devServer.on('close', code => { devExitedCode = code; });
 
-      // Give the server a moment to start
-      await new Promise(r => setTimeout(r, 3000));
+      const cameraUrl = 'http://127.0.0.1:3000/camera';
+      const serverReady = await waitForHttp(cameraUrl, 90000, 700);
 
       console.log('\n  → Open http://localhost:3000/camera in your browser');
+      if (isDockerEnv()) {
+        console.log('  (Docker) Ensure you started wizard with: docker-compose run --rm --service-ports wizard');
+      }
+      if (!serverReady) {
+        if (devExitedCode !== null) {
+          console.log(`  ✗ Next.js dev server exited early (code ${devExitedCode}).`);
+          if (devLog.trim()) {
+            console.log('  Last server log lines:');
+            console.log('  ─────────────────────────────────────────────────────');
+            console.log(devLog.split('\n').slice(-12).map(l => `  ${l}`).join('\n'));
+            console.log('  ─────────────────────────────────────────────────────');
+          }
+        } else {
+          console.log('  ⚠ Server is running but /camera is still unreachable.');
+          console.log('  If it does not load, confirm port 3000 is free and retry with --service-ports.');
+        }
+      }
       console.log('  Assign faces to speakers, then click Save profiles.\n');
       await ask('  Press Enter when done saving...');
 

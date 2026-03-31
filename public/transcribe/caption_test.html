@@ -55,8 +55,9 @@
   <!-- Player -->
   <section>
     <audio id="audio" controls>
-      <source src="input/synced-output.wav" type="audio/wav">
+      <source id="audio-source" src="" type="audio/wav">
     </audio>
+    <div id="audio-status" style="font-size:12px;color:#888;margin-bottom:8px">Loading audio...</div>
     <div id="playback">
       <span id="current-time">0.000s</span>
       <span id="caption-box">—</span>
@@ -145,8 +146,48 @@
 
     // ── Player ────────────────────────────────────────────────────────────────
     const audio = document.getElementById('audio');
+    const audioSource = document.getElementById('audio-source');
+    const audioStatus = document.getElementById('audio-status');
     const timeEl = document.getElementById('current-time');
     const captionEl = document.getElementById('caption-box');
+
+    async function fileExists(url) {
+      try {
+        const res = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+        return res.ok;
+      } catch {
+        return false;
+      }
+    }
+
+    async function configureAudioSource() {
+      const candidates = [
+        { src: 'input/audio.wav', type: 'audio/wav' },
+        { src: 'input/synced-output.wav', type: 'audio/wav' },
+        { src: 'input/audio.mp3', type: 'audio/mpeg' },
+        { src: 'input/audio.m4a', type: 'audio/mp4' },
+        { src: 'input/audio.aac', type: 'audio/aac' },
+      ];
+
+      for (const candidate of candidates) {
+        const ok = await fileExists(candidate.src);
+        if (!ok) continue;
+        audioSource.src = candidate.src;
+        audioSource.type = candidate.type;
+        audio.load();
+        audioStatus.textContent = `Loaded: ${candidate.src}`;
+        return true;
+      }
+
+      audioStatus.style.color = '#f44';
+      audioStatus.textContent = 'No input audio found. Put an audio file in public/transcribe/input/ (audio.wav, audio.mp3, audio.m4a, or audio.aac), then refresh this page.';
+      return false;
+    }
+
+    audio.addEventListener('error', () => {
+      audioStatus.style.color = '#f44';
+      audioStatus.textContent = 'Audio failed to load. Check that the file exists in public/transcribe/input/ and is a valid format.';
+    });
 
     function tick() {
       const t = audio.currentTime;
@@ -274,7 +315,7 @@
     }
 
     // ── Init ──────────────────────────────────────────────────────────────────
-    loadData().then(() => {
+    Promise.all([configureAudioSource(), loadData()]).then(() => {
       addMeasurement();
       addMeasurement();
     });

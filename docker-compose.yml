@@ -1,0 +1,88 @@
+version: '3.8'
+
+services:
+  # Main application service
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      # Mount source code for development (exclude whisper.cpp to avoid locking)
+      - .:/app:delegated
+      # Persist node_modules
+      - node_modules:/app/node_modules
+      # Mount public directory for input/output files
+      - ./public:/app/public
+    ports:
+      - "3000:3000"  # Next.js dev server
+      - "3001:3001"  # Serve for caption test
+    environment:
+      - NODE_ENV=development
+      - PYTHON_PATH=/usr/local/bin/python
+    stdin_open: true
+    tty: true
+    command: npm run dev -- --hostname 0.0.0.0 --port 3000
+
+  # Wizard service - interactive wizard for video editing
+  wizard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app:delegated
+      - node_modules:/app/node_modules
+      - ./public:/app/public
+    ports:
+      - "3000:3000"  # Camera setup GUI (/camera)
+      - "3001:3001"  # Caption alignment test server
+    environment:
+      - PYTHON_PATH=/usr/local/bin/python
+    stdin_open: true
+    tty: true
+    command: npm run wizard
+
+  # Transcription service
+  transcribe:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app:delegated
+      - node_modules:/app/node_modules
+      - ./public:/app/public
+    environment:
+      - PYTHON_PATH=/usr/local/bin/python
+    command: npm run transcribe
+
+  # Diarization service
+  diarize:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app:delegated
+      - node_modules:/app/node_modules
+      - ./public:/app/public
+    environment:
+      - PYTHON_PATH=/usr/local/bin/python
+    command: npm run diarize -- --num-speakers 2
+
+  # Remotion preview service
+  remotion:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app:delegated
+      - node_modules:/app/node_modules
+      - ./public:/app/public
+    ports:
+      - "8000:8000"  # Remotion Studio
+    environment:
+      - NODE_ENV=development
+    stdin_open: true
+    tty: true
+    command: npm run remotion
+
+volumes:
+  node_modules:
