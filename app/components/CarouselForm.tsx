@@ -299,23 +299,21 @@ export function CarouselForm() {
               <Accordion variant="separated" value={accordionValue} onChange={setAccordionValue}>
                 {form.values.slides.map((slide, index) => (
                   <Accordion.Item key={index} value={`slide-${index}`}>
-                    <Accordion.Control>
-                      <Group justify="space-between" wrap="nowrap">
+                    <Group wrap="nowrap" gap={0}>
+                      <Accordion.Control style={{ flex: 1 }}>
                         <Text fw={500}>Slide {index + 1}</Text>
-                        {form.values.slides.length > 1 && (
-                          <ActionIcon
-                            color="red"
-                            variant="subtle"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              removeSlide(index);
-                            }}
-                          >
-                            <IconTrash size={16} />
-                          </ActionIcon>
-                        )}
-                      </Group>
-                    </Accordion.Control>
+                      </Accordion.Control>
+                      {form.values.slides.length > 1 && (
+                        <ActionIcon
+                          color="red"
+                          variant="subtle"
+                          onClick={() => removeSlide(index)}
+                          mr="xs"
+                        >
+                          <IconTrash size={16} />
+                        </ActionIcon>
+                      )}
+                    </Group>
                     <Accordion.Panel>
                       <Stack gap="sm">
                         <TimePicker

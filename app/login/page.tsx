@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Container,
@@ -29,10 +29,13 @@ export default function LoginPage() {
   const { login, user } = useAuth();
   const router = useRouter();
 
-  if (user) {
-    router.push('/auto-carousel');
-    return null;
-  }
+  useEffect(() => {
+    if (user) {
+      router.push('/auto-carousel');
+    }
+  }, [user, router]);
+
+  if (user) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

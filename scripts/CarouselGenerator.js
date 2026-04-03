@@ -121,12 +121,12 @@ class CarouselGenerator {
     // If video reset to 0, YouTube likely triggered anti-scraping - reload and retry
     if (errorInfo.videoCurrentTime === 0 && timestamp > 10) {
       console.log(`  Video reset detected - reloading page and retrying...`);
-      await page.reload({ waitUntil: 'networkidle0' });
+      await page.reload({ waitUntil: 'load' });
       await new Promise(resolve => setTimeout(resolve, 3000));
       
       // Navigate to the timestamp directly in URL
       const videoUrl = page.url().split('&t=')[0];
-      await page.goto(`${videoUrl}&t=${Math.floor(timestamp)}s&vq=hd1080`, { waitUntil: 'networkidle0' });
+      await page.goto(`${videoUrl}&t=${Math.floor(timestamp)}s&vq=hd1080`, { waitUntil: 'load' });
       await new Promise(resolve => setTimeout(resolve, 4000));
       
       // Re-check after reload
@@ -572,7 +572,7 @@ class CarouselGenerator {
     const firstTimestamp = this.config.slides[0].topTimestamp;
     const url = `https://www.youtube.com/watch?v=${this.config.videoId}&t=${firstTimestamp}s&vq=hd1080`;
     console.log(`Opening video: ${url}\n`);
-    await page.goto(url, { waitUntil: 'networkidle0', timeout: 30000 });
+    await page.goto(url, { waitUntil: 'load', timeout: 60000 });
 
     await page.waitForSelector('video', { timeout: 15000 });
     await new Promise(resolve => setTimeout(resolve, 8000));
