@@ -149,58 +149,121 @@ class CarouselGenerator {
       throw new Error(`YouTube error detected after seeking to ${timestamp}s - timestamp may be beyond video duration`);
     }
 
+    // Wait for video to have at least a current frame buffered (readyState >= 2)
+    console.log('  Waiting for video to buffer...');
+    const readyStateReached = await page.evaluate(() => {
+      return new Promise((resolve) => {
+        const video = document.querySelector('video');
+        if (!video) { resolve(false); return; }
+        if (video.readyState >= 2) { resolve(true); return; }
+        const onReady = () => { video.removeEventListener('canplay', onReady); resolve(true); };
+        video.addEventListener('canplay', onReady);
+        setTimeout(() => { video.removeEventListener('canplay', onReady); resolve(false); }, 8000);
+      });
+    });
+
+    const videoState = await page.evaluate(() => {
+      const video = document.querySelector('video');
+      if (!video) return null;
+      return {
+        readyState: video.readyState,
+        currentTime: video.currentTime,
+        videoWidth: video.videoWidth,
+        videoHeight: video.videoHeight,
+        networkState: video.networkState,
+        src: video.currentSrc ? video.currentSrc.slice(0, 80) : 'none',
+      };
+    });
+    console.log(`  Video state before capture: readyStateReached=${readyStateReached}`, videoState);
+
+    if (!readyStateReached || (videoState && videoState.readyState < 2)) {
+      console.warn('  WARNING: Video readyState < 2 — frame may be blank');
+    }
+
     console.log('  Extracting video frame...');
 
     let screenshot = null;
     const maxRetries = 3;
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
-      const frameDataUrl = await page.evaluate(() => {
+      const frameResult = await page.evaluate(() => {
         const video = document.querySelector('video');
-        if (!video) {
-          throw new Error('Video element not found');
-        }
-
-        // Ensure video has valid dimensions
+        if (!video) throw new Error('Video element not found');
         if (video.videoWidth === 0 || video.videoHeight === 0) {
-          return null;
+          return { dataUrl: null, reason: `video dimensions zero (${video.videoWidth}x${video.videoHeight})` };
         }
 
         const canvas = document.createElement('canvas');
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
-        
         const ctx = canvas.getContext('2d');
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        
-        const dataUrl = canvas.toDataURL('image/png');
-        // Check for empty/invalid canvas output
-        if (!dataUrl || dataUrl === 'data:,' || dataUrl.length < 100) {
-          return null;
+
+        let tainted = false;
+        try {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        } catch (e) {
+          return { dataUrl: null, reason: `drawImage failed: ${e.message}` };
         }
-        return dataUrl;
+
+        let dataUrl;
+        try {
+          dataUrl = canvas.toDataURL('image/png');
+        } catch (e) {
+          tainted = true;
+          return { dataUrl: null, reason: `toDataURL failed (likely tainted canvas / CORS): ${e.message}` };
+        }
+
+        if (!dataUrl || dataUrl === 'data:,' || dataUrl.length < 100) {
+          return { dataUrl: null, reason: 'dataUrl empty or too short' };
+        }
+
+        // Sample pixels to detect blank (all-black or all-transparent) frames
+        const imageData = ctx.getImageData(0, 0, Math.min(canvas.width, 200), Math.min(canvas.height, 200));
+        const pixels = imageData.data;
+        let nonBlackPixels = 0;
+        for (let i = 0; i < pixels.length; i += 4) {
+          const r = pixels[i], g = pixels[i+1], b = pixels[i+2], a = pixels[i+3];
+          if (a > 10 && (r > 10 || g > 10 || b > 10)) nonBlackPixels++;
+        }
+        const totalPixels = pixels.length / 4;
+        const nonBlackRatio = nonBlackPixels / totalPixels;
+
+        return { dataUrl, reason: null, tainted, nonBlackRatio, totalPixels };
       });
 
-      if (frameDataUrl) {
-        const base64Data = frameDataUrl.replace(/^data:image\/png;base64,/, '');
+      console.log(`  Frame capture attempt ${attempt + 1}:`, {
+        hasData: !!frameResult?.dataUrl,
+        reason: frameResult?.reason,
+        nonBlackRatio: frameResult?.nonBlackRatio?.toFixed(3),
+      });
+
+      if (frameResult?.reason) {
+        console.warn(`  Frame blank reason: ${frameResult.reason}`);
+      }
+
+      if (frameResult?.nonBlackRatio !== undefined && frameResult.nonBlackRatio < 0.01) {
+        console.warn(`  WARNING: Frame appears blank — only ${(frameResult.nonBlackRatio * 100).toFixed(1)}% non-black pixels. Video may not have buffered.`);
+      }
+
+      if (frameResult?.dataUrl) {
+        const base64Data = frameResult.dataUrl.replace(/^data:image\/png;base64,/, '');
         const buffer = Buffer.from(base64Data, 'base64');
-        // Validate buffer has reasonable size (at least 1KB for a real image)
         if (buffer.length > 1024) {
           screenshot = buffer;
           break;
         }
+        console.warn(`  Buffer too small (${buffer.length} bytes), retrying...`);
       }
 
-      console.log(`  Frame extraction attempt ${attempt + 1} failed, retrying...`);
       await new Promise(resolve => setTimeout(resolve, 3000));
     }
 
     if (!screenshot) {
-      // Fallback: take a page screenshot of the video element
       console.log('  Falling back to element screenshot...');
       const videoElement = await page.$('video');
       if (videoElement) {
         screenshot = await videoElement.screenshot({ type: 'png' });
+        console.log(`  Element screenshot size: ${screenshot.length} bytes`);
       } else {
         throw new Error('Could not extract video frame after multiple attempts');
       }
