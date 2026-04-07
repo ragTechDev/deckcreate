@@ -5,6 +5,14 @@ import path from 'path';
 let puppeteer;
 let isStealthPluginLoaded = false;
 
+const IS_SERVERLESS = !!(process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.VERCEL);
+
+// Default to the chromium-v131 release which aligns with puppeteer v23's bundled Chrome.
+// Override via CHROMIUM_BINARY_URL env var if needed.
+const CHROMIUM_BINARY_URL =
+  process.env.CHROMIUM_BINARY_URL ||
+  'https://github.com/Sparticuz/chromium/releases/download/v131.0.1/chromium-v131.0.1-pack.tar';
+
 async function loadPuppeteer() {
   if (!puppeteer) {
     puppeteer = (await import('puppeteer-extra')).default;
@@ -32,9 +40,22 @@ class CarouselGenerator {
       await fs.ensureDir(this.outputDir);
     }
     const pptr = await loadPuppeteer();
+
+    let executablePath;
+    let extraArgs = [];
+
+    if (IS_SERVERLESS) {
+      const chromium = (await import('@sparticuz/chromium-min')).default;
+      executablePath = await chromium.executablePath(CHROMIUM_BINARY_URL);
+      extraArgs = chromium.args;
+      console.log(`Using serverless Chromium: ${executablePath}`);
+    }
+
     this.browser = await pptr.launch({
       headless: true,
+      executablePath,
       args: [
+        ...extraArgs,
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-blink-features=AutomationControlled',
