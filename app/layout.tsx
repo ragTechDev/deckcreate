@@ -34,7 +34,7 @@ export default function RootLayout({
       <head>
         <ColorSchemeScript />
       </head>
-      <body className={nunito.variable}>
+      <body className={nunito.variable} suppressHydrationWarning>
         <MantineProvider theme={theme}>
           <AuthProvider>
             <Notifications position="top-right" />

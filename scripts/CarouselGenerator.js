@@ -44,7 +44,8 @@ class CarouselGenerator {
         '--force-device-scale-factor=1',
         '--high-dpi-support=1',
         '--start-maximized',
-        '--disable-notifications'
+        '--disable-notifications',
+        '--disable-gpu-memory-buffer-video-frames'
       ],
       protocolTimeout: 60000,
       defaultViewport: null
@@ -186,87 +187,40 @@ class CarouselGenerator {
     const maxRetries = 3;
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
-      const frameResult = await page.evaluate(() => {
-        const video = document.querySelector('video');
-        if (!video) throw new Error('Video element not found');
-        if (video.videoWidth === 0 || video.videoHeight === 0) {
-          return { dataUrl: null, reason: `video dimensions zero (${video.videoWidth}x${video.videoHeight})` };
-        }
+      // Primary method: element screenshot via DevTools protocol — captures GPU-composited frames
+      const videoElement = await page.$('video');
+      if (!videoElement) throw new Error('Video element not found');
 
-        const canvas = document.createElement('canvas');
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        const ctx = canvas.getContext('2d');
+      const elementShot = await videoElement.screenshot({ type: 'png' });
+      console.log(`  Element screenshot attempt ${attempt + 1}: ${elementShot.length} bytes`);
 
-        let tainted = false;
-        try {
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        } catch (e) {
-          return { dataUrl: null, reason: `drawImage failed: ${e.message}` };
-        }
+      // Detect blank frames in Node.js using Sharp — avoids passing large data to browser context
+      const { data, info } = await sharp(elementShot)
+        .resize(100, 100, { fit: 'fill' })
+        .raw()
+        .toBuffer({ resolveWithObject: true });
 
-        let dataUrl;
-        try {
-          dataUrl = canvas.toDataURL('image/png');
-        } catch (e) {
-          tainted = true;
-          return { dataUrl: null, reason: `toDataURL failed (likely tainted canvas / CORS): ${e.message}` };
-        }
+      let nonBlack = 0;
+      const channels = info.channels;
+      for (let i = 0; i < data.length; i += channels) {
+        const r = data[i], g = data[i + 1], b = data[i + 2];
+        if (r > 10 || g > 10 || b > 10) nonBlack++;
+      }
+      const ratio = nonBlack / (info.width * info.height);
+      console.log(`  Non-black pixel ratio: ${ratio.toFixed(3)}`);
 
-        if (!dataUrl || dataUrl === 'data:,' || dataUrl.length < 100) {
-          return { dataUrl: null, reason: 'dataUrl empty or too short' };
-        }
-
-        // Sample pixels to detect blank (all-black or all-transparent) frames
-        const imageData = ctx.getImageData(0, 0, Math.min(canvas.width, 200), Math.min(canvas.height, 200));
-        const pixels = imageData.data;
-        let nonBlackPixels = 0;
-        for (let i = 0; i < pixels.length; i += 4) {
-          const r = pixels[i], g = pixels[i+1], b = pixels[i+2], a = pixels[i+3];
-          if (a > 10 && (r > 10 || g > 10 || b > 10)) nonBlackPixels++;
-        }
-        const totalPixels = pixels.length / 4;
-        const nonBlackRatio = nonBlackPixels / totalPixels;
-
-        return { dataUrl, reason: null, tainted, nonBlackRatio, totalPixels };
-      });
-
-      console.log(`  Frame capture attempt ${attempt + 1}:`, {
-        hasData: !!frameResult?.dataUrl,
-        reason: frameResult?.reason,
-        nonBlackRatio: frameResult?.nonBlackRatio?.toFixed(3),
-      });
-
-      if (frameResult?.reason) {
-        console.warn(`  Frame blank reason: ${frameResult.reason}`);
+      if (ratio < 0.01) {
+        console.warn(`  Blank frame detected, retrying in 3s...`);
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        continue;
       }
 
-      if (frameResult?.nonBlackRatio !== undefined && frameResult.nonBlackRatio < 0.01) {
-        console.warn(`  WARNING: Frame appears blank — only ${(frameResult.nonBlackRatio * 100).toFixed(1)}% non-black pixels. Video may not have buffered.`);
-      }
-
-      if (frameResult?.dataUrl) {
-        const base64Data = frameResult.dataUrl.replace(/^data:image\/png;base64,/, '');
-        const buffer = Buffer.from(base64Data, 'base64');
-        if (buffer.length > 1024) {
-          screenshot = buffer;
-          break;
-        }
-        console.warn(`  Buffer too small (${buffer.length} bytes), retrying...`);
-      }
-
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      screenshot = elementShot;
+      break;
     }
 
     if (!screenshot) {
-      console.log('  Falling back to element screenshot...');
-      const videoElement = await page.$('video');
-      if (videoElement) {
-        screenshot = await videoElement.screenshot({ type: 'png' });
-        console.log(`  Element screenshot size: ${screenshot.length} bytes`);
-      } else {
-        throw new Error('Could not extract video frame after multiple attempts');
-      }
+      throw new Error('Could not extract a non-blank video frame after multiple attempts');
     }
 
     console.log('  Frame extracted successfully');
@@ -616,6 +570,45 @@ class CarouselGenerator {
     }
   }
 
+  async skipAds(page) {
+    const maxAdWait = 30000;
+    const interval = 1000;
+    const start = Date.now();
+
+    while (Date.now() - start < maxAdWait) {
+      const adState = await page.evaluate(() => {
+        const player = document.querySelector('.html5-video-player');
+        const isAd = player && player.classList.contains('ad-showing');
+        const skipBtn = document.querySelector('.ytp-skip-ad-button, .ytp-ad-skip-button');
+        const adOverlay = document.querySelector('.ytp-ad-overlay-close-button');
+        return { isAd, hasSkip: !!skipBtn, hasOverlay: !!adOverlay };
+      });
+
+      if (!adState.isAd && !adState.hasOverlay) break;
+
+      if (adState.hasSkip) {
+        console.log('  Ad detected — clicking skip button...');
+        try {
+          await page.click('.ytp-skip-ad-button, .ytp-ad-skip-button');
+        } catch (_) {}
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        continue;
+      }
+
+      if (adState.hasOverlay) {
+        console.log('  Ad overlay detected — closing...');
+        try {
+          await page.click('.ytp-ad-overlay-close-button');
+        } catch (_) {}
+        await new Promise(resolve => setTimeout(resolve, 500));
+        continue;
+      }
+
+      console.log('  Waiting for ad to finish...');
+      await new Promise(resolve => setTimeout(resolve, interval));
+    }
+  }
+
   async generateCarousel() {
     console.log(`\n🎬 Generating carousel: ${this.config.name}`);
     console.log(`Total slides: ${this.config.slides.length}\n`);
@@ -650,10 +643,13 @@ class CarouselGenerator {
       console.log('Play button not found, video may be auto-playing');
     }
 
+    // Skip any ads before proceeding
+    await this.skipAds(page);
+
     try {
       await page.click('.ytp-settings-button');
       await new Promise(resolve => setTimeout(resolve, 500));
-      
+
       const qualityMenuItems = await page.$$('.ytp-menuitem');
       for (const item of qualityMenuItems) {
         const text = await page.evaluate(el => el.textContent, item);
@@ -663,15 +659,21 @@ class CarouselGenerator {
           break;
         }
       }
-      
+
       const qualityOptions = await page.$$('.ytp-quality-menu .ytp-menuitem');
       if (qualityOptions.length > 0) {
         await qualityOptions[0].click();
         await new Promise(resolve => setTimeout(resolve, 1000));
         console.log('Set to highest quality\n');
       }
+
+      // Close the settings panel
+      await page.keyboard.press('Escape');
+      await new Promise(resolve => setTimeout(resolve, 300));
     } catch (e) {
       console.log('Could not manually set quality via menu\n');
+      // Ensure settings panel is closed regardless
+      try { await page.keyboard.press('Escape'); } catch (_) {}
     }
 
     await page.evaluate(() => {
@@ -698,7 +700,17 @@ class CarouselGenerator {
         '.ytp-gradient-bottom',
         '.ytp-title',
         '.ytp-watermark',
-        '.ytp-pause-overlay'
+        '.ytp-pause-overlay',
+        '.ytp-settings-menu',
+        '.ytp-panel',
+        '.ytp-ad-overlay-container',
+        '.ytp-ad-image-overlay',
+        '.ytp-ad-text-overlay',
+        '.video-ads',
+        '.ytp-ad-player-overlay',
+        '#masthead-container',
+        '#related',
+        '#comments',
       ];
       
       elementsToHide.forEach(selector => {
