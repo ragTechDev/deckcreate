@@ -25,29 +25,21 @@ class CarouselGenerator {
       await fs.ensureDir(this.outputDir);
     }
 
-    const launchArgs = [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-blink-features=AutomationControlled',
-      '--disable-features=IsolateOrigins,site-per-process',
-      '--disable-dev-shm-usage',
-      '--enable-features=NetworkService,NetworkServiceInProcess',
-      '--force-device-scale-factor=1',
-      '--high-dpi-support=1',
-      '--start-maximized',
-      '--disable-notifications',
-      '--disable-gpu-memory-buffer-video-frames',
-    ];
-
     if (IS_SERVERLESS) {
       const chromium = (await import('@sparticuz/chromium-min')).default;
       const executablePath = await chromium.executablePath(CHROMIUM_BINARY_URL);
       console.log(`Using serverless Chromium: ${executablePath}`);
       const { launch } = await import('puppeteer-core');
+      // Use chromium.args as-is — they're tuned for Lambda.
+      // Only add flags that don't conflict with chromium.args.
       this.browser = await launch({
         headless: true,
         executablePath,
-        args: [...chromium.args, ...launchArgs],
+        args: [
+          ...chromium.args,
+          '--disable-blink-features=AutomationControlled',
+          '--disable-notifications',
+        ],
         protocolTimeout: 60000,
         defaultViewport: null,
       });
@@ -55,7 +47,19 @@ class CarouselGenerator {
       const { launch } = await import('puppeteer');
       this.browser = await launch({
         headless: true,
-        args: launchArgs,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-blink-features=AutomationControlled',
+          '--disable-features=IsolateOrigins,site-per-process',
+          '--disable-dev-shm-usage',
+          '--enable-features=NetworkService,NetworkServiceInProcess',
+          '--force-device-scale-factor=1',
+          '--high-dpi-support=1',
+          '--start-maximized',
+          '--disable-notifications',
+          '--disable-gpu-memory-buffer-video-frames',
+        ],
         protocolTimeout: 60000,
         defaultViewport: null,
       });
