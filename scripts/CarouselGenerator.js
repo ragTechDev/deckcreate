@@ -640,6 +640,23 @@ class CarouselGenerator {
     console.log(`Opening video: ${url}\n`);
     await page.goto(url, { waitUntil: 'load', timeout: 60000 });
 
+    // Log actual URL to detect redirects (consent pages, region blocks, etc.)
+    const landedUrl = page.url();
+    console.log(`Landed on: ${landedUrl}`);
+
+    // Dismiss cookie/consent banner if present (common outside US)
+    try {
+      const consentButton = await page.$('button[aria-label="Accept all"], button[aria-label="Reject all"], form[action*="consent"] button');
+      if (consentButton) {
+        console.log('Consent banner detected — dismissing...');
+        await consentButton.click();
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        await page.waitForSelector('video', { timeout: 10000 });
+      }
+    } catch (e) {
+      // No consent banner, continue
+    }
+
     await page.waitForSelector('video', { timeout: 15000 });
     await new Promise(resolve => setTimeout(resolve, 8000));
 
