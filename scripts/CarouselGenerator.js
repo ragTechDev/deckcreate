@@ -567,12 +567,12 @@ class CarouselGenerator {
       const player = document.querySelector('.html5-video-player');
       if (!player) return;
       if (typeof player.setPlaybackQualityRange === 'function') {
-        player.setPlaybackQualityRange('hd720', 'hd720');
+        player.setPlaybackQualityRange('large', 'large');
       } else if (typeof player.setPlaybackQuality === 'function') {
-        player.setPlaybackQuality('hd720');
+        player.setPlaybackQuality('large');
       }
     });
-    console.log('Quality set to 720p');
+    console.log('Quality set to 480p');
 
     // Hide UI chrome so it doesn't bleed into screenshots
     await page.evaluate(() => {
