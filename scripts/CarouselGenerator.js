@@ -96,8 +96,8 @@ class CarouselGenerator {
       }
     }, timestamp);
 
-    // Wait longer for YouTube to buffer to the target timestamp
-    await new Promise(resolve => setTimeout(resolve, 4000));
+    // Wait for YouTube to buffer to the target timestamp
+    await new Promise(resolve => setTimeout(resolve, 6000));
 
     await page.evaluate(() => {
       const video = document.querySelector('video');
@@ -180,7 +180,7 @@ class CarouselGenerator {
         if (video.readyState >= 2) { resolve(true); return; }
         const onReady = () => { video.removeEventListener('canplay', onReady); resolve(true); };
         video.addEventListener('canplay', onReady);
-        setTimeout(() => { video.removeEventListener('canplay', onReady); resolve(false); }, 8000);
+        setTimeout(() => { video.removeEventListener('canplay', onReady); resolve(false); }, 15000);
       });
     });
 
@@ -683,9 +683,28 @@ class CarouselGenerator {
 
       const qualityOptions = await page.$$('.ytp-quality-menu .ytp-menuitem');
       if (qualityOptions.length > 0) {
-        await qualityOptions[0].click();
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        console.log('Set to highest quality\n');
+        // Prefer 1080p — avoids 4K which is too slow to buffer in headless environments.
+        // Fall back to the next best option if 1080p isn't available.
+        const preferred = ['1080', '720', '480'];
+        let selected = false;
+        for (const res of preferred) {
+          for (const item of qualityOptions) {
+            const text = await page.evaluate(el => el.textContent, item);
+            if (text && text.includes(res)) {
+              await item.click();
+              await new Promise(resolve => setTimeout(resolve, 1000));
+              console.log(`Set quality to ${res}p\n`);
+              selected = true;
+              break;
+            }
+          }
+          if (selected) break;
+        }
+        if (!selected) {
+          await qualityOptions[0].click();
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          console.log('Set to highest available quality\n');
+        }
       }
 
       // Close the settings panel
