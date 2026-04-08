@@ -70,7 +70,14 @@ class CarouselGenerator {
 
   async seekAndExtractFrame(page, timestamp) {
     console.log(`  Seeking to ${timestamp}s...`);
-    
+
+    // Check the page is still on a YouTube watch page before doing anything
+    const currentUrl = page.url();
+    console.log(`  Current URL: ${currentUrl}`);
+    if (!currentUrl.includes('youtube.com/watch')) {
+      throw new Error(`Page navigated away from YouTube to: ${currentUrl}`);
+    }
+
     // Clear any existing error state and reload if necessary
     await page.evaluate(() => {
       const errorElements = document.querySelectorAll('.ytp-error, .ytp-error-content-wrap');
@@ -626,7 +633,14 @@ class CarouselGenerator {
     const outputPaths = [];
 
     const page = await this.browser.newPage();
-    
+
+    // Log every top-level navigation so we can see redirects (consent, login, etc.)
+    page.on('framenavigated', (frame) => {
+      if (frame === page.mainFrame()) {
+        console.log(`[nav] ${frame.url()}`);
+      }
+    });
+
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     await page.setViewport({ width: 1920, height: 1080 });
     
