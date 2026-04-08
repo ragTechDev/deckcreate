@@ -36,7 +36,9 @@ class CarouselGenerator {
         headless: true,
         executablePath,
         args: [
-          ...chromium.args,
+          // Filter out autoplay restriction — embed needs autoplay to load video source
+          ...chromium.args.filter(arg => !arg.startsWith('--autoplay-policy')),
+          '--autoplay-policy=no-user-gesture-required',
           '--disable-blink-features=AutomationControlled',
           '--disable-notifications',
         ],
@@ -59,6 +61,7 @@ class CarouselGenerator {
           '--start-maximized',
           '--disable-notifications',
           '--disable-gpu-memory-buffer-video-frames',
+          '--autoplay-policy=no-user-gesture-required',
         ],
         protocolTimeout: 60000,
         defaultViewport: null,
@@ -75,177 +78,85 @@ class CarouselGenerator {
   async seekAndExtractFrame(page, timestamp) {
     console.log(`  Seeking to ${timestamp}s...`);
 
-    // Check the page is still on a YouTube watch page before doing anything
-    const currentUrl = page.url();
-    console.log(`  Current URL: ${currentUrl}`);
-    if (!currentUrl.includes('youtube') && !currentUrl.includes('youtube-nocookie')) {
-      throw new Error(`Page navigated away from YouTube to: ${currentUrl}`);
-    }
+    // Unblock video requests so this specific segment can load
+    this.allowVideoRequests = true;
 
-    // Clear any existing error state and reload if necessary
-    await page.evaluate(() => {
-      const errorElements = document.querySelectorAll('.ytp-error, .ytp-error-content-wrap');
-      errorElements.forEach(el => el.remove());
-    });
-
-    await page.evaluate((ts) => {
-      const video = document.querySelector('video');
-      if (video) {
-        video.currentTime = ts;
-        video.pause();
-      }
-    }, timestamp);
-
-    // Wait for YouTube to buffer to the target timestamp
-    await new Promise(resolve => setTimeout(resolve, 6000));
-
-    await page.evaluate(() => {
-      const video = document.querySelector('video');
-      if (video) {
-        video.pause();
-        video.removeAttribute('autoplay');
-        video.playbackRate = 0;
-      }
-    });
-
-    await new Promise(resolve => setTimeout(resolve, 1500));
-
-    const isPaused = await page.evaluate(() => {
-      const video = document.querySelector('video');
-      if (video) {
-        video.pause();
-        return video.paused;
-      }
-      return false;
-    });
-
-    console.log(`  Video paused: ${isPaused}`);
-
-    // Wait for video to be ready at the target timestamp
-    await new Promise(resolve => setTimeout(resolve, 3000));
-
-    // Check again for errors after seeking (errors may appear during playback)
-    const errorInfo = await page.evaluate(() => {
-      const errorElements = document.querySelectorAll('.ytp-error, .ytp-error-content-wrap');
-      const video = document.querySelector('video');
-      
-      return {
-        hasErrorElements: errorElements.length > 0,
-        hasVideoError: video && video.error ? true : false,
-        videoReadyState: video ? video.readyState : null,
-        videoCurrentTime: video ? video.currentTime : null,
-        videoNetworkState: video ? video.networkState : null,
-      };
-    });
-
-    console.log(`  Error check:`, errorInfo);
-
-    // If video reset to 0, YouTube likely triggered anti-scraping - reload and retry
-    if (errorInfo.videoCurrentTime === 0 && timestamp > 10) {
-      console.log(`  Video reset detected - reloading page and retrying...`);
-      await page.reload({ waitUntil: 'load' });
-      await new Promise(resolve => setTimeout(resolve, 3000));
-      
-      // Navigate to the timestamp directly in URL
-      const videoUrl = page.url().split('&t=')[0];
-      await page.goto(`${videoUrl}&t=${Math.floor(timestamp)}s&vq=hd1080`, { waitUntil: 'load' });
-      await new Promise(resolve => setTimeout(resolve, 4000));
-      
-      // Re-check after reload
-      const retryErrorInfo = await page.evaluate(() => {
-        const errorElements = document.querySelectorAll('.ytp-error, .ytp-error-content-wrap');
+    try {
+      // Seek and pause at target timestamp
+      await page.evaluate((ts) => {
         const video = document.querySelector('video');
+        if (video) {
+          video.currentTime = ts;
+          video.pause();
+        }
+      }, timestamp);
+
+      // Wait until the frame at this timestamp is buffered
+      console.log('  Waiting for video to buffer...');
+      const readyStateReached = await page.waitForFunction(
+        () => { const v = document.querySelector('video'); return v && v.readyState >= 2; },
+        { timeout: 20000 }
+      ).then(() => true).catch(() => false);
+
+      const videoState = await page.evaluate(() => {
+        const v = document.querySelector('video');
+        if (!v) return null;
         return {
-          hasErrorElements: errorElements.length > 0,
-          hasVideoError: video && video.error ? true : false,
-          videoCurrentTime: video ? video.currentTime : null,
+          readyState: v.readyState,
+          currentTime: v.currentTime,
+          videoWidth: v.videoWidth,
+          videoHeight: v.videoHeight,
+          networkState: v.networkState,
         };
       });
-      
-      console.log(`  After reload:`, retryErrorInfo);
-      
-      if (retryErrorInfo.hasErrorElements || retryErrorInfo.hasVideoError) {
-        throw new Error(`YouTube error detected after seeking to ${timestamp}s - timestamp may be beyond video duration`);
-      }
-    } else if (errorInfo.hasErrorElements || errorInfo.hasVideoError) {
-      throw new Error(`YouTube error detected after seeking to ${timestamp}s - timestamp may be beyond video duration`);
-    }
+      console.log(`  Video state: readyStateReached=${readyStateReached}`, videoState);
 
-    // Wait for video to have at least a current frame buffered (readyState >= 2)
-    console.log('  Waiting for video to buffer...');
-    const readyStateReached = await page.evaluate(() => {
-      return new Promise((resolve) => {
-        const video = document.querySelector('video');
-        if (!video) { resolve(false); return; }
-        if (video.readyState >= 2) { resolve(true); return; }
-        const onReady = () => { video.removeEventListener('canplay', onReady); resolve(true); };
-        video.addEventListener('canplay', onReady);
-        setTimeout(() => { video.removeEventListener('canplay', onReady); resolve(false); }, 15000);
-      });
-    });
-
-    const videoState = await page.evaluate(() => {
-      const video = document.querySelector('video');
-      if (!video) return null;
-      return {
-        readyState: video.readyState,
-        currentTime: video.currentTime,
-        videoWidth: video.videoWidth,
-        videoHeight: video.videoHeight,
-        networkState: video.networkState,
-        src: video.currentSrc ? video.currentSrc.slice(0, 80) : 'none',
-      };
-    });
-    console.log(`  Video state before capture: readyStateReached=${readyStateReached}`, videoState);
-
-    if (!readyStateReached || (videoState && videoState.readyState < 2)) {
-      console.warn('  WARNING: Video readyState < 2 — frame may be blank');
-    }
-
-    console.log('  Extracting video frame...');
-
-    let screenshot = null;
-    const maxRetries = 3;
-
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      // Primary method: element screenshot via DevTools protocol — captures GPU-composited frames
-      const videoElement = await page.$('video');
-      if (!videoElement) throw new Error('Video element not found');
-
-      const elementShot = await videoElement.screenshot({ type: 'png' });
-      console.log(`  Element screenshot attempt ${attempt + 1}: ${elementShot.length} bytes`);
-
-      // Detect blank frames in Node.js using Sharp — avoids passing large data to browser context
-      const { data, info } = await sharp(elementShot)
-        .resize(100, 100, { fit: 'fill' })
-        .raw()
-        .toBuffer({ resolveWithObject: true });
-
-      let nonBlack = 0;
-      const channels = info.channels;
-      for (let i = 0; i < data.length; i += channels) {
-        const r = data[i], g = data[i + 1], b = data[i + 2];
-        if (r > 10 || g > 10 || b > 10) nonBlack++;
-      }
-      const ratio = nonBlack / (info.width * info.height);
-      console.log(`  Non-black pixel ratio: ${ratio.toFixed(3)}`);
-
-      if (ratio < 0.01) {
-        console.warn(`  Blank frame detected, retrying in 3s...`);
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        continue;
+      if (!readyStateReached) {
+        console.warn('  WARNING: readyState < 2 after 20s — frame may be blank');
       }
 
-      screenshot = elementShot;
-      break;
-    }
+      // Capture the frame
+      let screenshot = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const videoElement = await page.$('video');
+        if (!videoElement) throw new Error('Video element not found');
 
-    if (!screenshot) {
-      throw new Error('Could not extract a non-blank video frame after multiple attempts');
-    }
+        const elementShot = await videoElement.screenshot({ type: 'png' });
+        console.log(`  Screenshot attempt ${attempt + 1}: ${elementShot.length} bytes`);
 
-    console.log('  Frame extracted successfully');
-    return screenshot;
+        const { data, info } = await sharp(elementShot)
+          .resize(100, 100, { fit: 'fill' })
+          .raw()
+          .toBuffer({ resolveWithObject: true });
+
+        let nonBlack = 0;
+        for (let i = 0; i < data.length; i += info.channels) {
+          if (data[i] > 10 || data[i + 1] > 10 || data[i + 2] > 10) nonBlack++;
+        }
+        const ratio = nonBlack / (info.width * info.height);
+        console.log(`  Non-black pixel ratio: ${ratio.toFixed(3)}`);
+
+        if (ratio < 0.01) {
+          console.warn('  Blank frame, retrying in 3s...');
+          await new Promise(r => setTimeout(r, 3000));
+          continue;
+        }
+
+        screenshot = elementShot;
+        break;
+      }
+
+      if (!screenshot) throw new Error('Could not extract a non-blank video frame after multiple attempts');
+
+      console.log('  Frame extracted successfully');
+      return screenshot;
+    } catch (e) {
+      this.allowVideoRequests = false;
+      throw e;
+    }
+    // Note: we intentionally leave allowVideoRequests = true after a successful
+    // capture so the player stays happy between seeks. The initial block during
+    // page setup was enough to prevent the HD streaming OOM.
   }
 
   wordWrapText(text, maxWidth, fontSize) {
@@ -591,88 +502,92 @@ class CarouselGenerator {
     }
   }
 
-  async skipAds(page) {
-    const maxAdWait = 30000;
-    const interval = 1000;
-    const start = Date.now();
-
-    while (Date.now() - start < maxAdWait) {
-      const adState = await page.evaluate(() => {
-        const player = document.querySelector('.html5-video-player');
-        const isAd = player && player.classList.contains('ad-showing');
-        const skipBtn = document.querySelector('.ytp-skip-ad-button, .ytp-ad-skip-button');
-        const adOverlay = document.querySelector('.ytp-ad-overlay-close-button');
-        return { isAd, hasSkip: !!skipBtn, hasOverlay: !!adOverlay };
-      });
-
-      if (!adState.isAd && !adState.hasOverlay) break;
-
-      if (adState.hasSkip) {
-        console.log('  Ad detected — clicking skip button...');
-        try {
-          await page.click('.ytp-skip-ad-button, .ytp-ad-skip-button');
-        } catch (_) {}
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        continue;
-      }
-
-      if (adState.hasOverlay) {
-        console.log('  Ad overlay detected — closing...');
-        try {
-          await page.click('.ytp-ad-overlay-close-button');
-        } catch (_) {}
-        await new Promise(resolve => setTimeout(resolve, 500));
-        continue;
-      }
-
-      console.log('  Waiting for ad to finish...');
-      await new Promise(resolve => setTimeout(resolve, interval));
-    }
-  }
 
   async generateCarousel() {
     console.log(`\n🎬 Generating carousel: ${this.config.name}`);
     console.log(`Total slides: ${this.config.slides.length}\n`);
 
     const outputPaths = [];
-
     const page = await this.browser.newPage();
 
-    // Log every top-level navigation so we can see redirects (consent, login, etc.)
-    page.on('framenavigated', (frame) => {
-      if (frame === page.mainFrame()) {
-        console.log(`[nav] ${frame.url()}`);
+    // Block video data (googlevideo.com media segments) during setup to prevent
+    // YouTube from streaming HD video and exhausting Lambda memory.
+    // seekAndExtractFrame toggles this per-frame.
+    this.allowVideoRequests = false;
+    await page.setRequestInterception(true);
+    page.on('request', req => {
+      if (!this.allowVideoRequests && req.resourceType() === 'media') {
+        req.abort();
+      } else {
+        req.continue();
       }
     });
 
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-    await page.setViewport({ width: 1280, height: 720 });
+    page.on('framenavigated', (frame) => {
+      if (frame === page.mainFrame()) console.log(`[nav] ${frame.url()}`);
+    });
 
-    // Use the embed player — far lighter than the full watch page.
-    // No consent banners, no heavy JS, no bot detection, quality set via URL.
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    await page.setViewport({ width: 1920, height: 1080 });
+
     const firstTimestamp = this.config.slides[0].topTimestamp;
-    const url = `https://www.youtube-nocookie.com/embed/${this.config.videoId}?start=${Math.floor(firstTimestamp)}&autoplay=1&mute=1&controls=0&vq=hd720`;
+    const url = `https://www.youtube.com/watch?v=${this.config.videoId}&t=${firstTimestamp}s`;
     console.log(`Opening video: ${url}\n`);
     await page.goto(url, { waitUntil: 'load', timeout: 60000 });
+    console.log(`Landed on: ${page.url()}`);
+
+    // Dismiss consent banner if present
+    try {
+      const consentBtn = await page.$('button[aria-label="Accept all"], form[action*="consent"] button');
+      if (consentBtn) {
+        console.log('Consent banner — dismissing...');
+        await consentBtn.click();
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    } catch (e) { /* no banner */ }
 
     await page.waitForSelector('video', { timeout: 15000 });
-    // Let the embed initialise and buffer a bit
-    await new Promise(resolve => setTimeout(resolve, 5000));
+
+    // Wait for YouTube player JS to expose the quality API
+    await page.waitForFunction(
+      () => {
+        const p = document.querySelector('.html5-video-player');
+        return p && typeof p.setPlaybackQuality === 'function';
+      },
+      { timeout: 15000 }
+    ).catch(() => console.log('Player quality API not available'));
+
+    // Set quality to 1080p via YouTube's internal JS API — no menu interaction needed
+    await page.evaluate(() => {
+      const player = document.querySelector('.html5-video-player');
+      if (!player) return;
+      if (typeof player.setPlaybackQualityRange === 'function') {
+        player.setPlaybackQualityRange('hd1080', 'hd1080');
+      } else if (typeof player.setPlaybackQuality === 'function') {
+        player.setPlaybackQuality('hd1080');
+      }
+    });
+    console.log('Quality set to 1080p');
+
+    // Hide UI chrome so it doesn't bleed into screenshots
+    await page.evaluate(() => {
+      ['.ytp-chrome-top', '.ytp-chrome-bottom', '.ytp-gradient-top',
+       '.ytp-gradient-bottom', '.ytp-watermark', '.ytp-pause-overlay',
+       '.ytp-settings-menu', '#masthead-container', '#related', '#comments',
+      ].forEach(sel => {
+        document.querySelectorAll(sel).forEach(el => el.style.display = 'none');
+      });
+    });
 
     for (let i = 0; i < this.config.slides.length; i++) {
       const slide = this.config.slides[i];
       const result = await this.generateSlide(slide, i + 1, page);
       outputPaths.push(result);
-      
-      await new Promise(resolve => setTimeout(resolve, 500));
     }
 
     await page.close();
-
     console.log(`\n✅ Carousel complete! Generated ${outputPaths.length} slides`);
-    if (this.outputDir) {
-      console.log(`Output directory: ${this.outputDir}\n`);
-    }
+    if (this.outputDir) console.log(`Output directory: ${this.outputDir}\n`);
 
     return outputPaths;
   }
