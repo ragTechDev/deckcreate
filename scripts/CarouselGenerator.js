@@ -2,28 +2,13 @@ import sharp from 'sharp';
 import fs from 'fs-extra';
 import path from 'path';
 
-let puppeteer;
-let isStealthPluginLoaded = false;
-
-const IS_SERVERLESS = !!(process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.VERCEL);
+const IS_SERVERLESS = !!(process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.VERCEL || process.env.NETLIFY);
 
 // Default to the chromium-v131 release which aligns with puppeteer v23's bundled Chrome.
 // Override via CHROMIUM_BINARY_URL env var if needed.
 const CHROMIUM_BINARY_URL =
   process.env.CHROMIUM_BINARY_URL ||
   'https://github.com/Sparticuz/chromium/releases/download/v131.0.1/chromium-v131.0.1-pack.tar';
-
-async function loadPuppeteer() {
-  if (!puppeteer) {
-    puppeteer = (await import('puppeteer-extra')).default;
-    if (!isStealthPluginLoaded) {
-      const StealthPlugin = (await import('puppeteer-extra-plugin-stealth')).default;
-      puppeteer.use(StealthPlugin());
-      isStealthPluginLoaded = true;
-    }
-  }
-  return puppeteer;
-}
 
 class CarouselGenerator {
   constructor(config) {
@@ -39,38 +24,42 @@ class CarouselGenerator {
     if (this.outputDir) {
       await fs.ensureDir(this.outputDir);
     }
-    const pptr = await loadPuppeteer();
 
-    let executablePath;
-    let extraArgs = [];
+    const launchArgs = [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-blink-features=AutomationControlled',
+      '--disable-features=IsolateOrigins,site-per-process',
+      '--disable-dev-shm-usage',
+      '--enable-features=NetworkService,NetworkServiceInProcess',
+      '--force-device-scale-factor=1',
+      '--high-dpi-support=1',
+      '--start-maximized',
+      '--disable-notifications',
+      '--disable-gpu-memory-buffer-video-frames',
+    ];
 
     if (IS_SERVERLESS) {
       const chromium = (await import('@sparticuz/chromium-min')).default;
-      executablePath = await chromium.executablePath(CHROMIUM_BINARY_URL);
-      extraArgs = chromium.args;
+      const executablePath = await chromium.executablePath(CHROMIUM_BINARY_URL);
       console.log(`Using serverless Chromium: ${executablePath}`);
+      const { launch } = await import('puppeteer-core');
+      this.browser = await launch({
+        headless: true,
+        executablePath,
+        args: [...chromium.args, ...launchArgs],
+        protocolTimeout: 60000,
+        defaultViewport: null,
+      });
+    } else {
+      const { launch } = await import('puppeteer');
+      this.browser = await launch({
+        headless: true,
+        args: launchArgs,
+        protocolTimeout: 60000,
+        defaultViewport: null,
+      });
     }
-
-    this.browser = await pptr.launch({
-      headless: true,
-      executablePath,
-      args: [
-        ...extraArgs,
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-blink-features=AutomationControlled',
-        '--disable-features=IsolateOrigins,site-per-process',
-        '--disable-dev-shm-usage',
-        '--enable-features=NetworkService,NetworkServiceInProcess',
-        '--force-device-scale-factor=1',
-        '--high-dpi-support=1',
-        '--start-maximized',
-        '--disable-notifications',
-        '--disable-gpu-memory-buffer-video-frames'
-      ],
-      protocolTimeout: 60000,
-      defaultViewport: null
-    });
   }
 
   async close() {
