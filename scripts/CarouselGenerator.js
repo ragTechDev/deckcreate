@@ -78,7 +78,7 @@ class CarouselGenerator {
     // Check the page is still on a YouTube watch page before doing anything
     const currentUrl = page.url();
     console.log(`  Current URL: ${currentUrl}`);
-    if (!currentUrl.includes('youtube.com/watch')) {
+    if (!currentUrl.includes('youtube') && !currentUrl.includes('youtube-nocookie')) {
       throw new Error(`Page navigated away from YouTube to: ${currentUrl}`);
     }
 
@@ -646,146 +646,18 @@ class CarouselGenerator {
     });
 
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-    await page.setViewport({ width: 1920, height: 1080 });
-    
-    await page.setExtraHTTPHeaders({
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
-    });
+    await page.setViewport({ width: 1280, height: 720 });
 
+    // Use the embed player — far lighter than the full watch page.
+    // No consent banners, no heavy JS, no bot detection, quality set via URL.
     const firstTimestamp = this.config.slides[0].topTimestamp;
-    const url = `https://www.youtube.com/watch?v=${this.config.videoId}&t=${firstTimestamp}s&vq=hd1080`;
+    const url = `https://www.youtube-nocookie.com/embed/${this.config.videoId}?start=${Math.floor(firstTimestamp)}&autoplay=1&mute=1&controls=0&vq=hd720`;
     console.log(`Opening video: ${url}\n`);
     await page.goto(url, { waitUntil: 'load', timeout: 60000 });
 
-    // Log actual URL to detect redirects (consent pages, region blocks, etc.)
-    const landedUrl = page.url();
-    console.log(`Landed on: ${landedUrl}`);
-
-    // Dismiss cookie/consent banner if present (common outside US)
-    try {
-      const consentButton = await page.$('button[aria-label="Accept all"], button[aria-label="Reject all"], form[action*="consent"] button');
-      if (consentButton) {
-        console.log('Consent banner detected — dismissing...');
-        await consentButton.click();
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        await page.waitForSelector('video', { timeout: 10000 });
-      }
-    } catch (e) {
-      // No consent banner, continue
-    }
-
     await page.waitForSelector('video', { timeout: 15000 });
-    await new Promise(resolve => setTimeout(resolve, 8000));
-
-    try {
-      const playButton = await page.$('.ytp-large-play-button');
-      if (playButton) {
-        await playButton.click();
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      }
-    } catch (e) {
-      console.log('Play button not found, video may be auto-playing');
-    }
-
-    // Skip any ads before proceeding
-    await this.skipAds(page);
-
-    try {
-      await page.click('.ytp-settings-button');
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      const qualityMenuItems = await page.$$('.ytp-menuitem');
-      for (const item of qualityMenuItems) {
-        const text = await page.evaluate(el => el.textContent, item);
-        if (text && text.includes('Quality')) {
-          await item.click();
-          await new Promise(resolve => setTimeout(resolve, 500));
-          break;
-        }
-      }
-
-      const qualityOptions = await page.$$('.ytp-quality-menu .ytp-menuitem');
-      if (qualityOptions.length > 0) {
-        // Prefer 1080p — avoids 4K which is too slow to buffer in headless environments.
-        // Fall back to the next best option if 1080p isn't available.
-        const preferred = ['1080', '720', '480'];
-        let selected = false;
-        for (const res of preferred) {
-          for (const item of qualityOptions) {
-            const text = await page.evaluate(el => el.textContent, item);
-            if (text && text.includes(res)) {
-              await item.click();
-              await new Promise(resolve => setTimeout(resolve, 1000));
-              console.log(`Set quality to ${res}p\n`);
-              selected = true;
-              break;
-            }
-          }
-          if (selected) break;
-        }
-        if (!selected) {
-          await qualityOptions[0].click();
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          console.log('Set to highest available quality\n');
-        }
-      }
-
-      // Close the settings panel
-      await page.keyboard.press('Escape');
-      await new Promise(resolve => setTimeout(resolve, 300));
-    } catch (e) {
-      console.log('Could not manually set quality via menu\n');
-      // Ensure settings panel is closed regardless
-      try { await page.keyboard.press('Escape'); } catch (_) {}
-    }
-
-    await page.evaluate(() => {
-      const video = document.querySelector('video');
-      if (video) {
-        const player = document.querySelector('.html5-video-player');
-        if (player && player.getOption) {
-          try {
-            player.setOption('captions', 'track', {});
-          } catch (e) {}
-        }
-        const tracks = video.textTracks;
-        for (let i = 0; i < tracks.length; i++) {
-          tracks[i].mode = 'hidden';
-        }
-      }
-    });
-
-    await page.evaluate(() => {
-      const elementsToHide = [
-        '.ytp-chrome-top',
-        '.ytp-chrome-bottom',
-        '.ytp-gradient-top',
-        '.ytp-gradient-bottom',
-        '.ytp-title',
-        '.ytp-watermark',
-        '.ytp-pause-overlay',
-        '.ytp-settings-menu',
-        '.ytp-panel',
-        '.ytp-ad-overlay-container',
-        '.ytp-ad-image-overlay',
-        '.ytp-ad-text-overlay',
-        '.video-ads',
-        '.ytp-ad-player-overlay',
-        '#masthead-container',
-        '#related',
-        '#comments',
-      ];
-      
-      elementsToHide.forEach(selector => {
-        const elements = document.querySelectorAll(selector);
-        elements.forEach(el => {
-          if (el) el.style.display = 'none';
-        });
-      });
-    });
-
-    await new Promise(resolve => setTimeout(resolve, 500));
+    // Let the embed initialise and buffer a bit
+    await new Promise(resolve => setTimeout(resolve, 5000));
 
     for (let i = 0; i < this.config.slides.length; i++) {
       const slide = this.config.slides[i];
