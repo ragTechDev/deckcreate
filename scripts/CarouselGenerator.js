@@ -98,17 +98,22 @@ class CarouselGenerator {
         { timeout: 20000 }
       ).then(() => true).catch(() => false);
 
-      const videoState = await page.evaluate(() => {
-        const v = document.querySelector('video');
-        if (!v) return null;
-        return {
-          readyState: v.readyState,
-          currentTime: v.currentTime,
-          videoWidth: v.videoWidth,
-          videoHeight: v.videoHeight,
-          networkState: v.networkState,
-        };
-      });
+      let videoState = null;
+      try {
+        videoState = await page.evaluate(() => {
+          const v = document.querySelector('video');
+          if (!v) return null;
+          return {
+            readyState: v.readyState,
+            currentTime: v.currentTime,
+            videoWidth: v.videoWidth,
+            videoHeight: v.videoHeight,
+            networkState: v.networkState,
+          };
+        });
+      } catch (e) {
+        throw new Error(`Browser crashed while buffering video at ${timestamp}s (likely OOM): ${e.message}`);
+      }
       console.log(`  Video state: readyStateReached=${readyStateReached}`, videoState);
 
       if (!readyStateReached) {
@@ -562,12 +567,12 @@ class CarouselGenerator {
       const player = document.querySelector('.html5-video-player');
       if (!player) return;
       if (typeof player.setPlaybackQualityRange === 'function') {
-        player.setPlaybackQualityRange('hd1080', 'hd1080');
+        player.setPlaybackQualityRange('hd720', 'hd720');
       } else if (typeof player.setPlaybackQuality === 'function') {
-        player.setPlaybackQuality('hd1080');
+        player.setPlaybackQuality('hd720');
       }
     });
-    console.log('Quality set to 1080p');
+    console.log('Quality set to 720p');
 
     // Hide UI chrome so it doesn't bleed into screenshots
     await page.evaluate(() => {
