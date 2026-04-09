@@ -594,6 +594,13 @@ class CarouselGenerator {
     this.mediaRequestsAllowed = 0;
     await page.setRequestInterception(true);
     page.on('request', req => {
+      // Block Google's passive sign-in flow — on Lambda (no session) it causes
+      // YouTube to navigate/detach the main frame, crashing the page.
+      if (req.url().includes('accounts.google.com')) {
+        req.abort();
+        return;
+      }
+
       if (req.resourceType() === 'media') {
         if (!this.allowVideoRequests || TEST_BLOCK_ALL_MEDIA) {
           this.mediaRequestsAborted++;
@@ -658,12 +665,12 @@ class CarouselGenerator {
       const player = document.querySelector('.html5-video-player');
       if (!player) return;
       if (typeof player.setPlaybackQualityRange === 'function') {
-        player.setPlaybackQualityRange('large', 'large');
+        player.setPlaybackQualityRange('hd1080', 'hd1080');
       } else if (typeof player.setPlaybackQuality === 'function') {
-        player.setPlaybackQuality('large');
+        player.setPlaybackQuality('hd1080');
       }
     });
-    console.log('Quality set to 480p');
+    console.log('Quality set to 1080p');
 
     // Hide UI chrome so it doesn't bleed into screenshots
     await page.evaluate(() => {
