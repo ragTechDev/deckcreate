@@ -194,6 +194,13 @@ class CarouselGenerator {
       // Capture the frame
       let screenshot = null;
       for (let attempt = 0; attempt < 3; attempt++) {
+        // Hide spinner on every attempt — it can reappear during buffering
+        await page.evaluate(() => {
+          ['.ytp-spinner', '.ytp-buffering-spinner'].forEach(sel => {
+            document.querySelectorAll(sel).forEach(el => el.style.display = 'none');
+          });
+        }).catch(() => {});
+
         const videoElement = await page.$('video');
         if (!videoElement) throw new Error('Video element not found');
 
@@ -593,12 +600,18 @@ class CarouselGenerator {
     this.mediaRequestsAborted = 0;
     this.mediaRequestsAllowed = 0;
     await page.setRequestInterception(true);
+    const videoPageUrl = `https://www.youtube.com/watch?v=${this.config.videoId}`;
     page.on('request', req => {
-      // Block Google's passive sign-in flow — on Lambda (no session) it causes
-      // YouTube to navigate/detach the main frame, crashing the page.
-      if (req.url().includes('accounts.google.com')) {
-        req.abort();
-        return;
+      // Block any attempt to navigate the main frame away from the YouTube video page.
+      // YouTube iframes (sign-in, consent, ads) can trigger main frame navigations on
+      // Lambda (no session), causing the page to detach and crash.
+      if (req.isNavigationRequest() && req.frame() === page.mainFrame()) {
+        const dest = req.url();
+        if (!dest.startsWith(videoPageUrl) && dest !== 'about:blank') {
+          console.log(`[blocked nav] ${dest.slice(0, 120)}`);
+          req.abort();
+          return;
+        }
       }
 
       if (req.resourceType() === 'media') {
@@ -677,6 +690,7 @@ class CarouselGenerator {
       ['.ytp-chrome-top', '.ytp-chrome-bottom', '.ytp-gradient-top',
        '.ytp-gradient-bottom', '.ytp-watermark', '.ytp-pause-overlay',
        '.ytp-settings-menu', '#masthead-container', '#related', '#comments',
+       '.ytp-spinner', '.ytp-buffering-spinner',
       ].forEach(sel => {
         document.querySelectorAll(sel).forEach(el => el.style.display = 'none');
       });
