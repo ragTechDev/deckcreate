@@ -104,16 +104,22 @@ function deriveCuts(segment) {
       cutFrom = token._cutFrom !== undefined
         ? token._cutFrom
         : (prevWordToken
-            ? prevWordToken.t_dtw + CUT_START_BIAS * (token.t_dtw - prevWordToken.t_dtw)
+            // Use exact word-end boundary when available (WhisperX t_end), else heuristic.
+            ? (prevWordToken.t_end !== undefined
+                ? prevWordToken.t_end
+                : prevWordToken.t_dtw + CUT_START_BIAS * (token.t_dtw - prevWordToken.t_dtw))
             : token.t_dtw);
       lastCutToken = token;
     } else if (cutFrom && isCut) {
       lastCutToken = token;
     } else if (cutFrom && !isCut) {
       const endTime = token ? token.t_dtw : segment.end;
+      // Use the next word's start (t_dtw) directly as the cut end — this is the exact
+      // word onset from WhisperX alignment, so no end-bias buffer is needed.
+      // Fallback to the bias heuristic only when _cutTo is explicitly overridden.
       const cutTo = lastCutToken._cutTo !== undefined
         ? lastCutToken._cutTo
-        : lastCutToken.t_dtw + CUT_END_BIAS * (endTime - lastCutToken.t_dtw);
+        : endTime;
       // Skip zero-duration or inverted cuts (can happen when token t_dtw > segment.end
       // due to Whisper timing imprecision, or when consecutive tokens share a t_dtw).
       if (cutTo > cutFrom) cuts.push({ from: cutFrom, to: cutTo });
@@ -410,11 +416,14 @@ function resolvePhraseToTimeRange(phrase, tokens, segEnd) {
       const lastEndIdx = lastWord.endIdx;
       const nextToken = tokens.slice(lastEndIdx + 1).find(t => !isSpecialToken(t));
       const rawTo = nextToken ? nextToken.t_dtw : (segEnd ?? lastWord.t_dtw + WORD_DURATION_ESTIMATE);
-      // Ensure `to` is at least one WORD_DURATION_ESTIMATE past the last word's
-      // own timestamp. When the next token shares the same (or very close) timestamp
-      // as the last word — common with punctuation tokens — rawTo would equal
-      // lastWord.t_dtw, clipping the last word entirely from the hook clip.
-      const to = Math.max(rawTo, lastWord.t_dtw + WORD_DURATION_ESTIMATE);
+      // Use WhisperX word-end boundary (t_end) when available — it reflects the
+      // actual spoken duration of the word rather than a fixed WORD_DURATION_ESTIMATE.
+      // This is especially important for multi-syllable words where the next token
+      // shares the same t_dtw (e.g. a punctuation token), which would otherwise
+      // produce a clip too short to hear the full word.
+      const lastTokenInPhrase = tokens[lastEndIdx];
+      const wordEnd = lastTokenInPhrase.t_end ?? (lastWord.t_dtw + WORD_DURATION_ESTIMATE);
+      const to = Math.max(rawTo, wordEnd);
       return { from, to };
     }
   }
@@ -803,7 +812,14 @@ function applyTextPartsToTokens(rawText, tokens) {
       // in a token when the doc has the correct spelling "world") without requiring
       // the doc word and the token to normalize to the same string.
       visibleWords.forEach((word, wi) => {
-        const idx = twg[wi].firstIdx;
+        const g = twg[wi];
+        // Skip when the doc word and the token group already normalize to the same
+        // string — no user correction was made. Writing the combined word (e.g.
+        // "That's") to only the firstIdx token (e.g. " That") while its BPE
+        // continuation "'s" remains as a separate token produces "That's's" in
+        // captions on subsequent runs.
+        if (normalize(word) === g.normText) return;
+        const idx = g.firstIdx;
         const prefix = updated[idx].text.startsWith(' ') ? ' ' : '';
         updated[idx] = { ...updated[idx], text: prefix + word };
       });
@@ -836,9 +852,13 @@ function applyTextPartsToTokens(rawText, tokens) {
 
       const docToGrp = new Map(pairs.map(p => [p.docIdx, p.groupIdx]));
 
-      // Apply text corrections for matched words (preserving leading space for BPE)
+      // Apply text corrections for matched words (preserving leading space for BPE).
+      // Skip when already matching to avoid writing combined BPE words (e.g. "That's")
+      // to only the first sub-token while the continuation dangles separately.
       for (const { docIdx, groupIdx } of pairs) {
-        const idx = twg[groupIdx].firstIdx;
+        const g = twg[groupIdx];
+        if (normalize(visibleWords[docIdx]) === g.normText) continue;
+        const idx = g.firstIdx;
         const prefix = updated[idx].text.startsWith(' ') ? ' ' : '';
         updated[idx] = { ...updated[idx], text: prefix + visibleWords[docIdx] };
       }
@@ -1092,27 +1112,29 @@ function autoCutPauses(transcript, threshold) {
       const pauseCuts = [];
 
       for (let i = 0; i < activeTokens.length - 1; i++) {
-        const gap = activeTokens[i + 1].t_dtw - activeTokens[i].t_dtw;
-        // gap = word_duration + silence. Subtract estimated word duration to get
-        // the actual silence. Only cut if silence exceeds threshold.
-        const silence = gap - WORD_DURATION_ESTIMATE;
+        const curr = activeTokens[i];
+        const next = activeTokens[i + 1];
+        // Use exact word-end boundary when available (WhisperX t_end), otherwise
+        // estimate word end as t_dtw + WORD_DURATION_ESTIMATE.
+        const wordEnd = curr.t_end !== undefined ? curr.t_end : curr.t_dtw + WORD_DURATION_ESTIMATE;
+        const silence = next.t_dtw - wordEnd;
         if (silence >= threshold) {
-          pauseCuts.push({
-            from: activeTokens[i].t_dtw + WORD_DURATION_ESTIMATE,
-            to: activeTokens[i + 1].t_dtw,
-          });
+          pauseCuts.push({ from: wordEnd, to: next.t_dtw });
         }
       }
 
       if (!pauseCuts.length) return seg;
 
       // Merge consecutive pause cuts whose gap is at most WORD_DURATION_ESTIMATE.
-      // When a word's entire play window (≤ WORD_DURATION_ESTIMATE) is sandwiched
-      // between two pause cuts it produces a jarring micro-clip; absorb it instead.
+      // When a word's entire play window is sandwiched between two pause cuts it
+      // produces a jarring micro-clip; absorb it into a single cut instead.
+      // Gap = next cut's `from` (word end) minus this cut's `to` (next word start)
+      // — a short gap means the word between them is too short to keep.
       const merged = [{ ...pauseCuts[0] }];
       for (let i = 1; i < pauseCuts.length; i++) {
         const last = merged[merged.length - 1];
-        if (pauseCuts[i].from - last.to <= WORD_DURATION_ESTIMATE) {
+        const wordDur = pauseCuts[i].from - last.to;
+        if (wordDur <= WORD_DURATION_ESTIMATE) {
           last.to = pauseCuts[i].to;
         } else {
           merged.push({ ...pauseCuts[i] });
@@ -1253,6 +1275,32 @@ function applyVttCorrections(transcript, vttSegments) {
   return transcript;
 }
 
+// ─── Edit-transcript re-run helpers ───────────────────────────────────────────
+
+/**
+ * Builds a t_dtw → token lookup for the "preserve manual edits" merge in
+ * edit-transcript re-runs. When multiple tokens share the same t_dtw — which
+ * Whisper commonly does for punctuation tokens that inherit the preceding
+ * word's timestamp — the token with non-empty normalized text (a real word)
+ * is preferred over a pure-punctuation token so that word text corrections
+ * are not overwritten with punctuation characters on the next re-run.
+ */
+function buildPrevTokensByTdtw(tokens) {
+  // Key = "<t_dtw>_<position>" where position is the 0-based index of this token
+  // among all tokens sharing the same t_dtw. This lets each token (including
+  // multiple word tokens at the same timestamp, and BPE sub-tokens) map to its
+  // own counterpart rather than all colliding on the first entry.
+  const map = {};
+  const countByBase = {};
+  for (const t of tokens) {
+    const base = t.t_dtw.toFixed(3);
+    const n = countByBase[base] ?? 0;
+    map[`${base}_${n}`] = t;
+    countByBase[base] = n + 1;
+  }
+  return map;
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -1305,12 +1353,22 @@ async function main() {
         const prev = findPrev(seg);
         if (!prev) return seg;
 
-        const prevTokensByTdtw = Object.fromEntries(
-          (prev.tokens || []).map(t => [t.t_dtw.toFixed(3), t])
-        );
+        const prevTokensByTdtw = buildPrevTokensByTdtw(prev.tokens || []);
+        const rawCountByBase = {};
         const tokens = seg.tokens.map(t => {
-          const p = prevTokensByTdtw[t.t_dtw.toFixed(3)];
+          const base = t.t_dtw.toFixed(3);
+          const n = rawCountByBase[base] ?? 0;
+          rawCountByBase[base] = n + 1;
+          const p = prevTokensByTdtw[`${base}_${n}`];
           if (!p) return t;
+          // Only apply text correction when both the raw token and the stored token
+          // represent a real word (non-empty normalize). Pure punctuation tokens
+          // (e.g. ".") must not inherit corrections intended for the preceding word
+          // that shares their t_dtw — doing so renames "." to "principles", which
+          // then breaks word-group building in applyTextPartsToTokens on the next run.
+          if (normalize(t.text) === '' || normalize(p.text) === '') {
+            return { ...t, cut: p.cut };
+          }
           // Always keep the raw token's leading space (BPE word-boundary marker).
           // Old stored tokens may have had their spaces stripped by a previous
           // merge-doc run. Apply the user's correction to the non-space part only.
@@ -1411,4 +1469,4 @@ if (_argv1.endsWith('/edit-transcript.js') || _argv1.endsWith('/edit-transcript'
 }
 
 export default main;
-export { buildTextWithCuts, applyTextPartsToTokens, mergeDocIntoTranscript, buildDoc, deriveCuts, cleanCaptionText, buildSentencesVtt, buildSentencesSrt, getSubClips, getHookClips, resolvePhraseToTimeRange, autoCutPauses, autoCutDisfluencies, rebalanceBoundaryTokens, WORD_DURATION_ESTIMATE, CUT_START_BIAS, CUT_END_BIAS, isSpecialToken, isDisfluencyToken };
+export { buildTextWithCuts, applyTextPartsToTokens, mergeDocIntoTranscript, buildDoc, deriveCuts, cleanCaptionText, buildSentencesVtt, buildSentencesSrt, getSubClips, getHookClips, resolvePhraseToTimeRange, autoCutPauses, autoCutDisfluencies, rebalanceBoundaryTokens, buildPrevTokensByTdtw, WORD_DURATION_ESTIMATE, CUT_START_BIAS, CUT_END_BIAS, isSpecialToken, isDisfluencyToken };
