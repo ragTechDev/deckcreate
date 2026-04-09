@@ -178,12 +178,14 @@ class CarouselGenerator {
         }
       }, timestamp);
 
-      // Poll for readyState >= 2, logging the exact moment of any failure
+      // Poll for readyState >= 2, recovering once if YouTube navigates the page
+      // (passive sign-in check on Lambda causes a one-time page reload).
       console.log('  Waiting for video to buffer...');
       let readyStateReached = false;
       let videoState = null;
       const pollStart = Date.now();
-      while (Date.now() - pollStart < 20000) {
+      let recovered = false;
+      while (Date.now() - pollStart < 30000) {
         await new Promise(r => setTimeout(r, 500));
         try {
           const state = await page.evaluate(() => {
@@ -197,10 +199,41 @@ class CarouselGenerator {
           }
         } catch (e) {
           const elapsed = Math.round((Date.now() - pollStart) / 1000);
-          console.error(`  [detach at ${elapsed}s] ${e.message}`);
-          console.error(`  [detach] page url: ${page.url()}`);
-          console.error(`  [detach] media requests: ${this.mediaRequestsAborted} aborted, ${this.mediaRequestsAllowed} allowed`);
-          throw new Error(`Frame detached while waiting for video at ${timestamp}s (${elapsed}s elapsed): ${e.message}`);
+          console.log(`  [detach at ${elapsed}s] ${e.message}`);
+
+          if (recovered) {
+            throw new Error(`Frame detached again after recovery at ${timestamp}s: ${e.message}`);
+          }
+          recovered = true;
+
+          // YouTube navigated the page (passive sign-in flow). Wait for it to reload,
+          // then re-seek and continue polling.
+          console.log('  Waiting for page to recover after navigation...');
+          try {
+            await page.waitForNavigation({ timeout: 15000, waitUntil: 'load' });
+          } catch (_) {
+            // Navigation may have already completed — just wait a moment
+            await new Promise(r => setTimeout(r, 3000));
+          }
+          console.log(`  [recovered] page url: ${page.url()}`);
+
+          // Re-hide UI chrome on the reloaded page
+          await page.evaluate(() => {
+            ['.ytp-chrome-top', '.ytp-chrome-bottom', '.ytp-gradient-top',
+             '.ytp-gradient-bottom', '.ytp-watermark', '.ytp-pause-overlay',
+             '.ytp-settings-menu', '#masthead-container', '#related', '#comments',
+             '.ytp-spinner', '.ytp-buffering-spinner',
+            ].forEach(sel => {
+              document.querySelectorAll(sel).forEach(el => el.style.display = 'none');
+            });
+          }).catch(() => {});
+
+          // Re-seek to the target timestamp
+          await page.evaluate((ts) => {
+            const video = document.querySelector('video');
+            if (video) { video.currentTime = ts; video.pause(); }
+          }, timestamp).catch(() => {});
+          console.log('  Re-sought after recovery, continuing to poll...');
         }
       }
       console.log(`  Video state: readyStateReached=${readyStateReached}`, videoState);
