@@ -602,16 +602,26 @@ class CarouselGenerator {
     await page.setRequestInterception(true);
     const videoPageUrl = `https://www.youtube.com/watch?v=${this.config.videoId}`;
     page.on('request', req => {
+      const url = req.url();
+
+      // Block Google sign-in and YouTube's passive sign-in endpoint in any frame.
+      // On Lambda (no session), this flow ultimately navigates/detaches the main frame.
+      if (url.includes('accounts.google.com') || url.includes('youtube.com/signin')) {
+        req.abort();
+        return;
+      }
+
       // Block any attempt to navigate the main frame away from the YouTube video page.
-      // YouTube iframes (sign-in, consent, ads) can trigger main frame navigations on
-      // Lambda (no session), causing the page to detach and crash.
-      if (req.isNavigationRequest() && req.frame() === page.mainFrame()) {
-        const dest = req.url();
-        if (!dest.startsWith(videoPageUrl) && dest !== 'about:blank') {
-          console.log(`[blocked nav] ${dest.slice(0, 120)}`);
-          req.abort();
-          return;
-        }
+      if (req.isNavigationRequest()) {
+        try {
+          if (req.frame() === page.mainFrame()) {
+            if (!url.startsWith(videoPageUrl) && url !== 'about:blank') {
+              console.log(`[blocked main nav] ${url.slice(0, 120)}`);
+              req.abort();
+              return;
+            }
+          }
+        } catch (_) {}
       }
 
       if (req.resourceType() === 'media') {
