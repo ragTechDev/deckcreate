@@ -593,6 +593,27 @@ class CarouselGenerator {
     const outputPaths = [];
     const page = await this.browser.newPage();
 
+    // Inject before any page scripts run: silently drop any iframe that tries to
+    // load a Google sign-in URL. On Lambda (no session), YouTube creates these iframes
+    // for passive auth — if they error, YouTube navigates/detaches the main frame.
+    await page.evaluateOnNewDocument(() => {
+      const BLOCKED = ['accounts.google.com', '/signin_passive', 'youtube.com/signin'];
+      const isBlocked = (val) => val && BLOCKED.some(s => val.includes(s));
+
+      const srcDesc = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'src');
+      Object.defineProperty(HTMLIFrameElement.prototype, 'src', {
+        set(val) { if (!isBlocked(val) && srcDesc?.set) srcDesc.set.call(this, val); },
+        get() { return srcDesc?.get ? srcDesc.get.call(this) : this.getAttribute('src'); },
+        configurable: true,
+      });
+
+      const origSetAttr = Element.prototype.setAttribute;
+      Element.prototype.setAttribute = function(name, val) {
+        if (this instanceof HTMLIFrameElement && name === 'src' && isBlocked(val)) return;
+        return origSetAttr.call(this, name, val);
+      };
+    });
+
     // Block video data (googlevideo.com media segments) during setup to prevent
     // YouTube from streaming HD video and exhausting Lambda memory.
     // seekAndExtractFrame toggles this per-frame.
