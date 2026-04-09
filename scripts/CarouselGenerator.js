@@ -37,20 +37,37 @@ class CarouselGenerator {
       const { launch } = await import('puppeteer-core');
       // Use chromium.args as-is — they're tuned for Lambda.
       // Only add flags that don't conflict with chromium.args.
+      // Merge sparticuz's --disable-features with our own to avoid Chrome
+      // only applying the last --disable-features flag (overriding the earlier one).
+      const baseArgs = chromium.args.filter(arg =>
+        !arg.startsWith('--autoplay-policy') &&
+        arg !== '--single-process' &&
+        !arg.startsWith('--disable-features=')
+      );
+      const existingDisabled = chromium.args
+        .filter(arg => arg.startsWith('--disable-features='))
+        .flatMap(arg => arg.slice('--disable-features='.length).split(','));
+      const disabledFeatures = [
+        ...new Set([
+          ...existingDisabled,
+          'IsolateOrigins',
+          'site-per-process',
+          'ServiceWorkerMain',
+        ])
+      ].join(',');
+      console.log(`Chrome disabled features: ${disabledFeatures}`);
+
       this.browser = await launch({
         headless: true,
         executablePath,
         args: [
-          ...chromium.args.filter(arg =>
-            !arg.startsWith('--autoplay-policy') &&
-            arg !== '--single-process'
-          ),
+          ...baseArgs,
+          `--disable-features=${disabledFeatures}`,
           '--autoplay-policy=no-user-gesture-required',
           '--disable-blink-features=AutomationControlled',
           '--disable-notifications',
           '--disable-webgl',
           '--disable-webgl2',
-          '--disable-features=ServiceWorkerMain',
         ],
         protocolTimeout: 60000,
         defaultViewport: null,
