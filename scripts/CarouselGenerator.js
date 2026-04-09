@@ -604,10 +604,13 @@ class CarouselGenerator {
     page.on('request', req => {
       const url = req.url();
 
-      // Block Google sign-in and YouTube's passive sign-in endpoint in any frame.
-      // On Lambda (no session), this flow ultimately navigates/detaches the main frame.
+      // Intercept Google sign-in and YouTube's passive sign-in iframes.
+      // Aborting causes chrome-error:// in the iframe, which YouTube's JS treats as
+      // a fatal error and navigates the main frame. Instead, respond with an empty
+      // page so the iframe loads silently and YouTube doesn't trigger a reload.
       if (url.includes('accounts.google.com') || url.includes('youtube.com/signin')) {
-        req.abort();
+        console.log(`[faked signin] ${url.slice(0, 80)}`);
+        req.respond({ status: 200, contentType: 'text/html', body: '<html></html>' });
         return;
       }
 
