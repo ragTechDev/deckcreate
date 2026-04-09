@@ -48,6 +48,8 @@ class CarouselGenerator {
           '--autoplay-policy=no-user-gesture-required',
           '--disable-blink-features=AutomationControlled',
           '--disable-notifications',
+          '--disable-webgl',
+          '--disable-webgl2',
         ],
         protocolTimeout: 60000,
         defaultViewport: null,
@@ -609,6 +611,12 @@ class CarouselGenerator {
 
     page.on('framenavigated', (frame) => {
       if (frame === page.mainFrame()) console.log(`[nav] ${frame.url()}`);
+    });
+
+    page.on('error', err => console.log(`[page crash] ${err.message}`));
+    page.on('pageerror', err => console.log(`[page js error] ${err.message}`));
+    page.on('console', msg => {
+      if (msg.type() === 'error') console.log(`[console error] ${msg.text()}`);
     });
 
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
