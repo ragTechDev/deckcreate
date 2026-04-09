@@ -184,7 +184,7 @@ Labels each transcript segment with the detected speaker and updates `transcript
 ```
 npm run align
 ```
-Refines `segments[].start/end` and `segments[].tokens[].t_dtw` inside `public/transcribe/output/raw/transcript.raw.json`.
+Refines `segments[].start/end` and `segments[].tokens[].t_dtw` inside `public/transcribe/output/raw/transcript.raw.json`. Also populates `tokens[].t_end` (word-end boundary) for each word it can align, enabling exact cut boundaries in subsequent steps instead of heuristic approximations.
 
 Use a specific Python interpreter when needed:
 ```
@@ -212,9 +212,13 @@ npm run merge-doc
 ```
 Applies doc edits back to `transcript.json`.
 
-To also auto-cut silences longer than 0.5 s:
+The renderer plays the full recording continuously by default — only segments and words you explicitly cut are removed. To also remove inter-sentence silence (gaps between utterances longer than 0.5 s):
 ```
 npm run merge-doc:cut-pauses
+```
+This writes silence time-ranges into `transcript.json` so the renderer skips them. You can adjust the threshold:
+```
+npm run merge-doc:cut-pauses -- --pause-threshold 0.3
 ```
 
 If you measured a timestamp offset (see step 2a), pass it here:
@@ -222,6 +226,8 @@ If you measured a timestamp offset (see step 2a), pass it here:
 npm run merge-doc -- --timestamp-offset 0.5
 npm run merge-doc:cut-pauses -- --timestamp-offset 0.5
 ```
+
+Note: Running `npm run merge-doc` again will reset any pause cuts or timestamp offset created in previous editing sessions. To keep changes, run the command with the desired flags.
 
 ### 8. Camera setup — punch-in/punch-out cuts (optional)
 
@@ -274,7 +280,7 @@ npm run setup-camera -- --video path/to/video.mp4 --transcript path/to/transcrip
 ```
 npm run remotion
 ```
-If `camera-profiles.json` exists, the composition will apply punch-in/punch-out cuts automatically. To disable, remove or rename that file — the composition falls back to the standard cut-only render.
+The composition plays the full recording continuously, skipping only what was explicitly cut in the doc. If `camera-profiles.json` exists, punch-in/punch-out camera cuts are applied automatically. To disable, remove or rename that file — the composition falls back to the standard render.
 
 ### 10. Cut preview (optional)
 ```

@@ -48,4 +48,6 @@ Fun and accessible — tech content that doesn't take itself too seriously.
 2. **Intro** — `PodcastIntro` plays between hooks and the main episode content.
 3. **Main episode** — full edited recording with optional camera punch-ins (`CameraPlayer`).
 
+Forced alignment (`npm run align`) populates `token.t_end` (word-end boundary) alongside `token.t_dtw` (word start), enabling exact cut boundaries when words are marked for removal. Without it, cut boundaries fall back to heuristic bias constants. See `AGENTS.md` for full architecture details.
+
 Transcript editing scripts live in `scripts/`. Transcription pipeline is in `scripts/transcribe/`.
