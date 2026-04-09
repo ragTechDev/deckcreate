@@ -623,41 +623,46 @@ class CarouselGenerator {
     await page.setRequestInterception(true);
     const videoPageUrl = `https://www.youtube.com/watch?v=${this.config.videoId}`;
     page.on('request', req => {
-      const url = req.url();
+      try {
+        const url = req.url();
 
-      // Intercept Google sign-in and YouTube's passive sign-in iframes.
-      // Aborting causes chrome-error:// in the iframe, which YouTube's JS treats as
-      // a fatal error and navigates the main frame. Instead, respond with an empty
-      // page so the iframe loads silently and YouTube doesn't trigger a reload.
-      if (url.includes('accounts.google.com') || url.includes('youtube.com/signin')) {
-        console.log(`[faked signin] ${url.slice(0, 80)}`);
-        req.respond({ status: 200, contentType: 'text/html', body: '<html></html>' });
-        return;
-      }
+        // Intercept Google sign-in and YouTube's passive sign-in iframes.
+        // Aborting causes chrome-error:// in the iframe, which YouTube's JS treats as
+        // a fatal error and navigates the main frame. Instead, respond with an empty
+        // page so the iframe loads silently and YouTube doesn't trigger a reload.
+        if (url.includes('accounts.google.com') || url.includes('youtube.com/signin')) {
+          console.log(`[faked signin] ${url.slice(0, 80)}`);
+          req.respond({ status: 200, contentType: 'text/html', body: '<html></html>' });
+          return;
+        }
 
-      // Block any attempt to navigate the main frame away from the YouTube video page.
-      if (req.isNavigationRequest()) {
-        try {
-          if (req.frame() === page.mainFrame()) {
-            if (!url.startsWith(videoPageUrl) && url !== 'about:blank') {
-              console.log(`[blocked main nav] ${url.slice(0, 120)}`);
-              req.abort();
-              return;
-            }
+        // Log ALL navigation requests so we can see what's going through the interceptor
+        if (req.isNavigationRequest()) {
+          let isMain = false;
+          try { isMain = req.frame() === page.mainFrame(); } catch (_) {}
+          console.log(`[nav req] isMain=${isMain} url=${url.slice(0, 120)}`);
+
+          if (isMain && !url.startsWith(videoPageUrl) && url !== 'about:blank') {
+            console.log(`[blocked main nav] ${url.slice(0, 120)}`);
+            req.abort();
+            return;
           }
-        } catch (_) {}
-      }
+        }
 
-      if (req.resourceType() === 'media') {
-        if (!this.allowVideoRequests || TEST_BLOCK_ALL_MEDIA) {
-          this.mediaRequestsAborted++;
-          req.abort();
+        if (req.resourceType() === 'media') {
+          if (!this.allowVideoRequests || TEST_BLOCK_ALL_MEDIA) {
+            this.mediaRequestsAborted++;
+            req.abort();
+          } else {
+            this.mediaRequestsAllowed++;
+            req.continue();
+          }
         } else {
-          this.mediaRequestsAllowed++;
           req.continue();
         }
-      } else {
-        req.continue();
+      } catch (e) {
+        console.error(`[req handler error] ${e.message}`);
+        try { req.continue(); } catch (_) {}
       }
     });
     if (TEST_BLOCK_ALL_MEDIA) {
