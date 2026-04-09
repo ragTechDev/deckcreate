@@ -36,8 +36,10 @@ class CarouselGenerator {
         headless: true,
         executablePath,
         args: [
-          // Filter out autoplay restriction — embed needs autoplay to load video source
-          ...chromium.args.filter(arg => !arg.startsWith('--autoplay-policy')),
+          ...chromium.args.filter(arg =>
+            !arg.startsWith('--autoplay-policy') &&
+            arg !== '--single-process'
+          ),
           '--autoplay-policy=no-user-gesture-required',
           '--disable-blink-features=AutomationControlled',
           '--disable-notifications',
@@ -75,6 +77,34 @@ class CarouselGenerator {
     }
   }
 
+  async skipAds(page) {
+    const maxWait = 30000;
+    const start = Date.now();
+    while (Date.now() - start < maxWait) {
+      const adState = await page.evaluate(() => {
+        const player = document.querySelector('.html5-video-player');
+        const isAd = player && player.classList.contains('ad-showing');
+        const skipBtn = document.querySelector('.ytp-skip-ad-button, .ytp-ad-skip-button');
+        const overlay = document.querySelector('.ytp-ad-overlay-close-button');
+        return { isAd, hasSkip: !!skipBtn, hasOverlay: !!overlay };
+      });
+
+      if (!adState.isAd && !adState.hasOverlay) break;
+
+      if (adState.hasSkip) {
+        console.log('  Ad — clicking skip...');
+        try { await page.click('.ytp-skip-ad-button, .ytp-ad-skip-button'); } catch (_) {}
+        await new Promise(r => setTimeout(r, 1500));
+      } else if (adState.hasOverlay) {
+        try { await page.click('.ytp-ad-overlay-close-button'); } catch (_) {}
+        await new Promise(r => setTimeout(r, 500));
+      } else {
+        console.log('  Waiting for ad to finish...');
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+  }
+
   async seekAndExtractFrame(page, timestamp) {
     console.log(`  Seeking to ${timestamp}s...`);
 
@@ -82,6 +112,9 @@ class CarouselGenerator {
     this.allowVideoRequests = true;
 
     try {
+      // Skip any ads that may appear now that media requests are unblocked
+      await this.skipAds(page);
+
       // Seek and pause at target timestamp
       await page.evaluate((ts) => {
         const video = document.querySelector('video');
