@@ -50,6 +50,7 @@ class CarouselGenerator {
           '--disable-notifications',
           '--disable-webgl',
           '--disable-webgl2',
+          '--disable-features=ServiceWorkerMain',
         ],
         protocolTimeout: 60000,
         defaultViewport: null,
