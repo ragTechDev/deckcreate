@@ -2,11 +2,6 @@ import sharp from 'sharp';
 import fs from 'fs-extra';
 import path from 'path';
 
-const IS_SERVERLESS = !!(process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.VERCEL || process.env.NETLIFY);
-
-const CHROMIUM_BINARY_URL =
-  process.env.CHROMIUM_BINARY_URL ||
-  'https://github.com/Sparticuz/chromium/releases/download/v131.0.1/chromium-v131.0.1-pack.tar';
 
 class CarouselGenerator {
   constructor(config) {
@@ -23,23 +18,7 @@ class CarouselGenerator {
       await fs.ensureDir(this.outputDir);
     }
 
-    if (IS_SERVERLESS) {
-      const chromium = (await import('@sparticuz/chromium-min')).default;
-      const executablePath = await chromium.executablePath(CHROMIUM_BINARY_URL);
-      const { launch } = await import('puppeteer-core');
-      this.browser = await launch({
-        headless: true,
-        executablePath,
-        args: [
-          ...chromium.args.filter(arg => !arg.startsWith('--autoplay-policy') && arg !== '--single-process'),
-          '--autoplay-policy=no-user-gesture-required',
-          '--disable-blink-features=AutomationControlled',
-          '--disable-notifications',
-        ],
-        protocolTimeout: 60000,
-        defaultViewport: null,
-      });
-    } else {
+    {
       const { launch } = await import('puppeteer');
       this.browser = await launch({
         headless: true,
