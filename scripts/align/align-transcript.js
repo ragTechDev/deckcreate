@@ -100,6 +100,7 @@ function assignTokenTimes(tokens, alignedWords, oldStart, oldEnd, newStart, newE
 
     if (matchIndex >= 0) {
       token.__alignedTime = words[matchIndex].start;
+      token.__alignedEnd  = words[matchIndex].end;   // exact word-end boundary from WhisperX
       matched++;
       searchStart = matchIndex + 1;
     }
@@ -153,7 +154,14 @@ function assignTokenTimes(tokens, alignedWords, oldStart, oldEnd, newStart, newE
     delete clean.__idx;
     delete clean.__normalized;
     delete clean.__alignedTime;
-    return { ...clean, t_dtw: Number(t.toFixed(3)) };
+    const alignedEnd = clean.__alignedEnd;
+    delete clean.__alignedEnd;
+    const result = { ...clean, t_dtw: Number(t.toFixed(3)) };
+    if (alignedEnd !== undefined) {
+      // Clamp to [t_dtw, newEnd] so t_end is always a valid, monotonically sound boundary.
+      result.t_end = Number(Math.min(newEnd, Math.max(t, alignedEnd)).toFixed(3));
+    }
+    return result;
   });
 }
 

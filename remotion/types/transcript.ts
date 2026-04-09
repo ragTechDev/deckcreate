@@ -1,6 +1,9 @@
 export type Token = {
-  /** Seconds from start of audio (converted from whisper.cpp centiseconds) */
+  /** Start time in seconds (word onset, from WhisperX forced alignment or Whisper t_dtw) */
   t_dtw: number;
+  /** End time in seconds (word offset, populated by forced alignment). When present,
+   *  deriveCuts and autoCutPauses use exact word boundaries instead of heuristic biases. */
+  t_end?: number;
   text: string;
   cut: boolean;
 };
