@@ -160,34 +160,35 @@ class CarouselGenerator {
         }
       }, timestamp);
 
-      // Wait until the frame at this timestamp is buffered
+      // Poll for readyState >= 2, logging the exact moment of any failure
       console.log('  Waiting for video to buffer...');
-      const readyStateReached = await page.waitForFunction(
-        () => { const v = document.querySelector('video'); return v && v.readyState >= 2; },
-        { timeout: 20000 }
-      ).then(() => true).catch(() => false);
-
+      let readyStateReached = false;
       let videoState = null;
-      try {
-        videoState = await page.evaluate(() => {
-          const v = document.querySelector('video');
-          if (!v) return null;
-          return {
-            readyState: v.readyState,
-            currentTime: v.currentTime,
-            videoWidth: v.videoWidth,
-            videoHeight: v.videoHeight,
-            networkState: v.networkState,
-          };
-        });
-      } catch (e) {
-        console.error(`  [crash] Media requests at crash: ${this.mediaRequestsAborted} aborted, ${this.mediaRequestsAllowed} allowed`);
-        throw new Error(`Browser crashed while buffering video at ${timestamp}s (likely OOM): ${e.message}`);
+      const pollStart = Date.now();
+      while (Date.now() - pollStart < 20000) {
+        await new Promise(r => setTimeout(r, 500));
+        try {
+          const state = await page.evaluate(() => {
+            const v = document.querySelector('video');
+            if (!v) return null;
+            return { readyState: v.readyState, currentTime: v.currentTime, networkState: v.networkState, videoWidth: v.videoWidth, videoHeight: v.videoHeight };
+          });
+          if (state) {
+            videoState = state;
+            if (state.readyState >= 2) { readyStateReached = true; break; }
+          }
+        } catch (e) {
+          const elapsed = Math.round((Date.now() - pollStart) / 1000);
+          console.error(`  [detach at ${elapsed}s] ${e.message}`);
+          console.error(`  [detach] page url: ${page.url()}`);
+          console.error(`  [detach] media requests: ${this.mediaRequestsAborted} aborted, ${this.mediaRequestsAllowed} allowed`);
+          throw new Error(`Frame detached while waiting for video at ${timestamp}s (${elapsed}s elapsed): ${e.message}`);
+        }
       }
       console.log(`  Video state: readyStateReached=${readyStateReached}`, videoState);
 
       if (!readyStateReached) {
-        console.warn('  WARNING: readyState < 2 after 20s — frame may be blank');
+        console.warn(`  WARNING: readyState ${videoState?.readyState ?? 'unknown'} after 20s — frame may be blank`);
       }
 
       // Capture the frame
@@ -617,6 +618,9 @@ class CarouselGenerator {
     page.on('pageerror', err => console.log(`[page js error] ${err.message}`));
     page.on('console', msg => {
       if (msg.type() === 'error') console.log(`[console error] ${msg.text()}`);
+    });
+    page.on('framedetached', frame => {
+      console.log(`[framedetached] isMain=${frame === page.mainFrame()} url=${frame.url()}`);
     });
 
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
