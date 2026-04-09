@@ -4,6 +4,11 @@ import path from 'path';
 
 const IS_SERVERLESS = !!(process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.VERCEL || process.env.NETLIFY);
 
+// Set TEST_BLOCK_ALL_MEDIA=true in Netlify env vars to test whether Chrome crashes
+// even when NO video data is allowed. If it still crashes → baseline Chromium OOM.
+// If it doesn't crash → video streaming is the cause.
+const TEST_BLOCK_ALL_MEDIA = process.env.TEST_BLOCK_ALL_MEDIA === 'true';
+
 // Default to the chromium-v131 release which aligns with puppeteer v23's bundled Chrome.
 // Override via CHROMIUM_BINARY_URL env var if needed.
 const CHROMIUM_BINARY_URL =
@@ -108,8 +113,21 @@ class CarouselGenerator {
   async seekAndExtractFrame(page, timestamp) {
     console.log(`  Seeking to ${timestamp}s...`);
 
+    // Log Chrome memory and request stats before unblocking video
+    try {
+      const metrics = await page.metrics();
+      const nodeMem = process.memoryUsage();
+      console.log(`  [mem] Chrome JS heap: ${Math.round(metrics.JSHeapUsedSize / 1024 / 1024)}MB used / ${Math.round(metrics.JSHeapTotalSize / 1024 / 1024)}MB total`);
+      console.log(`  [mem] Node RSS: ${Math.round(nodeMem.rss / 1024 / 1024)}MB`);
+      console.log(`  [req] Media requests so far: ${this.mediaRequestsAborted} aborted, ${this.mediaRequestsAllowed} allowed`);
+    } catch (e) {
+      console.log(`  [mem] Could not read metrics: ${e.message}`);
+    }
+
     // Unblock video requests so this specific segment can load
-    this.allowVideoRequests = true;
+    if (!TEST_BLOCK_ALL_MEDIA) {
+      this.allowVideoRequests = true;
+    }
 
     try {
       // Skip any ads that may appear now that media requests are unblocked
@@ -145,6 +163,7 @@ class CarouselGenerator {
           };
         });
       } catch (e) {
+        console.error(`  [crash] Media requests at crash: ${this.mediaRequestsAborted} aborted, ${this.mediaRequestsAllowed} allowed`);
         throw new Error(`Browser crashed while buffering video at ${timestamp}s (likely OOM): ${e.message}`);
       }
       console.log(`  Video state: readyStateReached=${readyStateReached}`, videoState);
@@ -552,14 +571,25 @@ class CarouselGenerator {
     // YouTube from streaming HD video and exhausting Lambda memory.
     // seekAndExtractFrame toggles this per-frame.
     this.allowVideoRequests = false;
+    this.mediaRequestsAborted = 0;
+    this.mediaRequestsAllowed = 0;
     await page.setRequestInterception(true);
     page.on('request', req => {
-      if (!this.allowVideoRequests && req.resourceType() === 'media') {
-        req.abort();
+      if (req.resourceType() === 'media') {
+        if (!this.allowVideoRequests || TEST_BLOCK_ALL_MEDIA) {
+          this.mediaRequestsAborted++;
+          req.abort();
+        } else {
+          this.mediaRequestsAllowed++;
+          req.continue();
+        }
       } else {
         req.continue();
       }
     });
+    if (TEST_BLOCK_ALL_MEDIA) {
+      console.log('[TEST] TEST_BLOCK_ALL_MEDIA=true — all video requests will be blocked');
+    }
 
     page.on('framenavigated', (frame) => {
       if (frame === page.mainFrame()) console.log(`[nav] ${frame.url()}`);
