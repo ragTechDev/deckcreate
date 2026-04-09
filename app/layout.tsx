@@ -30,11 +30,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <ColorSchemeScript />
       </head>
-      <body className={nunito.variable}>
+      <body className={nunito.variable} suppressHydrationWarning>
         <MantineProvider theme={theme}>
           <AuthProvider>
             <Notifications position="top-right" />

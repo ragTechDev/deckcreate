@@ -1,3 +1,5 @@
+import { YoutubeTranscript } from 'youtube-transcript';
+
 const FILLER_WORDS = [
   'uh', 'um', 'uhh', 'umm', 'uhm', 'er', 'err', 'ah', 'ahh',
   'like,', 'you know,', 'i mean,', 'sort of', 'kind of',
@@ -17,6 +19,21 @@ class CaptionExtractor {
   // Fetch all timed caption segments for a video
   async fetchAllCaptions(videoId) {
     console.log(`Fetching captions for video ${videoId}`);
+
+    // Step 0: Try youtube-transcript package (most reliable)
+    try {
+      const transcript = await YoutubeTranscript.fetchTranscript(videoId, { lang: 'en' });
+      if (transcript && transcript.length > 0) {
+        console.log(`  youtube-transcript succeeded with ${transcript.length} segments`);
+        return transcript.map((s) => ({
+          startSec: s.offset / 1000,
+          endSec: (s.offset + s.duration) / 1000,
+          text: s.text,
+        }));
+      }
+    } catch (e) {
+      console.log(`  youtube-transcript failed: ${e.message}, trying fallback...`);
+    }
 
     // Step 1: Fetch the YouTube video page to get caption URLs + cookies
     const pageUrl = `https://www.youtube.com/watch?v=${videoId}`;
