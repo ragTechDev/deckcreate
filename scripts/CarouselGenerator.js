@@ -124,6 +124,22 @@ class CarouselGenerator {
       console.log(`  [mem] Could not read metrics: ${e.message}`);
     }
 
+    // Log total system memory from /proc/meminfo (Linux/Lambda)
+    try {
+      const { execSync } = await import('child_process');
+      const meminfo = execSync('cat /proc/meminfo').toString();
+      const total = meminfo.match(/MemTotal:\s+(\d+)/)?.[1];
+      const available = meminfo.match(/MemAvailable:\s+(\d+)/)?.[1];
+      if (total && available) {
+        const totalMB = Math.round(parseInt(total) / 1024);
+        const availMB = Math.round(parseInt(available) / 1024);
+        const usedMB = totalMB - availMB;
+        console.log(`  [mem] System: ${usedMB}MB used / ${totalMB}MB total (${availMB}MB available)`);
+      }
+    } catch (e) {
+      console.log(`  [mem] Could not read /proc/meminfo: ${e.message}`);
+    }
+
     // Unblock video requests so this specific segment can load
     if (!TEST_BLOCK_ALL_MEDIA) {
       this.allowVideoRequests = true;
