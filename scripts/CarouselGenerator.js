@@ -4,13 +4,6 @@ import path from 'path';
 
 const IS_SERVERLESS = !!(process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.VERCEL || process.env.NETLIFY);
 
-// Set TEST_BLOCK_ALL_MEDIA=true in Netlify env vars to test whether Chrome crashes
-// even when NO video data is allowed. If it still crashes → baseline Chromium OOM.
-// If it doesn't crash → video streaming is the cause.
-const TEST_BLOCK_ALL_MEDIA = process.env.TEST_BLOCK_ALL_MEDIA === 'true';
-
-// Default to the chromium-v131 release which aligns with puppeteer v23's bundled Chrome.
-// Override via CHROMIUM_BINARY_URL env var if needed.
 const CHROMIUM_BINARY_URL =
   process.env.CHROMIUM_BINARY_URL ||
   'https://github.com/Sparticuz/chromium/releases/download/v131.0.1/chromium-v131.0.1-pack.tar';
@@ -33,41 +26,15 @@ class CarouselGenerator {
     if (IS_SERVERLESS) {
       const chromium = (await import('@sparticuz/chromium-min')).default;
       const executablePath = await chromium.executablePath(CHROMIUM_BINARY_URL);
-      console.log(`Using serverless Chromium: ${executablePath}`);
       const { launch } = await import('puppeteer-core');
-      // Use chromium.args as-is — they're tuned for Lambda.
-      // Only add flags that don't conflict with chromium.args.
-      // Merge sparticuz's --disable-features with our own to avoid Chrome
-      // only applying the last --disable-features flag (overriding the earlier one).
-      const baseArgs = chromium.args.filter(arg =>
-        !arg.startsWith('--autoplay-policy') &&
-        arg !== '--single-process' &&
-        !arg.startsWith('--disable-features=')
-      );
-      const existingDisabled = chromium.args
-        .filter(arg => arg.startsWith('--disable-features='))
-        .flatMap(arg => arg.slice('--disable-features='.length).split(','));
-      const disabledFeatures = [
-        ...new Set([
-          ...existingDisabled,
-          'IsolateOrigins',
-          'site-per-process',
-          'ServiceWorkerMain',
-        ])
-      ].join(',');
-      console.log(`Chrome disabled features: ${disabledFeatures}`);
-
       this.browser = await launch({
         headless: true,
         executablePath,
         args: [
-          ...baseArgs,
-          `--disable-features=${disabledFeatures}`,
+          ...chromium.args.filter(arg => !arg.startsWith('--autoplay-policy') && arg !== '--single-process'),
           '--autoplay-policy=no-user-gesture-required',
           '--disable-blink-features=AutomationControlled',
           '--disable-notifications',
-          '--disable-webgl',
-          '--disable-webgl2',
         ],
         protocolTimeout: 60000,
         defaultViewport: null,
@@ -132,114 +99,31 @@ class CarouselGenerator {
 
   async seekAndExtractFrame(page, timestamp) {
     console.log(`  Seeking to ${timestamp}s...`);
-
-    // Log Chrome memory and request stats before unblocking video
-    try {
-      const metrics = await page.metrics();
-      const nodeMem = process.memoryUsage();
-      console.log(`  [mem] Chrome JS heap: ${Math.round(metrics.JSHeapUsedSize / 1024 / 1024)}MB used / ${Math.round(metrics.JSHeapTotalSize / 1024 / 1024)}MB total`);
-      console.log(`  [mem] Node RSS: ${Math.round(nodeMem.rss / 1024 / 1024)}MB`);
-      console.log(`  [req] Media requests so far: ${this.mediaRequestsAborted} aborted, ${this.mediaRequestsAllowed} allowed`);
-    } catch (e) {
-      console.log(`  [mem] Could not read metrics: ${e.message}`);
-    }
-
-    // Log total system memory from /proc/meminfo (Linux/Lambda)
-    try {
-      const { execSync } = await import('child_process');
-      const meminfo = execSync('cat /proc/meminfo').toString();
-      const total = meminfo.match(/MemTotal:\s+(\d+)/)?.[1];
-      const available = meminfo.match(/MemAvailable:\s+(\d+)/)?.[1];
-      if (total && available) {
-        const totalMB = Math.round(parseInt(total) / 1024);
-        const availMB = Math.round(parseInt(available) / 1024);
-        const usedMB = totalMB - availMB;
-        console.log(`  [mem] System: ${usedMB}MB used / ${totalMB}MB total (${availMB}MB available)`);
-      }
-    } catch (e) {
-      console.log(`  [mem] Could not read /proc/meminfo: ${e.message}`);
-    }
-
-    // Unblock video requests so this specific segment can load
-    if (!TEST_BLOCK_ALL_MEDIA) {
-      this.allowVideoRequests = true;
-    }
+    this.allowVideoRequests = true;
 
     try {
-      // Skip any ads that may appear now that media requests are unblocked
       await this.skipAds(page);
 
-      // Seek and pause at target timestamp
       await page.evaluate((ts) => {
         const video = document.querySelector('video');
-        if (video) {
-          video.currentTime = ts;
-          video.pause();
-        }
+        if (video) { video.currentTime = ts; video.pause(); }
       }, timestamp);
 
-      // Poll for readyState >= 2, recovering once if YouTube navigates the page
-      // (passive sign-in check on Lambda causes a one-time page reload).
       console.log('  Waiting for video to buffer...');
-      let readyStateReached = false;
-      let videoState = null;
-      const pollStart = Date.now();
-      let recovered = false;
-      while (Date.now() - pollStart < 30000) {
-        await new Promise(r => setTimeout(r, 500));
-        try {
-          const state = await page.evaluate(() => {
-            const v = document.querySelector('video');
-            if (!v) return null;
-            return { readyState: v.readyState, currentTime: v.currentTime, networkState: v.networkState, videoWidth: v.videoWidth, videoHeight: v.videoHeight };
-          });
-          if (state) {
-            videoState = state;
-            if (state.readyState >= 2) { readyStateReached = true; break; }
-          }
-        } catch (e) {
-          const elapsed = Math.round((Date.now() - pollStart) / 1000);
-          console.log(`  [detach at ${elapsed}s] ${e.message}`);
+      const readyStateReached = await page.waitForFunction(
+        () => { const v = document.querySelector('video'); return v && v.readyState >= 2; },
+        { timeout: 20000 }
+      ).then(() => true).catch(() => false);
 
-          if (recovered) {
-            throw new Error(`Frame detached again after recovery at ${timestamp}s: ${e.message}`);
-          }
-          recovered = true;
-
-          // YouTube navigated the page (passive sign-in flow). Wait for it to reload,
-          // then re-seek and continue polling.
-          console.log('  Waiting for page to recover after navigation...');
-          try {
-            await page.waitForNavigation({ timeout: 15000, waitUntil: 'load' });
-          } catch (_) {
-            // Navigation may have already completed — just wait a moment
-            await new Promise(r => setTimeout(r, 3000));
-          }
-          console.log(`  [recovered] page url: ${page.url()}`);
-
-          // Re-hide UI chrome on the reloaded page
-          await page.evaluate(() => {
-            ['.ytp-chrome-top', '.ytp-chrome-bottom', '.ytp-gradient-top',
-             '.ytp-gradient-bottom', '.ytp-watermark', '.ytp-pause-overlay',
-             '.ytp-settings-menu', '#masthead-container', '#related', '#comments',
-             '.ytp-spinner', '.ytp-buffering-spinner',
-            ].forEach(sel => {
-              document.querySelectorAll(sel).forEach(el => el.style.display = 'none');
-            });
-          }).catch(() => {});
-
-          // Re-seek to the target timestamp
-          await page.evaluate((ts) => {
-            const video = document.querySelector('video');
-            if (video) { video.currentTime = ts; video.pause(); }
-          }, timestamp).catch(() => {});
-          console.log('  Re-sought after recovery, continuing to poll...');
-        }
-      }
+      const videoState = await page.evaluate(() => {
+        const v = document.querySelector('video');
+        if (!v) return null;
+        return { readyState: v.readyState, currentTime: v.currentTime, videoWidth: v.videoWidth, videoHeight: v.videoHeight };
+      });
       console.log(`  Video state: readyStateReached=${readyStateReached}`, videoState);
 
       if (!readyStateReached) {
-        console.warn(`  WARNING: readyState ${videoState?.readyState ?? 'unknown'} after 20s — frame may be blank`);
+        console.warn('  WARNING: readyState < 2 after 20s — frame may be blank');
       }
 
       // Capture the frame
@@ -247,7 +131,12 @@ class CarouselGenerator {
       for (let attempt = 0; attempt < 3; attempt++) {
         // Hide spinner on every attempt — it can reappear during buffering
         await page.evaluate(() => {
-          ['.ytp-spinner', '.ytp-buffering-spinner'].forEach(sel => {
+          ['.ytp-spinner', '.ytp-buffering-spinner',
+           '.ytp-chrome-top', '.ytp-chrome-bottom', '.ytp-gradient-top', '.ytp-gradient-bottom',
+           '.ytp-ce-element', '.ytp-ad-overlay-container', '.ytp-ad-text-overlay',
+           '.ytp-suggested-action-badge', '.ytp-card-teaser', '.ytp-cards-teaser',
+           '.ytp-watermark', '.ytp-pause-overlay',
+          ].forEach(sel => {
             document.querySelectorAll(sel).forEach(el => el.style.display = 'none');
           });
         }).catch(() => {});
@@ -264,14 +153,19 @@ class CarouselGenerator {
           .toBuffer({ resolveWithObject: true });
 
         let nonBlack = 0;
+        let nonWhite = 0;
         for (let i = 0; i < data.length; i += info.channels) {
-          if (data[i] > 10 || data[i + 1] > 10 || data[i + 2] > 10) nonBlack++;
+          const r = data[i], g = data[i + 1], b = data[i + 2];
+          if (r > 10 || g > 10 || b > 10) nonBlack++;
+          if (r < 245 || g < 245 || b < 245) nonWhite++;
         }
-        const ratio = nonBlack / (info.width * info.height);
-        console.log(`  Non-black pixel ratio: ${ratio.toFixed(3)}`);
+        const total = info.width * info.height;
+        const blackRatio = nonBlack / total;
+        const whiteRatio = nonWhite / total;
+        console.log(`  Non-black: ${blackRatio.toFixed(3)}, non-white: ${whiteRatio.toFixed(3)}`);
 
-        if (ratio < 0.01) {
-          console.warn('  Blank frame, retrying in 3s...');
+        if (blackRatio < 0.01 || whiteRatio < 0.01) {
+          console.warn('  Blank frame (all black or all white), retrying in 3s...');
           await new Promise(r => setTimeout(r, 3000));
           continue;
         }
@@ -644,93 +538,16 @@ class CarouselGenerator {
     const outputPaths = [];
     const page = await this.browser.newPage();
 
-    // Inject before any page scripts run: silently drop any iframe that tries to
-    // load a Google sign-in URL. On Lambda (no session), YouTube creates these iframes
-    // for passive auth — if they error, YouTube navigates/detaches the main frame.
-    await page.evaluateOnNewDocument(() => {
-      const BLOCKED = ['accounts.google.com', '/signin_passive', 'youtube.com/signin'];
-      const isBlocked = (val) => val && BLOCKED.some(s => val.includes(s));
-
-      const srcDesc = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'src');
-      Object.defineProperty(HTMLIFrameElement.prototype, 'src', {
-        set(val) { if (!isBlocked(val) && srcDesc?.set) srcDesc.set.call(this, val); },
-        get() { return srcDesc?.get ? srcDesc.get.call(this) : this.getAttribute('src'); },
-        configurable: true,
-      });
-
-      const origSetAttr = Element.prototype.setAttribute;
-      Element.prototype.setAttribute = function(name, val) {
-        if (this instanceof HTMLIFrameElement && name === 'src' && isBlocked(val)) return;
-        return origSetAttr.call(this, name, val);
-      };
-    });
-
-    // Block video data (googlevideo.com media segments) during setup to prevent
-    // YouTube from streaming HD video and exhausting Lambda memory.
-    // seekAndExtractFrame toggles this per-frame.
+    // Block media requests during setup to prevent YouTube from streaming video
+    // before we're ready. seekAndExtractFrame re-enables this per frame.
     this.allowVideoRequests = false;
-    this.mediaRequestsAborted = 0;
-    this.mediaRequestsAllowed = 0;
     await page.setRequestInterception(true);
-    const videoPageUrl = `https://www.youtube.com/watch?v=${this.config.videoId}`;
     page.on('request', req => {
-      try {
-        const url = req.url();
-
-        // Intercept Google sign-in and YouTube's passive sign-in iframes.
-        // Aborting causes chrome-error:// in the iframe, which YouTube's JS treats as
-        // a fatal error and navigates the main frame. Instead, respond with an empty
-        // page so the iframe loads silently and YouTube doesn't trigger a reload.
-        if (url.includes('accounts.google.com') || url.includes('youtube.com/signin')) {
-          console.log(`[faked signin] ${url.slice(0, 80)}`);
-          req.respond({ status: 200, contentType: 'text/html', body: '<html></html>' });
-          return;
-        }
-
-        // Log ALL navigation requests so we can see what's going through the interceptor
-        if (req.isNavigationRequest()) {
-          let isMain = false;
-          try { isMain = req.frame() === page.mainFrame(); } catch (_) {}
-          console.log(`[nav req] isMain=${isMain} url=${url.slice(0, 120)}`);
-
-          if (isMain && !url.startsWith(videoPageUrl) && url !== 'about:blank') {
-            console.log(`[blocked main nav] ${url.slice(0, 120)}`);
-            req.abort();
-            return;
-          }
-        }
-
-        if (req.resourceType() === 'media') {
-          if (!this.allowVideoRequests || TEST_BLOCK_ALL_MEDIA) {
-            this.mediaRequestsAborted++;
-            req.abort();
-          } else {
-            this.mediaRequestsAllowed++;
-            req.continue();
-          }
-        } else {
-          req.continue();
-        }
-      } catch (e) {
-        console.error(`[req handler error] ${e.message}`);
-        try { req.continue(); } catch (_) {}
+      if (!this.allowVideoRequests && req.resourceType() === 'media') {
+        req.abort();
+      } else {
+        req.continue();
       }
-    });
-    if (TEST_BLOCK_ALL_MEDIA) {
-      console.log('[TEST] TEST_BLOCK_ALL_MEDIA=true — all video requests will be blocked');
-    }
-
-    page.on('framenavigated', (frame) => {
-      if (frame === page.mainFrame()) console.log(`[nav] ${frame.url()}`);
-    });
-
-    page.on('error', err => console.log(`[page crash] ${err.message}`));
-    page.on('pageerror', err => console.log(`[page js error] ${err.message}`));
-    page.on('console', msg => {
-      if (msg.type() === 'error') console.log(`[console error] ${msg.text()}`);
-    });
-    page.on('framedetached', frame => {
-      console.log(`[framedetached] isMain=${frame === page.mainFrame()} url=${frame.url()}`);
     });
 
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
@@ -741,6 +558,24 @@ class CarouselGenerator {
     console.log(`Opening video: ${url}\n`);
     await page.goto(url, { waitUntil: 'load', timeout: 60000 });
     console.log(`Landed on: ${page.url()}`);
+
+    // Inject persistent CSS to hide all YouTube UI chrome and ad overlays.
+    // Using !important and a <style> tag so elements can't override it via inline styles.
+    await page.addStyleTag({ content: `
+      .ytp-chrome-top, .ytp-chrome-bottom, .ytp-gradient-top, .ytp-gradient-bottom,
+      .ytp-watermark, .ytp-pause-overlay, .ytp-settings-menu,
+      .ytp-spinner, .ytp-buffering-spinner,
+      .ytp-ad-module, .ytp-flyout-cta, .ytp-ad-overlay-container,
+      .ytp-ad-overlay-slot, .ytp-ad-text-overlay, .ytp-ad-player-overlay,
+      .ytp-ad-image-overlay, .ytp-ad-skip-button-modern, .ytp-ad-message-container,
+      .ytp-ce-element, .ytp-suggested-action-badge,
+      .ytp-card-teaser, .ytp-cards-teaser,
+      #masthead-container, #related, #comments {
+        display: none !important;
+        visibility: hidden !important;
+        opacity: 0 !important;
+      }
+    ` }).catch(() => {});
 
     // Dismiss consent banner if present
     try {
@@ -775,16 +610,6 @@ class CarouselGenerator {
     });
     console.log('Quality set to 1080p');
 
-    // Hide UI chrome so it doesn't bleed into screenshots
-    await page.evaluate(() => {
-      ['.ytp-chrome-top', '.ytp-chrome-bottom', '.ytp-gradient-top',
-       '.ytp-gradient-bottom', '.ytp-watermark', '.ytp-pause-overlay',
-       '.ytp-settings-menu', '#masthead-container', '#related', '#comments',
-       '.ytp-spinner', '.ytp-buffering-spinner',
-      ].forEach(sel => {
-        document.querySelectorAll(sel).forEach(el => el.style.display = 'none');
-      });
-    });
 
     for (let i = 0; i < this.config.slides.length; i++) {
       const slide = this.config.slides[i];
