@@ -7,12 +7,11 @@ import {
   CalculateMetadataFunction,
   useVideoConfig,
   delayRender,
-  continueRender,
-  useCurrentFrame,
+  continueRender
 } from 'remotion';
 import { getAudioDurationInSeconds } from '@remotion/media-utils';
 import React, { useState, useEffect, useMemo } from 'react';
-import { SegmentPlayer, buildSections, getEffectiveDuration } from './components/SegmentPlayer';
+import { SegmentPlayer, buildSections, buildMainSubClips } from './components/SegmentPlayer';
 import { CameraPlayer } from './components/CameraPlayer';
 import { HookOverlay } from './components/HookOverlay';
 import { PodcastIntroComposition, INTRO_DURATION_FRAMES } from './components/PodcastIntro';
@@ -106,9 +105,10 @@ function computeEffectiveDuration(transcript: Transcript): number {
     return sum + (hookClipEnd(s, nextHookStart) - start);
   }, 0);
   const introDuration = hooks.length > 0 ? INTRO_DURATION_SECS : 0;
-  const mainDuration = getActiveSegments(transcript)
-    .filter(s => !s.hook && !s.cut)
-    .reduce((sum, s) => sum + getEffectiveDuration(s), 0);
+  const { videoStart, videoEnd } = transcript.meta;
+  const mainInRange = getActiveSegments(transcript).filter(s => !s.hook);
+  const mainDuration = buildMainSubClips(mainInRange, videoStart, videoEnd)
+    .reduce((sum, c) => sum + (c.sourceEnd - c.sourceStart), 0);
   return hookDuration + introDuration + mainDuration;
 }
 
@@ -168,11 +168,16 @@ const TranscriptComposition: React.FC<TranscriptCompositionProps> = ({
   );
 
   const orderedSegments: Segment[] = useMemo(() => {
+    // Include cut=true main segments so buildSections can use them as exclusion ranges
+    // when computing the "full range minus cuts" main section list.
     const mainSegments = getActiveSegments(transcript).filter(s => !s.hook);
     return [...hookSegments, ...mainSegments];
   }, [transcript, hookSegments]);
 
-  const { hookSections, mainSections } = useMemo(() => buildSections(orderedSegments, fps), [orderedSegments, fps]);
+  const { hookSections, mainSections } = useMemo(
+    () => buildSections(orderedSegments, fps, transcript.meta.videoStart, transcript.meta.videoEnd),
+    [orderedSegments, fps, transcript.meta.videoStart, transcript.meta.videoEnd],
+  );
 
   const totalHookFrames = hookSections.reduce((sum, s) => sum + s.trimAfter - s.trimBefore, 0);
   const hasHooks        = hookSegments.length > 0;

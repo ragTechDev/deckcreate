@@ -8,11 +8,11 @@ import { createTikTokStyleCaptions } from '@remotion/captions';
 import type { Caption } from '@remotion/captions';
 import { whip } from '@remotion/sfx';
 import type { Segment, Token } from '../types/transcript';
+import { isSpokenToken } from '../lib/tokens';
 import type { Brand } from '../types/brand';
 
 // ── Token helpers ──────────────────────────────────────────────────────────────
 
-function isSpecialToken(t: Token) { return /_[A-Z]+_/.test(t.text.trim()); }
 
 function isContractionSuffixTokenText(text: string) {
   return /^'(m|s|t|re|ve|ll|d)$/i.test(text.trim());
@@ -48,13 +48,13 @@ function buildCaptions(
   tokens: Token[],
   sourceStart: number,
   sourceEnd: number,
-  endBufferSeconds: number,
+  isBoundedHook: boolean,
 ): Caption[] {
   const dedupedTokens: Token[] = [];
   const seenTokenAtMoment = new Set<string>();
   for (let i = tokens.length - 1; i >= 0; i--) {
     const t = tokens[i];
-    if (isSpecialToken(t) || t.text.trim() === '') continue;
+    if (!isSpokenToken(t)) continue;
     const key = `${t.t_dtw}|${t.text.trim().toLowerCase()}`;
     if (seenTokenAtMoment.has(key)) continue;
     seenTokenAtMoment.add(key);
@@ -119,12 +119,12 @@ function buildCaptions(
     return !(sameTime && sameToken);
   });
 
-  // Filter to the hook window. Use a 0.5 s buffer past sourceEnd so words
-  // whose t_dtw lands exactly at the boundary (or slightly past due to Whisper
-  // timestamp drift) are not silently dropped from captions.
-  const inRange = deduped.filter(w => w.t_dtw >= sourceStart && w.t_dtw < sourceEnd + endBufferSeconds);
+  // Filter to the hook window
+  const inRange = deduped.filter(w => w.t_dtw >= sourceStart && w.t_dtw < sourceEnd);
   return inRange.map((w, i) => {
-    const startMs = Math.round(w.t_dtw * 1000);
+    const startMs = (i === 0 && isBoundedHook && w.t_dtw > sourceStart)
+      ? Math.round(sourceStart * 1000)
+      : Math.round(w.t_dtw * 1000);
     const rawEndMs = Math.round(
       (i + 1 < inRange.length ? inRange[i + 1].t_dtw : sourceEnd) * 1000,
     );
@@ -163,45 +163,38 @@ function buildHookTimings(segments: Segment[], fps: number): HookTiming[] {
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i];
     if (!seg.hook || seg.cut) continue;
+
     const sourceStart = seg.hookFrom ?? seg.start;
-    const baseEnd     = seg.hookTo   ?? seg.end;
+    const baseEnd = seg.hookTo ?? seg.end;
     const isBoundedHook = seg.hookTo !== undefined && seg.hookTo !== null;
-    const captions    = buildCaptions(seg.tokens, sourceStart, baseEnd, isBoundedHook ? 0 : 0.5);
-    // Extend only unbounded hooks (no explicit hookTo) when tokens drift past
-    // the segment end. Must match SegmentPlayer/Composition/CameraPlayer.
-    let sourceEnd = baseEnd;
-    if (seg.hookTo === undefined || seg.hookTo === null) {
-      const latestSpokenToken = seg.tokens
-        .filter(t => !isSpecialToken(t) && t.text.trim() !== '')
-        .reduce((max, t) => Math.max(max, t.t_dtw), -Infinity);
-      if (latestSpokenToken > baseEnd) {
-        const drift = latestSpokenToken - baseEnd;
-        const extension = Math.min(1.5, drift + 0.4);
-        sourceEnd = baseEnd + extension;
+
+     let sourceEnd = baseEnd;
+    if (!isBoundedHook) {
+      const lastSpokenToken = seg.tokens
+        .filter(isSpokenToken)
+        .sort((a, b) => (b.t_end ?? 0) - (a.t_end ?? 0))[0];
+
+      if (lastSpokenToken?.t_end) {
+        sourceEnd = Math.max(baseEnd, lastSpokenToken.t_end);
       }
     }
-    const next = segments[i + 1];
-    const nextHookStart = next && next.hook && !next.cut ? (next.hookFrom ?? next.start) : undefined;
-    const hasSpokenTokenAfterEnd = seg.tokens.some(
-      (t) => !isSpecialToken(t)
-        && t.text.trim() !== ''
-        && t.t_dtw > sourceEnd + 0.02,
-    );
-    const endsAtSegmentTail = !hasSpokenTokenAfterEnd;
-    const canBridgeToNextHook = nextHookStart !== undefined
-      && nextHookStart > sourceEnd
-      && nextHookStart - sourceEnd <= HOOK_BRIDGE_MAX_GAP_SECONDS;
-    if (endsAtSegmentTail && canBridgeToNextHook) {
-      sourceEnd = nextHookStart;
-    }
-    sourceEnd += isBoundedHook ? HOOK_TAIL_PAD_BOUNDED_SECONDS : HOOK_TAIL_PAD_UNBOUNDED_SECONDS;
+
+    // Add a small tail pad to avoid cutting off the audio abruptly
+    sourceEnd += isBoundedHook
+      ? HOOK_TAIL_PAD_BOUNDED_SECONDS
+      : HOOK_TAIL_PAD_UNBOUNDED_SECONDS;
+
+    const captions = buildCaptions(seg.tokens, sourceStart, sourceEnd, isBoundedHook);
+
     const startFrame = Math.floor(sourceStart * fps);
     const endFrame = Math.ceil(sourceEnd * fps);
     const dur = Math.max(1, endFrame - startFrame);
-    const { pages }   = createTikTokStyleCaptions({
+
+    const { pages } = createTikTokStyleCaptions({
       captions,
       combineTokensWithinMilliseconds: 1200,
     });
+
     timings.push({ seg, outputStartFrame: cum, outputEndFrame: cum + dur, sourceStart, pages });
     cum += dur;
   }

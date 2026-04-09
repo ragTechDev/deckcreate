@@ -1,8 +1,9 @@
 import React, { useEffect, useRef } from 'react';
 import { OffthreadVideo, Sequence, useCurrentFrame, useVideoConfig, getRemotionEnvironment } from 'remotion';
 import type { Segment, TimeCut } from '../types/transcript';
+import { isSpokenToken } from '../lib/tokens';
 
-type SubClip = { sourceStart: number; sourceEnd: number };
+export type SubClip = { sourceStart: number; sourceEnd: number };
 
 export type Section = { trimBefore: number; trimAfter: number };
 
@@ -10,6 +11,10 @@ export type SplitSections = { hookSections: Section[]; mainSections: Section[] }
 
 /** Splits a segment's time range into playable sub-clips, skipping cuts[] ranges. */
 export function getSubClips(segment: Segment): SubClip[] {
+  if (!segment.cuts || segment.cuts.length === 0) {
+    return [{ sourceStart: segment.start, sourceEnd: segment.end }];
+  }
+
   const clips: SubClip[] = [];
   let cursor = segment.start;
 
@@ -35,42 +40,94 @@ export function getEffectiveDuration(segment: Segment): number {
   return getSubClips(segment).reduce((sum, c) => sum + (c.sourceEnd - c.sourceStart), 0);
 }
 
-/** Returns the clip range for a hook segment: phrase window if set, else the raw segment
+/**
+ * Builds the playable sub-clips for main content using "full range minus explicit cuts".
+ *
+ * Starts from [videoStart, rangeEnd] and subtracts:
+ *   - cut=true segment spans (whole segments removed)
+ *   - segment.cuts[] entries (intra-segment time ranges removed)
+ *
+ * Inter-segment silence/gaps are included by default. To opt-in to silence removal,
+ * run --auto-cut-pauses which writes explicit cuts[] entries into the transcript.
+ */
+export function buildMainSubClips(
+  allMainSegments: Segment[],
+  videoStart: number | undefined,
+  videoEnd: number | undefined,
+): SubClip[] {
+  const activeMain = allMainSegments.filter(s => !s.cut);
+  if (activeMain.length === 0) return [];
+
+  const rangeStart = videoStart ?? activeMain[0].start;
+  const rangeEnd   = videoEnd   ?? activeMain[activeMain.length - 1].end;
+
+  // Collect all exclusion ranges
+  const cutRanges: { from: number; to: number }[] = [];
+
+  for (const seg of allMainSegments) {
+    if (seg.cut) cutRanges.push({ from: seg.start, to: seg.end });
+  }
+  for (const seg of activeMain) {
+    for (const c of seg.cuts ?? []) {
+      const from = Math.max(c.from, seg.start);
+      const to   = Math.min(c.to,   seg.end);
+      if (to > from) cutRanges.push({ from, to });
+    }
+  }
+
+  // Sort and merge overlapping/adjacent exclusion ranges
+  cutRanges.sort((a, b) => a.from - b.from);
+  const merged: { from: number; to: number }[] = [];
+  for (const c of cutRanges) {
+    if (merged.length > 0 && c.from <= merged[merged.length - 1].to) {
+      merged[merged.length - 1].to = Math.max(merged[merged.length - 1].to, c.to);
+    } else {
+      merged.push({ ...c });
+    }
+  }
+
+  // Invert: the gaps between exclusions are the playable clips
+  const clips: SubClip[] = [];
+  let cursor = rangeStart;
+  for (const cut of merged) {
+    if (cut.from > cursor) clips.push({ sourceStart: cursor, sourceEnd: cut.from });
+    cursor = Math.max(cursor, cut.to);
+  }
+  if (cursor < rangeEnd) clips.push({ sourceStart: cursor, sourceEnd: rangeEnd });
+
+  // Drop clips shorter than 2 frames at 60fps (Whisper segmentation artifacts
+  // between adjacent cut=true segments).
+  return clips.filter(c => (c.sourceEnd - c.sourceStart) >= 0.034);
+}
+
+/**
+ * Returns the clip range for a hook segment: phrase window if set, else the raw segment
  *  (no cuts applied — hook clips play uninterrupted so the music stays in sync).
  *
  *  The clip end is extended when spoken tokens drift past the segment boundary,
  *  matching HookOverlay/Composition/CameraPlayer so hook audio does not clip the
  *  trailing word of a phrase. */
-function getHookSubClips(segment: Segment, nextHookStart?: number): SubClip[] {
+function getHookSubClips(segment: Segment): SubClip[] {
   const sourceStart = segment.hookFrom ?? segment.start;
-  const baseEnd     = segment.hookTo   ?? segment.end;
+  const baseEnd = segment.hookTo ?? segment.end;
   const isBoundedHook = segment.hookTo !== undefined && segment.hookTo !== null;
-  // Only extend unbounded hooks (no explicit hookTo). Phrase-bounded hooks play
-  // exactly their defined window so post-phrase tokens don't leak in.
+
   let sourceEnd = baseEnd;
-  if (segment.hookTo === undefined || segment.hookTo === null) {
-    const latestSpokenToken = segment.tokens
-      .filter(t => !/_[A-Z]+_/.test(t.text.trim()) && t.text.trim() !== '')
-      .reduce((max, t) => Math.max(max, t.t_dtw), -Infinity);
-    if (latestSpokenToken > baseEnd) {
-      const drift = latestSpokenToken - baseEnd;
-      const extension = Math.min(1.5, drift + 0.4);
-      sourceEnd = baseEnd + extension;
+  if (!isBoundedHook) {
+    const lastSpokenToken = segment.tokens
+      .filter(isSpokenToken)
+      .sort((a, b) => (b.t_end ?? 0) - (a.t_end ?? 0))[0];
+
+    if (lastSpokenToken?.t_end) {
+      sourceEnd = Math.max(baseEnd, lastSpokenToken.t_end);
     }
   }
-  const hasSpokenTokenAfterEnd = segment.tokens.some(
-    (t) => !/_[A-Z]+_/.test(t.text.trim())
-      && t.text.trim() !== ''
-      && t.t_dtw > sourceEnd + 0.02,
-  );
-  const endsAtSegmentTail = !hasSpokenTokenAfterEnd;
-  const canBridgeToNextHook = nextHookStart !== undefined
-    && nextHookStart > sourceEnd
-    && nextHookStart - sourceEnd <= HOOK_BRIDGE_MAX_GAP_SECONDS;
-  if (endsAtSegmentTail && canBridgeToNextHook) {
-    sourceEnd = nextHookStart;
-  }
-  sourceEnd += isBoundedHook ? HOOK_TAIL_PAD_BOUNDED_SECONDS : HOOK_TAIL_PAD_UNBOUNDED_SECONDS;
+
+  // Add a small tail pad to avoid cutting off the audio abruptly
+  sourceEnd += isBoundedHook
+    ? HOOK_TAIL_PAD_BOUNDED_SECONDS
+    : HOOK_TAIL_PAD_UNBOUNDED_SECONDS;
+
   return [{ sourceStart, sourceEnd }];
 }
 
@@ -95,18 +152,25 @@ function toSections(clips: SubClip[], fps: number): Section[] {
  * plays at hookDuration…end. Without the split, after hookDuration frames of hooks
  * the accumulated prevSum would exceed mainSection.trimBefore, making the shift
  * trimBefore = mainSection.trimBefore - prevSum go negative.
+ *
+ * Main content uses "full range minus explicit cuts": the active range
+ * [videoStart, lastSegment.end] plays continuously, with only cut=true segments
+ * and cuts[] time ranges removed. Inter-segment silence is included by default.
  */
-export function buildSections(segments: Segment[], fps: number): SplitSections {
+export function buildSections(
+  segments: Segment[],
+  fps: number,
+  videoStart?: number,
+  videoEnd?: number,
+): SplitSections {
   const hookSegments = segments.filter(s => s.hook && !s.cut);
   const hookSections = hookSegments
     .flatMap((seg, idx) => {
-      const next = hookSegments[idx + 1];
-      const nextHookStart = next ? (next.hookFrom ?? next.start) : undefined;
-      return toSections(getHookSubClips(seg, nextHookStart), fps);
+      return toSections(getHookSubClips(seg), fps);
     });
-  const mainSections = segments
-    .filter(s => !s.hook && !s.cut)
-    .flatMap(seg => toSections(getSubClips(seg), fps));
+  const allMainSegments = segments.filter(s => !s.hook);
+  const mainSubClips = buildMainSubClips(allMainSegments, videoStart, videoEnd);
+  const mainSections = toSections(mainSubClips, fps);
   return { hookSections, mainSections };
 }
 

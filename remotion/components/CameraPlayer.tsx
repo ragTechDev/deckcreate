@@ -4,6 +4,27 @@ import { SegmentPlayer, getEffectiveDuration, Section } from './SegmentPlayer';
 import type { Segment } from '../types/transcript';
 import type { CameraProfiles, CameraShot, CropViewport } from '../types/camera';
 
+/**
+ * Maps a source-video time (seconds) to an output frame index within the main
+ * content sequence (frame 0 = first frame of main content, not including hooks).
+ *
+ * Uses the same mainSections that SegmentPlayer renders, so camera shot boundaries
+ * are always in sync with actual playback position even when silence fills
+ * inter-segment gaps.
+ */
+function sourceToOutputFrame(sourceSec: number, mainSections: Section[], fps: number): number {
+  let outputFrame = 0;
+  for (const sec of mainSections) {
+    const secDur = sec.trimAfter - sec.trimBefore;
+    const sourceFrame = Math.round(sourceSec * fps);
+    if (sourceFrame <= sec.trimAfter) {
+      return outputFrame + Math.max(0, sourceFrame - sec.trimBefore);
+    }
+    outputFrame += secDur;
+  }
+  return outputFrame;
+}
+
 // ── Pacing constants ──────────────────────────────────────────────────────────
 
 const MIN_WIDE_S      = 1.5;   // minimum wide-shot duration before cutting to closeup
@@ -97,11 +118,16 @@ function getOutputDuration(seg: Segment, nextHookStart?: number): number {
 /**
  * Builds the camera shot timeline from the active (non-cut) segments.
  * All frame numbers are in the OUTPUT timeline (cuts already removed).
+ *
+ * mainSections is required so main-content shot positions are derived from the
+ * same section map that SegmentPlayer renders, ensuring frame accuracy when
+ * silence fills inter-segment gaps.
  */
 export function buildCameraShots(
   activeSegments: Segment[],
   profiles: CameraProfiles,
   fps: number,
+  mainSections: Section[],
 ): CameraShot[] {
   const MIN_WIDE_F    = Math.round(MIN_WIDE_S    * fps);
   const MAX_CLOSEUP_F = Math.round(MAX_CLOSEUP_S * fps);
@@ -109,13 +135,28 @@ export function buildCameraShots(
 
   const shots: CameraShot[] = [];
 
+  // Pre-compute total hook output frames so we can anchor main-segment positions.
+  const hookSegs = activeSegments.filter(s => s.hook && !s.cut);
+  let hookTotalFrames = 0;
+  for (let i = 0; i < hookSegs.length; i++) {
+    const next = hookSegs[i + 1];
+    const nextHookStart = next ? (next.hookFrom ?? next.start) : undefined;
+    hookTotalFrames += Math.round(getOutputDuration(hookSegs[i], nextHookStart) * fps);
+  }
+
+  const mainTotalFrames = mainSections.reduce((sum, s) => sum + s.trimAfter - s.trimBefore, 0);
+
+  // Non-cut main segments in order — used to compute pacing duration (seg start →
+  // next seg start, which includes inter-segment silence in the new model).
+  const mainSegsNonCut = activeSegments.filter(s => !s.hook && !s.cut);
+
   // State
   let shotType: 'wide' | 'closeup' = 'wide';
   let shotStart        = 0;
   let shotSpeaker      = '';    // speaker the current shot is focused on
   let framesInShot     = 0;
   let totalCloseupF    = 0;     // total closeup frames since last wide
-  let cumFrame         = 0;
+  let cumFrame         = 0;     // used only while processing hook segments
 
   function emitShot(endFrame: number): CameraShot {
     const viewport =
@@ -127,11 +168,28 @@ export function buildCameraShots(
 
   for (const seg of activeSegments) {
     if (seg.cut) continue;
-    const next = activeSegments.find((cand) => cand.hook && !cand.cut && cand.id > seg.id);
-    const nextHookStart = next ? (next.hookFrom ?? next.start) : undefined;
-    const segDur   = Math.round(getOutputDuration(seg, nextHookStart) * fps);
-    const segStart = cumFrame;
-    cumFrame      += segDur;
+
+    let segStart: number;
+    let segDur: number;
+
+    if (seg.hook) {
+      // Hook segments: unchanged — accumulate via cumFrame
+      const next = activeSegments.find((cand) => cand.hook && !cand.cut && cand.id > seg.id);
+      const nextHookStart = next ? (next.hookFrom ?? next.start) : undefined;
+      segDur   = Math.round(getOutputDuration(seg, nextHookStart) * fps);
+      segStart = cumFrame;
+      cumFrame += segDur;
+    } else {
+      // Main segments: derive output position from mainSections so silence between
+      // segments is accounted for. Duration = distance to next segment's output
+      // start (includes trailing silence) for accurate pacing counters.
+      segStart = hookTotalFrames + sourceToOutputFrame(seg.start, mainSections, fps);
+      const nextMainSeg = mainSegsNonCut.find(s => s.id > seg.id);
+      const segOutputEnd = nextMainSeg
+        ? hookTotalFrames + sourceToOutputFrame(nextMainSeg.start, mainSections, fps)
+        : hookTotalFrames + mainTotalFrames;
+      segDur = Math.max(1, segOutputEnd - segStart);
+    }
 
     const profile = profiles.speakers[seg.speaker];
 
@@ -185,8 +243,9 @@ export function buildCameraShots(
     }
   }
 
-  // Close the final shot
-  if (cumFrame > shotStart) shots.push(emitShot(cumFrame));
+  // Close the final shot at the end of the full output timeline
+  const totalOutputFrames = hookTotalFrames + mainTotalFrames;
+  if (totalOutputFrames > shotStart) shots.push(emitShot(totalOutputFrames));
 
   return shots;
 }
@@ -197,15 +256,25 @@ type OverrideEvent = { outputFrame: number; viewport: CropViewport };
 
 /**
  * Walks active segments and maps each CameraCue's `at` (absolute source seconds)
- * to an output-timeline frame, respecting cuts within the segment.
+ * to an output-timeline frame. Uses sourceToOutputFrame so cuts and inter-segment
+ * silence are automatically accounted for via mainSections.
  */
 function collectCameraOverrides(
   activeSegments: Segment[],
   profiles: CameraProfiles,
   fps: number,
+  mainSections: Section[],
 ): OverrideEvent[] {
   const events: OverrideEvent[] = [];
-  let cumFrame = 0;
+
+  // Pre-compute hook total frames to anchor main-segment cue positions.
+  const hookSegs = activeSegments.filter(s => s.hook && !s.cut);
+  let hookTotalFrames = 0;
+  for (let i = 0; i < hookSegs.length; i++) {
+    hookTotalFrames += Math.round(getOutputDuration(hookSegs[i]) * fps);
+  }
+
+  let hookCumFrame = 0; // used only for hook segments
 
   for (const seg of activeSegments) {
     if (seg.cut) continue;
@@ -217,23 +286,20 @@ function collectCameraOverrides(
           ? profiles.wideViewport
           : (profiles.speakers[cue.speaker]?.closeupViewport ?? profiles.wideViewport);
 
-      // Map cue.at to an offset within this segment's output frames, subtracting
-      // any cuts that precede cue.at.
-      let frameOffset = 0;
-      if (cue.at > seg.start) {
-        const sourceOffset = Math.min(cue.at - seg.start, seg.end - seg.start);
-        let cutsBefore = 0;
-        for (const cut of (seg.cuts ?? [])) {
-          if (cut.from >= cue.at) break;
-          cutsBefore += Math.min(cut.to, cue.at) - cut.from;
-        }
-        frameOffset = Math.round(Math.max(0, sourceOffset - cutsBefore) * fps);
+      let outputFrame: number;
+      if (seg.hook) {
+        // Hook segments: map cue offset within hook's output frames
+        const sourceOffset = Math.min(Math.max(0, cue.at - seg.start), seg.end - seg.start);
+        outputFrame = hookCumFrame + Math.round(sourceOffset * fps);
+      } else {
+        // Main segments: sourceToOutputFrame handles cuts and silence directly
+        outputFrame = hookTotalFrames + sourceToOutputFrame(cue.at, mainSections, fps);
       }
 
-      events.push({ outputFrame: cumFrame + frameOffset, viewport });
+      events.push({ outputFrame, viewport });
     }
 
-    cumFrame += segDur;
+    if (seg.hook) hookCumFrame += segDur;
   }
 
   return events.sort((a, b) => a.outputFrame - b.outputFrame);
@@ -300,8 +366,8 @@ export const CameraPlayer: React.FC<Props> = ({ src, hookSections, mainSections,
   // If mainOffset > 0, shift every main-content shot forward by mainOffset so
   // the composition-frame lookup stays in sync with the actual playback position.
   const shots = useMemo(() => {
-    const pacing    = buildCameraShots(segments, profiles, fps);
-    const overrides = collectCameraOverrides(segments, profiles, fps);
+    const pacing    = buildCameraShots(segments, profiles, fps, mainSections);
+    const overrides = collectCameraOverrides(segments, profiles, fps, mainSections);
     const applied   = applyOverrides(pacing, overrides);
     if (mainOffset === 0) return applied;
     // Split any shot that straddles the hook/main boundary so the main portion
@@ -323,7 +389,7 @@ export const CameraPlayer: React.FC<Props> = ({ src, hookSections, mainSections,
       }
     }
     return result;
-  }, [segments, profiles, fps, hookOutputFrames, mainOffset]);
+  }, [segments, profiles, fps, mainSections, hookOutputFrames, mainOffset]);
 
   // Find current shot
   const currentShot = useMemo(() => {
