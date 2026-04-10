@@ -168,15 +168,29 @@ function buildHookTimings(segments: Segment[], fps: number): HookTiming[] {
     const baseEnd = seg.hookTo ?? seg.end;
     const isBoundedHook = seg.hookTo !== undefined && seg.hookTo !== null;
 
-     let sourceEnd = baseEnd;
-    if (!isBoundedHook) {
-      const lastSpokenToken = seg.tokens
-        .filter(isSpokenToken)
-        .sort((a, b) => (b.t_end ?? 0) - (a.t_end ?? 0))[0];
+    let sourceEnd = baseEnd;
+    // Extend to cover the last spoken token's audio tail (both bounded and unbounded hooks)
+    const lastSpokenToken = seg.tokens
+      .filter(t => isSpokenToken(t) && t.t_dtw >= sourceStart && t.t_dtw <= baseEnd)
+      .sort((a, b) => (b.t_end ?? 0) - (a.t_end ?? 0))[0];
 
-      if (lastSpokenToken?.t_end) {
-        sourceEnd = Math.max(baseEnd, lastSpokenToken.t_end);
-      }
+    if (lastSpokenToken?.t_end) {
+      sourceEnd = Math.max(sourceEnd, lastSpokenToken.t_end);
+    }
+
+    // Bridge to the next hook when the gap is small and this hook ends at the
+    // segment tail — must match SegmentPlayer.getHookSubClips / CameraPlayer.
+    const nextHookSeg = segments.slice(i + 1).find(s => s.hook && !s.cut);
+    const nextHookStart = nextHookSeg ? (nextHookSeg.hookFrom ?? nextHookSeg.start) : undefined;
+    const hasSpokenTokenAfterEnd = seg.tokens.some(
+      t => isSpokenToken(t) && t.t_dtw > sourceEnd + 0.02,
+    );
+    const endsAtSegmentTail = !hasSpokenTokenAfterEnd;
+    const canBridge = nextHookStart !== undefined
+      && nextHookStart > sourceEnd
+      && nextHookStart - sourceEnd <= HOOK_BRIDGE_MAX_GAP_SECONDS;
+    if (endsAtSegmentTail && canBridge) {
+      sourceEnd = nextHookStart;
     }
 
     // Add a small tail pad to avoid cutting off the audio abruptly

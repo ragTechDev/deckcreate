@@ -107,20 +107,32 @@ export function buildMainSubClips(
  *  The clip end is extended when spoken tokens drift past the segment boundary,
  *  matching HookOverlay/Composition/CameraPlayer so hook audio does not clip the
  *  trailing word of a phrase. */
-function getHookSubClips(segment: Segment): SubClip[] {
+function getHookSubClips(segment: Segment, nextHookStart?: number): SubClip[] {
   const sourceStart = segment.hookFrom ?? segment.start;
   const baseEnd = segment.hookTo ?? segment.end;
   const isBoundedHook = segment.hookTo !== undefined && segment.hookTo !== null;
 
   let sourceEnd = baseEnd;
-  if (!isBoundedHook) {
-    const lastSpokenToken = segment.tokens
-      .filter(isSpokenToken)
-      .sort((a, b) => (b.t_end ?? 0) - (a.t_end ?? 0))[0];
+  // Extend to cover the last spoken token's audio tail (both bounded and unbounded hooks)
+  const lastSpokenToken = segment.tokens
+    .filter(t => isSpokenToken(t) && t.t_dtw >= sourceStart && t.t_dtw <= baseEnd)
+    .sort((a, b) => (b.t_end ?? 0) - (a.t_end ?? 0))[0];
 
-    if (lastSpokenToken?.t_end) {
-      sourceEnd = Math.max(baseEnd, lastSpokenToken.t_end);
-    }
+  if (lastSpokenToken?.t_end) {
+    sourceEnd = Math.max(sourceEnd, lastSpokenToken.t_end);
+  }
+
+  // Bridge to the next hook when the gap is small and this hook ends at the
+  // segment tail — must match CameraPlayer.getOutputDuration / Composition.hookClipEnd.
+  const hasSpokenTokenAfterEnd = segment.tokens.some(
+    t => isSpokenToken(t) && t.t_dtw > sourceEnd + 0.02,
+  );
+  const endsAtSegmentTail = !hasSpokenTokenAfterEnd;
+  const canBridge = nextHookStart !== undefined
+    && nextHookStart > sourceEnd
+    && nextHookStart - sourceEnd <= HOOK_BRIDGE_MAX_GAP_SECONDS;
+  if (endsAtSegmentTail && canBridge) {
+    sourceEnd = nextHookStart;
   }
 
   // Add a small tail pad to avoid cutting off the audio abruptly
@@ -166,7 +178,9 @@ export function buildSections(
   const hookSegments = segments.filter(s => s.hook && !s.cut);
   const hookSections = hookSegments
     .flatMap((seg, idx) => {
-      return toSections(getHookSubClips(seg), fps);
+      const next = hookSegments[idx + 1];
+      const nextHookStart = next ? (next.hookFrom ?? next.start) : undefined;
+      return toSections(getHookSubClips(seg, nextHookStart), fps);
     });
   const allMainSegments = segments.filter(s => !s.hook);
   const mainSubClips = buildMainSubClips(allMainSegments, videoStart, videoEnd);

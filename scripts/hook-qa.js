@@ -7,6 +7,7 @@ import { spawn } from 'child_process';
 const FPS = 60;
 const HOOK_TAIL_PAD_UNBOUNDED_SECONDS = 0.16;
 const HOOK_TAIL_PAD_BOUNDED_SECONDS = 0.02;
+const HOOK_BRIDGE_MAX_GAP_SECONDS = 1.0;
 const DEFAULT_DRIFT_THRESHOLD_MS = 180;
 
 function parseArgs() {
@@ -109,20 +110,32 @@ function isSpokenToken(token) {
   return normalizeTokenText(trimmed) !== '';
 }
 
-function getHookClipRange(segment) {
+function getHookClipRange(segment, nextHookStart) {
   const sourceStart = segment.hookFrom ?? segment.start;
   const baseEnd = segment.hookTo ?? segment.end;
   const isBoundedHook = segment.hookTo !== undefined && segment.hookTo !== null;
 
   let sourceEnd = baseEnd;
-  if (!isBoundedHook) {
-    const lastSpokenToken = (segment.tokens || [])
-      .filter(isSpokenToken)
-      .sort((a, b) => (b.t_end ?? 0) - (a.t_end ?? 0))[0];
+  // Extend to cover the last spoken token's audio tail (both bounded and unbounded hooks)
+  const lastSpokenToken = (segment.tokens || [])
+    .filter(t => isSpokenToken(t) && t.t_dtw >= sourceStart && t.t_dtw <= baseEnd)
+    .sort((a, b) => (b.t_end ?? 0) - (a.t_end ?? 0))[0];
 
-    if (lastSpokenToken?.t_end) {
-      sourceEnd = Math.max(baseEnd, lastSpokenToken.t_end);
-    }
+  if (lastSpokenToken?.t_end) {
+    sourceEnd = Math.max(sourceEnd, lastSpokenToken.t_end);
+  }
+
+  // Bridge to the next hook when the gap is small and this hook ends at the
+  // segment tail — must match SegmentPlayer.getHookSubClips.
+  const hasSpokenTokenAfterEnd = (segment.tokens || []).some(
+    t => isSpokenToken(t) && t.t_dtw > sourceEnd + 0.02,
+  );
+  const endsAtSegmentTail = !hasSpokenTokenAfterEnd;
+  const canBridge = nextHookStart !== undefined
+    && nextHookStart > sourceEnd
+    && nextHookStart - sourceEnd <= HOOK_BRIDGE_MAX_GAP_SECONDS;
+  if (endsAtSegmentTail && canBridge) {
+    sourceEnd = nextHookStart;
   }
 
   sourceEnd += isBoundedHook
@@ -144,8 +157,11 @@ function buildExpectedHookTokens(transcript, fps) {
   const clips = [];
 
   let cumulativeFrames = 0;
-  for (const seg of hookSegments) {
-    const { sourceStart, sourceEnd } = getHookClipRange(seg);
+  for (let hi = 0; hi < hookSegments.length; hi++) {
+    const seg = hookSegments[hi];
+    const nextHook = hookSegments[hi + 1];
+    const nextHookStart = nextHook ? (nextHook.hookFrom ?? nextHook.start) : undefined;
+    const { sourceStart, sourceEnd } = getHookClipRange(seg, nextHookStart);
     const durationFrames = toClipFrames(sourceStart, sourceEnd, fps);
     const outputStartSec = cumulativeFrames / fps;
 
