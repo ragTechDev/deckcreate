@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const CarouselGenerator = require('@/scripts/CarouselGenerator');
+import CarouselGenerator from '@/scripts/CarouselGenerator';
 
 export async function POST(request: NextRequest) {
   try {
@@ -42,7 +42,10 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Error generating carousel:', error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to generate carousel' },
+      {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      },
       { status: 500 }
     );
   }

@@ -6,8 +6,6 @@ const nextConfig: NextConfig = {
     'pdfkit',
     'fontkit',
     'puppeteer',
-    'puppeteer-extra',
-    'puppeteer-extra-plugin-stealth',
     'sharp',
     'fs-extra',
   ],
