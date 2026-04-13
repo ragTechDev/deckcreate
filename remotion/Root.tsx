@@ -2,6 +2,7 @@ import React from 'react';
 import {Composition} from 'remotion';
 import {MyComposition, calculateMetadata} from './Composition';
 import { PodcastIntroComposition, INTRO_DURATION_FRAMES } from './components/PodcastIntro';
+import { OverlayGalleryComposition, GALLERY_TOTAL_FRAMES } from './components/OverlayGallery';
 
 export const RemotionRoot: React.FC = () => {
   return (
@@ -20,6 +21,14 @@ export const RemotionRoot: React.FC = () => {
             hookMusicSrc: 'sounds/jazz-cafe-music.mp3',
         }}
         calculateMetadata={calculateMetadata}
+        />
+        <Composition
+        id="OverlayGallery"
+        component={OverlayGalleryComposition}
+        durationInFrames={GALLERY_TOTAL_FRAMES}
+        fps={60}
+        width={1920}
+        height={1080}
         />
     </>
   );

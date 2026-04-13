@@ -14,6 +14,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { SegmentPlayer, buildSections, buildMainSubClips } from './components/SegmentPlayer';
 import { CameraPlayer } from './components/CameraPlayer';
 import { HookOverlay } from './components/HookOverlay';
+import { OverlayRenderer } from './components/OverlayRenderer';
 import { PodcastIntroComposition, INTRO_DURATION_FRAMES } from './components/PodcastIntro';
 import { loadNunito } from './loadFonts';
 import type { Transcript, Segment } from './types/transcript';
@@ -222,6 +223,15 @@ const TranscriptComposition: React.FC<TranscriptCompositionProps> = ({
           <PodcastIntroComposition brandSrc="brand.json" />
         </Sequence>
       )}
+
+      {/* Overlay graphics from transcript segments */}
+      <OverlayRenderer
+        segments={orderedSegments}
+        brand={brand}
+        mainSections={mainSections}
+        hookSections={hookSections}
+        mainStartFrame={totalHookFrames + introFrames}
+      />
 
       {/* Optional music bed for the full video */}
       {audioSrc && (

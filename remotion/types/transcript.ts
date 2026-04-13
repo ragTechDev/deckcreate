@@ -8,8 +8,15 @@ export type Token = {
   cut: boolean;
 };
 
-/** Maps 1:1 to a component in remotion/components/graphics/ */
-export type GraphicType = 'LowerThird' | 'Callout' | 'ChapterMarker';
+/** Maps 1:1 to a component in remotion/components/graphics/ or remotion/components/overlays/ */
+export type GraphicType =
+  // Legacy graphics
+  | 'LowerThird' | 'Callout' | 'ChapterMarker'
+  // Overlay components
+  | 'AwardsOverlay' | 'CodingOverlay' | 'EngineeringOverlay'
+  | 'AIOverlay' | 'InfrastructureOverlay' | 'PracticeOverlay'
+  | 'RoleOverlay' | 'LanguageOverlay' | 'FrameworkOverlay'
+  | 'EducationOverlay';
 
 export type CameraCue = {
   /** 'closeup' on a named speaker, or 'wide' for the wide shot */

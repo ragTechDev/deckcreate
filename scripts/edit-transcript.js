@@ -502,9 +502,9 @@ function buildInstructionsBlock() {
     '                  Multiple > CAM lines per segment are allowed.',
     '',
     '  GRAPHICS        Add a line starting with > after the segment:',
-    '                    > LowerThird  at="word"  duration=3  name="Name"  title="Role"',
-    '                    > Callout  at="word"  duration=2  text="Quote"',
-    '                    > ChapterMarker  at="word"  duration=1',
+    '                    > LowerThird  at="word"  duration=5  name="Name"  title="Role"',
+    '                    > Callout  at="word"  duration=5  text="Quote"',
+    '                    > ChapterMarker  at="word"  duration=5',
     '',
     '  TRIM VIDEO       Place > START before the first segment to keep,',
     '                  and > END after the last segment to keep:',
@@ -671,7 +671,7 @@ function parseGraphicLine(line, tokens) {
     at = token ? token.t_dtw : parseFloat(raw) || 0;
   }
 
-  const duration = parseFloat(kv.duration) || 3;
+  const duration = parseFloat(kv.duration) || 5;
   const props = {};
   for (const [k, v] of Object.entries(kv)) {
     if (k !== 'at' && k !== 'duration') props[k] = v;

@@ -50,7 +50,7 @@ next-env.d.ts
 /public/sync/*
 
 # comment this out if using agent to edit transcript
-# /public/transcribe/output/* 
+/public/transcribe/output/* 
 
 # Whisper.cpp binary and models (downloaded on first run)
 /whisper.cpp/

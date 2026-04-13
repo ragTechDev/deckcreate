@@ -302,8 +302,8 @@ const SectionGroupPlayer: React.FC<{
             fontSize: 18,
             lineHeight: 1.3,
             fontFamily: 'monospace',
-            color: '#fff',
-            background: 'rgba(0,0,0,0.7)',
+            color: '#111',
+            background: 'rgba(255,255,255,0.88)',
             padding: '8px 10px',
             borderRadius: 6,
           }}

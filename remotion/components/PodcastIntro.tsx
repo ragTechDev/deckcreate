@@ -288,18 +288,18 @@ export const PodcastIntro: React.FC<Props> = ({ brand }) => {
       }}>
         <div style={{ position: 'relative' }}>
           <div style={{
-            background: colors.surface,
+            background: 'rgba(255,255,255,0.96)',
             borderRadius: interpolate(collapseProg, [0, 1], [shape.borderRadius, 0]),
-            border: `1.5px solid ${colors.secondary}28`,
-            boxShadow: '0 -4px 40px rgba(0,0,0,0.3), 0 20px 56px rgba(0,0,0,0.45)',
+            border: `1.5px solid ${colors.secondary}40`,
+            boxShadow: '0 -4px 40px rgba(0,0,0,0.12), 0 20px 56px rgba(0,0,0,0.18)',
             overflow: 'hidden',
           }}>
             {/* Title bar */}
             <div style={{
               display: 'flex', alignItems: 'center', gap: 7,
               padding: `10px ${termPad}px`,
-              background: `${colors.surface}F0`,
-              borderBottom: `1px solid ${colors.secondary}20`,
+              background: 'rgba(243,244,246,0.96)',
+              borderBottom: `1px solid ${colors.secondary}30`,
             }}>
               <span style={{ width: 12, height: 12, borderRadius: '50%', background: '#FF5F57', display: 'inline-block', flexShrink: 0 }} />
               <span style={{ width: 12, height: 12, borderRadius: '50%', background: '#FEBC2E', display: 'inline-block', flexShrink: 0 }} />
@@ -307,7 +307,7 @@ export const PodcastIntro: React.FC<Props> = ({ brand }) => {
               <span style={{
                 flex: 1, textAlign: 'center',
                 fontSize: titleBarSz, fontWeight: tw.semiBold,
-                color: `${colors.text.secondary}88`, letterSpacing: '0.04em',
+                color: `${colors.text.onPrimary}55`, letterSpacing: '0.04em',
                 overflow: 'hidden', whiteSpace: 'nowrap',
               }}>
                 bash — podcast studio
@@ -345,7 +345,7 @@ export const PodcastIntro: React.FC<Props> = ({ brand }) => {
                   {/* Line 1: Starting... */}
                   <div style={{ height: lineH, display: 'flex', alignItems: 'center', gap: 10, opacity: line1Op }}>
                     <span style={{ fontSize: outFontSz, color: colors.secondary, flexShrink: 0 }}>❯</span>
-                    <span style={{ fontSize: outFontSz, color: colors.text.primary, whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: outFontSz, color: colors.text.onPrimary, whiteSpace: 'nowrap' }}>
                       Starting ragTech podcast...
                     </span>
                   </div>
@@ -353,7 +353,7 @@ export const PodcastIntro: React.FC<Props> = ({ brand }) => {
                   {/* Line 2: Loading cohosts... */}
                   <div style={{ height: lineH, display: 'flex', alignItems: 'center', gap: 10, opacity: line2Op }}>
                     <span style={{ fontSize: outFontSz, color: colors.secondary, flexShrink: 0 }}>❯</span>
-                    <span style={{ fontSize: outFontSz, color: colors.text.primary, whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: outFontSz, color: colors.text.onPrimary, whiteSpace: 'nowrap' }}>
                       Loading cohosts...
                     </span>
                   </div>
@@ -362,10 +362,10 @@ export const PodcastIntro: React.FC<Props> = ({ brand }) => {
                   {cohostData.map(({ name, checkOp }) => (
                     <div key={name} style={{ height: lineH, display: 'flex', alignItems: 'center', gap: 12, opacity: checkOp }}>
                       <span style={{ fontSize: outFontSz, color: colors.accent, fontWeight: tw.bold, flexShrink: 0 }}>✓</span>
-                      <span style={{ fontSize: outFontSz, color: colors.text.primary, fontWeight: tw.semiBold, whiteSpace: 'nowrap' }}>
+                      <span style={{ fontSize: outFontSz, color: colors.text.onPrimary, fontWeight: tw.semiBold, whiteSpace: 'nowrap' }}>
                         {name}
                       </span>
-                      <span style={{ fontSize: barFontSz, color: `${colors.text.primary}44`, whiteSpace: 'nowrap' }}>
+                      <span style={{ fontSize: barFontSz, color: `${colors.text.onPrimary}44`, whiteSpace: 'nowrap' }}>
                         loaded
                       </span>
                     </div>
@@ -499,12 +499,12 @@ export const PodcastIntro: React.FC<Props> = ({ brand }) => {
                 <div style={{
                   width: 72, height: 72,
                   borderRadius: '50%',
-                  background: `${colors.surface}CC`,
-                  border: `2px solid ${colors.secondary}44`,
+                  background: 'rgba(255,255,255,0.92)',
+                  border: `2px solid ${colors.secondary}60`,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  boxShadow: `0 4px 20px rgba(0,0,0,0.3)`,
+                  boxShadow: `0 4px 20px rgba(0,0,0,0.12)`,
                 }}>
-                  <Icon size={38} color={colors.text.secondary} strokeWidth={1.5} />
+                  <Icon size={38} color={colors.text.onPrimary} strokeWidth={1.5} />
                 </div>
               </div>
             );
