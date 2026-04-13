@@ -16,6 +16,7 @@ import { CameraPlayer } from './components/CameraPlayer';
 import { HookOverlay } from './components/HookOverlay';
 import { OverlayRenderer } from './components/OverlayRenderer';
 import { PodcastIntroComposition, INTRO_DURATION_FRAMES } from './components/PodcastIntro';
+import { PodcastOutroComposition, OUTRO_DURATION_FRAMES } from './components/PodcastOutro';
 import { loadNunito } from './loadFonts';
 import type { Transcript, Segment } from './types/transcript';
 import type { CameraProfiles } from './types/camera';
@@ -60,6 +61,7 @@ function getActiveSegments(transcript: Transcript) {
 }
 
 const INTRO_DURATION_SECS = INTRO_DURATION_FRAMES / 60;
+const OUTRO_DURATION_SECS = OUTRO_DURATION_FRAMES / 60;
 const HOOK_TAIL_PAD_UNBOUNDED_SECONDS = 0.16;
 const HOOK_TAIL_PAD_BOUNDED_SECONDS = 0.02;
 const HOOK_BRIDGE_MAX_GAP_SECONDS = 1.0;
@@ -110,7 +112,7 @@ function computeEffectiveDuration(transcript: Transcript): number {
   const mainInRange = getActiveSegments(transcript).filter(s => !s.hook);
   const mainDuration = buildMainSubClips(mainInRange, videoStart, videoEnd)
     .reduce((sum, c) => sum + (c.sourceEnd - c.sourceStart), 0);
-  return hookDuration + introDuration + mainDuration;
+  return hookDuration + introDuration + mainDuration + OUTRO_DURATION_SECS;
 }
 
 export const calculateMetadata: CalculateMetadataFunction<MyCompositionProps> = async ({ props }) => {
@@ -184,6 +186,9 @@ const TranscriptComposition: React.FC<TranscriptCompositionProps> = ({
   const hasHooks        = hookSegments.length > 0;
   // PodcastIntro plays between hooks and main content (only when there are hooks)
   const introFrames     = hasHooks ? INTRO_DURATION_FRAMES : 0;
+  // Calculate main content duration for outro placement
+  const mainContentFrames = mainSections.reduce((sum, s) => sum + s.trimAfter - s.trimBefore, 0);
+  const outroStartFrame = totalHookFrames + introFrames + mainContentFrames;
 
   const videoEl = cameraProfiles
     ? (
@@ -240,6 +245,11 @@ const TranscriptComposition: React.FC<TranscriptCompositionProps> = ({
           startFrom={audioStartFromFrames}
         />
       )}
+
+      {/* PodcastOutro — plays at the end of the video */}
+      <Sequence from={outroStartFrame} durationInFrames={OUTRO_DURATION_FRAMES}>
+        <PodcastOutroComposition brandSrc="brand.json" />
+      </Sequence>
     </>
   );
 };
