@@ -29,7 +29,7 @@
     "vtt-to-srt": "node scripts/shared/vtt-to-srt.js",
     "remotion": "npx remotion studio",
     "wizard": "node scripts/wizard.js",
-    "prepare": "husky"
+    "prepare": "husky || true"
   },
   "dependencies": {
     "@mantine/carousel": "^8.3.15",
@@ -57,10 +57,16 @@
     "puppeteer": "^23.0.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "youtube-transcript": "^1.3.0",
     "remotion": "4.0.436",
     "sharp": "^0.33.0",
-    "wavefile": "^11.0.0"
+    "wavefile": "^11.0.0",
+    "youtube-transcript": "^1.3.0"
+  },
+  "optionalDependencies": {
+    "@img/sharp-libvips-linux-x64": "1.0.4",
+    "@img/sharp-linux-x64": "0.33.5",
+    "@tailwindcss/oxide-linux-x64-gnu": "4.1.18",
+    "lightningcss-linux-x64-gnu": "1.30.2"
   },
   "devDependencies": {
     "@babel/core": "^7.29.0",
@@ -73,6 +79,7 @@
     "babel-jest": "^30.2.0",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
+    "husky": "^9.1.7",
     "jest": "^29.7.0",
     "jest-environment-node": "^29.7.0",
     "postcss": "^8.5.6",

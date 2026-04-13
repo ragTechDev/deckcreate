@@ -62,9 +62,9 @@ jest.mock('puppeteer-extra', () => ({
     close: jest.fn()
   }),
   use: jest.fn()
-}));
+}), { virtual: true });
 
 jest.mock('puppeteer-extra-plugin-stealth', () => ({
   __esModule: true,
   default: jest.fn()
-}));
+}), { virtual: true });
