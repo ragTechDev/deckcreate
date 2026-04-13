@@ -1,0 +1,178 @@
+import React, { useMemo } from 'react';
+import { useVideoConfig, useCurrentFrame, Sequence } from 'remotion';
+import type { Segment, GraphicsCue } from '../types/transcript';
+import type { Brand } from '../types/brand';
+import type { Section } from './SegmentPlayer';
+
+// Import all overlay components
+import { AwardsOverlay } from './overlays/awards';
+import { CodingOverlay, EngineeringOverlay } from './overlays/concepts';
+import { AIOverlay } from './overlays/ai';
+import { InfrastructureOverlay } from './overlays/infrastructure';
+import { PracticeOverlay } from './overlays/practices';
+import { RoleOverlay } from './overlays/roles';
+import { LanguageOverlay, FrameworkOverlay } from './overlays/tech';
+import { EducationOverlay } from './overlays/education';
+import { ConceptExplainer, SpeakerIntro } from './overlays/lower-thirds';
+
+interface OverlayRendererProps {
+  segments: Segment[];
+  brand: Brand;
+  /** Sections for the main (non-hook) video — used to remap raw audio time to rendered frame */
+  mainSections: Section[];
+  /** Sections for hook clips — used to remap hook raw audio time to rendered frame */
+  hookSections: Section[];
+  /** First composition frame of the main section (totalHookFrames + introFrames) */
+  mainStartFrame: number;
+}
+
+// Map of component names to their React components
+const COMPONENT_MAP: Record<string, React.FC<any>> = {
+  // Concept overlays
+  AwardsOverlay,
+  CodingOverlay,
+  EngineeringOverlay,
+  AIOverlay,
+  InfrastructureOverlay,
+  PracticeOverlay,
+  RoleOverlay,
+  LanguageOverlay,
+  FrameworkOverlay,
+  EducationOverlay,
+  // Lower-third overlays
+  ConceptExplainer,
+  SpeakerIntro,
+};
+
+/**
+ * Convert a raw audio timestamp (seconds) to its composition frame using a
+ * list of sections (trimBefore/trimAfter in frames).  Each section is a
+ * contiguous clip from the source; gaps between sections are cuts that don't
+ * appear in the output.  The returned value is relative to the start of the
+ * section group (i.e. frame 0 of the hook group, or frame 0 of the main group).
+ */
+function rawTimeToGroupFrame(atSeconds: number, sections: Section[], fps: number): number {
+  const rawFrame = Math.round(atSeconds * fps);
+  let rendered = 0;
+  for (const section of sections) {
+    const dur = section.trimAfter - section.trimBefore;
+    if (rawFrame >= section.trimAfter) {
+      // This entire section plays before our target — add its full duration.
+      rendered += dur;
+    } else if (rawFrame >= section.trimBefore) {
+      // Our target falls inside this section.
+      rendered += rawFrame - section.trimBefore;
+      break;
+    } else {
+      // rawFrame is before this section starts — target precedes the group entirely.
+      break;
+    }
+  }
+  return rendered;
+}
+
+export const OverlayRenderer: React.FC<OverlayRendererProps> = ({
+  segments,
+  brand,
+  mainSections,
+  hookSections,
+  mainStartFrame,
+}) => {
+  const { fps } = useVideoConfig();
+  const currentFrame = useCurrentFrame();
+
+  // Collect all graphics cues from all segments with their timing info
+  const graphicsCues = useMemo(() => {
+    const cues: Array<{
+      cue: GraphicsCue;
+      startFrame: number;
+      durationInFrames: number;
+      key: string;
+    }> = [];
+
+    let totalGraphics = 0;
+    segments.forEach((segment) => {
+      if (segment.cut) return;
+      if (!segment.graphics || segment.graphics.length === 0) return;
+      totalGraphics += segment.graphics.length;
+
+      segment.graphics.forEach((graphic, idx) => {
+        let startFrame: number;
+        if (segment.hook) {
+          // Hook segment: remap raw audio time within the hook group (starts at frame 0)
+          startFrame = rawTimeToGroupFrame(graphic.at, hookSections, fps);
+        } else {
+          // Main segment: remap raw audio time and offset by hook + intro frames
+          startFrame = mainStartFrame + rawTimeToGroupFrame(graphic.at, mainSections, fps);
+        }
+
+        const durationInFrames = Math.round(graphic.duration * fps);
+
+        cues.push({
+          cue: graphic,
+          startFrame,
+          durationInFrames,
+          key: `${segment.id}-${idx}-${graphic.type}`,
+        });
+      });
+    });
+
+    // Sort by startFrame, then cap each duration so it ends when the next one starts.
+    cues.sort((a, b) => a.startFrame - b.startFrame);
+    for (let i = 0; i < cues.length - 1; i++) {
+      const maxDuration = cues[i + 1].startFrame - cues[i].startFrame;
+      if (cues[i].durationInFrames > maxDuration) {
+        cues[i] = { ...cues[i], durationInFrames: Math.max(1, maxDuration) };
+      }
+    }
+
+    console.log(`[OverlayRenderer] Found ${totalGraphics} graphics in ${segments.length} segments`);
+    return cues;
+  }, [segments, fps, mainSections, hookSections, mainStartFrame]);
+
+  // Find cues that should be currently visible
+  const visibleCues = graphicsCues.filter(
+    (g) => currentFrame >= g.startFrame && currentFrame < g.startFrame + g.durationInFrames
+  );
+
+  console.log(`[OverlayRenderer] Frame ${currentFrame}: ${visibleCues.length} visible cues out of ${graphicsCues.length} total`);
+
+  if (visibleCues.length === 0) {
+    return null;
+  }
+
+  return (
+    <>
+      {visibleCues.map(({ cue, startFrame, durationInFrames, key }) => {
+        const Component = COMPONENT_MAP[cue.type];
+        if (!Component) {
+          console.warn(`Unknown overlay component: ${cue.type}`);
+          return null;
+        }
+
+        // Pass brand, durationInFrames, and other props (excluding brand string from transcript)
+        const { brand: _, ...otherProps } = cue.props || {};
+        const props = {
+          ...otherProps,
+          brand,
+          durationInFrames,
+        };
+
+        console.log(`[OverlayRenderer] Rendering ${cue.type} at frame ${startFrame} for ${durationInFrames} frames`);
+
+        return (
+          <Sequence
+            key={key}
+            from={startFrame}
+            durationInFrames={durationInFrames}
+            layout="none"
+          >
+            <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 100, pointerEvents: 'none' }}>
+              <Component {...props} />
+            </div>
+          </Sequence>
+        );
+      })}
+    </>
+  );
+};

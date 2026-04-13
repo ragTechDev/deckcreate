@@ -32,6 +32,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -39,3 +40,33 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Media content
+/public/sync/audio/*
+/public/sync/output/*
+/public/sync/video/*
+/public/transcribe/input/*
+/public/input/*
+/public/sync/*
+
+# comment this out if using agent to edit transcript
+/public/transcribe/output/* 
+
+# Whisper.cpp binary and models (downloaded on first run)
+/whisper.cpp/
+.claude/settings.local.json
+
+# Python Environments
+.envrc
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Python Byte-compiled / optimized / DLL files
+scripts/diarize/__pycache__/
+*.py[codz]
+*$py.class
+.vscode/settings.json

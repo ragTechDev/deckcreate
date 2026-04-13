@@ -1,0 +1,35 @@
+{
+  "colors": {
+    "primary":    "#eebf89",
+    "secondary":  "#9cd2d0",
+    "accent":     "#ffa3a6",
+    "background": "#fff3c2",
+    "surface":    "#1c1006",
+    "text": {
+      "primary":   "#FFFFFF",
+      "secondary": "#B0B0CC",
+      "onPrimary": "#0F0F1A"
+    },
+    "palette": ["#fff3c2", "#9cd2d0", "#ffa3a6", "#eebf89"]
+  },
+
+  "typography": {
+    "fontFamily": "Nunito",
+    "fontSrc":    "/fonts/Nunito-VariableFont_wght.ttf",
+    "fontSrcItalic": "/fonts/Nunito-Italic-VariableFont_wght.ttf",
+    "weights": {
+      "regular":   400,
+      "semiBold":  600,
+      "bold":      700,
+      "extraBold": 800,
+      "black":     900
+    }
+  },
+
+  "logo": "/assets/logo/transparent-bg-logo.png",
+
+  "shape": {
+    "borderRadius": 12,
+    "borderRadiusSmall": 6
+  }
+}

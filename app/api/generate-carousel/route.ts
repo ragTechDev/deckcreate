@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import CarouselGenerator from '@/scripts/CarouselGenerator';
+import CarouselGenerator from '@/scripts/carousel/CarouselGenerator';
 
 export async function POST(request: NextRequest) {
   try {

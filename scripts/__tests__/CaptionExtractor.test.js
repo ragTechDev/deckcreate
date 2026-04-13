@@ -1,4 +1,4 @@
-import CaptionExtractor from './CaptionExtractor.js';
+import CaptionExtractor from '../carousel/CaptionExtractor.js';
 
 describe('CaptionExtractor', () => {
   let extractor;

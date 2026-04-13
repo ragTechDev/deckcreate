@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import CaptionExtractor from '@/scripts/CaptionExtractor';
+import CaptionExtractor from '@/scripts/carousel/CaptionExtractor';
 
 export async function POST(request: NextRequest) {
   try {
