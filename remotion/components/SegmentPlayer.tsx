@@ -214,11 +214,13 @@ const SectionGroupPlayer: React.FC<{
   sections: Section[];
   declickFrames?: number;
   groupFadeOutFrames?: number;
+  muted?: boolean;
 }> = ({
   src,
   sections,
   declickFrames = DECLICK_FRAMES,
   groupFadeOutFrames = 0,
+  muted = false,
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -289,7 +291,7 @@ const SectionGroupPlayer: React.FC<{
         acceptableTimeShiftInSeconds={isStudio ? 0.35 : 0}
         // Give the compositor extra time for large seeks deep into a long video file.
         delayRenderTimeoutInMilliseconds={120000}
-        volume={effectiveVolume}
+        volume={muted ? 0 : effectiveVolume}
         style={{ opacity: groupFade }}
       />
       {debugTiming && (
@@ -328,6 +330,11 @@ type Props = {
    * main episode without offsetting trimBefore calculations.
    */
   mainOffset?: number;
+  /**
+   * When true, audio is suppressed (volume set to 0).
+   * Used by CameraPlayer to silence non-active angle layers in multi-angle shoots.
+   */
+  muted?: boolean;
 };
 
 function isTimingDebugEnabled(): boolean {
@@ -341,7 +348,7 @@ function isTimingDebugEnabled(): boolean {
  * one for hook clips, one for main content. Each lives in its own <Sequence>
  * so trimBefore is computed against a local frame counter, keeping it non-negative.
  */
-export const SegmentPlayer: React.FC<Props> = ({ src, hookSections, mainSections, mainOffset = 0 }) => {
+export const SegmentPlayer: React.FC<Props> = ({ src, hookSections, mainSections, mainOffset = 0, muted = false }) => {
   const hookDuration = hookSections.reduce((sum, s) => sum + s.trimAfter - s.trimBefore, 0);
 
   return (
@@ -353,11 +360,12 @@ export const SegmentPlayer: React.FC<Props> = ({ src, hookSections, mainSections
             sections={hookSections}
             declickFrames={0}
             groupFadeOutFrames={HOOK_END_FADE_FRAMES}
+            muted={muted}
           />
         </Sequence>
       )}
       <Sequence from={hookDuration + mainOffset}>
-        <SectionGroupPlayer src={src} sections={mainSections} />
+        <SectionGroupPlayer src={src} sections={mainSections} muted={muted} />
       </Sequence>
     </>
   );

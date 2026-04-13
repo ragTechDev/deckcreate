@@ -413,4 +413,76 @@ class AudioSyncer {
   }
 }
 
+  /**
+   * Sync multiple video angles to the same audio track.
+   *
+   * Each video is synced independently against `audioPath`. Output files are
+   * written as `synced-output-1.mp4`, `synced-output-2.mp4`, etc. in `outputDir`.
+   *
+   * @param {string[]} videoPaths   Paths to each angle's video file.
+   * @param {string}   audioPath    Path to the shared audio file.
+   * @param {string}   outputDir    Directory to write synced output files into.
+   * @returns {Promise<Array<{outputPath: string, videoSrc: string, sourceWidth: number, sourceHeight: number}>>}
+   *   One entry per angle (in the same order as `videoPaths`).
+   */
+  static async syncMultiple(videoPaths, audioPath, outputDir) {
+    await fs.ensureDir(outputDir);
+    const results = [];
+
+    for (let i = 0; i < videoPaths.length; i++) {
+      const videoPath = videoPaths[i];
+      const outputFileName = `synced-output-${i + 1}.mp4`;
+      const outputPath = path.join(outputDir, outputFileName);
+
+      console.log(`\n── Angle ${i + 1}/${videoPaths.length}: ${path.basename(videoPath)} ──`);
+
+      const syncer = new AudioSyncer({ videoPath, audioPath, outputPath });
+      await syncer.init();
+      try {
+        await syncer.sync();
+      } finally {
+        await syncer.close();
+      }
+
+      const { width: sourceWidth, height: sourceHeight } = await getVideoDimensions(outputPath);
+      // videoSrc is relative to /public (the outputDir is expected to be inside /public)
+      const videoSrc = outputPath;
+      results.push({ outputPath, videoSrc, sourceWidth, sourceHeight });
+    }
+
+    return results;
+  }
+}
+
+/**
+ * Returns the pixel dimensions of the video stream in the given file.
+ * @param {string} filePath
+ * @returns {Promise<{width: number, height: number}>}
+ */
+async function getVideoDimensions(filePath) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('ffprobe', [
+      '-v', 'quiet',
+      '-print_format', 'json',
+      '-show_streams',
+      '-select_streams', 'v:0',
+      filePath,
+    ], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    proc.stdout.on('data', (d) => { stdout += d.toString(); });
+    proc.on('close', (code) => {
+      if (code !== 0) return reject(new Error(`ffprobe failed for ${filePath}`));
+      try {
+        const data = JSON.parse(stdout);
+        const stream = data.streams?.[0];
+        if (!stream) return reject(new Error(`No video stream found in ${filePath}`));
+        resolve({ width: parseInt(stream.width, 10), height: parseInt(stream.height, 10) });
+      } catch (e) {
+        reject(new Error(`Failed to parse ffprobe output: ${e.message}`));
+      }
+    });
+    proc.on('error', (err) => reject(new Error(`Failed to spawn ffprobe: ${err.message}`)));
+  });
+}
+
 export default AudioSyncer;

@@ -4,87 +4,58 @@ Video podcast editing and carousel generation pipeline.
 
 ## Prerequisites
 
-### Option 1: Run locally (without containers)
+### Option 1: Local
 
 **Required:**
-- **Node.js** (v18 or later)
-- **ffmpeg** — required for audio extraction and video processing
-  - macOS: `brew install ffmpeg`
-  - Ubuntu/Debian: `sudo apt-get install ffmpeg`
-  - Windows: Download from [ffmpeg.org](https://ffmpeg.org/download.html)
-- **Python 3.9–3.12** (use 3.12) — required for diarization and forced alignment
-  - See [Python setup section](#python-setup-for-diarization--forced-alignment-windows) below
+- **Node.js** v18+
+- **ffmpeg** — `brew install ffmpeg` / `apt-get install ffmpeg` / [ffmpeg.org](https://ffmpeg.org/download.html)
+- **Python 3.9–3.12** (use 3.12) — diarization + forced alignment
 
-**Verify installation:**
+**Verify:**
 ```bash
-ffmpeg -version
-python --version
-node --version
+ffmpeg -version && python --version && node --version
 ```
 
-### Option 2: Run using Docker
+### Option 2: Docker
 
-All prerequisites (ffmpeg, Python, Node.js, dependencies) are included in the Docker container.
+All dependencies included.
 
-**Required:**
-- Docker and Docker Compose
-
-**Run the wizard:**
 ```bash
 docker-compose run --rm --service-ports wizard
-```
-
-**Run other commands:**
-```bash
 docker-compose run --rm app npm run transcribe
 docker-compose run --rm app npm run remotion
 ```
 
-**Caption alignment test in Docker:**
-
-When the wizard prompts for the caption alignment test, it starts a server on port 3001 in the container. Use `--service-ports` (shown above) so that port is published to the host, then open:
-```
-http://localhost:3001/caption_test.html
-```
-
-The page reads audio from `public/transcribe/input/` (auto-detects `audio.wav` first), and shows a status line under the player if no playable file is found.
-
-The wizard will wait for you to complete the test in your browser before continuing.
-
-**Camera angle step in Docker:**
-
-The wizard includes an optional camera-angle setup step (speaker closeup cuts). When prompted, open:
-```
-http://localhost:3000/camera
-```
-
-This works in Docker when the wizard is started with `--service-ports` (as shown above).
-
-See [docker-compose.yml](docker-compose.yml) for all available services.
+Caption alignment test (port 3001) and camera GUI (port 3000) both work in Docker when using `--service-ports`.
 
 ---
 
-## Quick start — Video Editing
+## Quick start
 
-```
+```bash
 npm run wizard
 ```
 
-The wizard guides you through every step interactively: it asks what files you have, how many speakers, then runs each stage in sequence — waiting for you to review each output before moving on. Transcription and diarization are run in parallel automatically.
+Guides you interactively through every step. Transcription + diarization run in parallel automatically.
 
-Modes:
-1. **Separate video + audio (need sync)** — aligns audio to video before transcribing
-2. **Separate video + audio (already in sync)** — skips sync, uses audio directly
-3. **Single video file** — extracts audio from the video
-4. **Audio only** — transcription only, no video output
+### Wizard modes
 
-## Python setup for diarization + forced alignment (Windows)
+| # | Mode | Description |
+|---|------|-------------|
+| 1 | Separate video + audio (need sync) | Aligns audio to video before transcribing. Supports multiple camera angles. |
+| 2 | Separate video + audio (in sync) | Skips sync, uses audio directly |
+| 3 | Single video file | Extracts audio from video |
+| 4 | Audio only | Transcription only, no video output |
 
-`diarize` and `align` require Python 3.9–3.12 (use 3.12).
+**Multi-angle (mode 1):** When prompted "how many camera angles?", enter 2+. Place each additional angle's video in `public/input/video/angle2/`, `angle3/`, etc. Each is synced independently to the same audio and assigned to speakers in the camera GUI.
 
-From repo root:
+---
 
-```
+## Python setup — diarization + forced alignment
+
+Python 3.12 required for `diarize` and `align`.
+
+```bash
 py -3.12 -m venv .venv
 .\.venv\Scripts\activate
 python -m pip install --upgrade pip setuptools wheel
@@ -92,207 +63,165 @@ python -m pip install -r scripts/diarize/requirements.txt
 python -m pip install whisperx faster-whisper
 ```
 
-Verify:
-
-```
-python --version
-python -c "import whisperx; print('whisperx ok')"
-```
-
-If your shell resolves `python` to `...WindowsApps\python` (or shows permission denied), use the interpreter path explicitly:
-
-```
+If `python` resolves to `WindowsApps\python` (permission denied), pass the path explicitly:
+```bash
 npm run diarize -- --num-speakers 2 --python .venv\Scripts\python.exe
 npm run align -- --python .venv\Scripts\python.exe
 ```
 
-The wizard now runs `align` automatically after transcription, before speaker assignment/editing.
-
 ---
 
-## Manual steps (reference)
-
-Run scripts in order:
+## Manual steps
 
 ### 1. Sync audio and video
-```
+
+**Single angle:**
+```bash
 npm run sync
 ```
-Aligns recorded audio with the camera feed and outputs `public/transcribe/sync/output/synced-output.mp4`.
+Output: `public/sync/output/synced-output.mp4`
+
+**Multi-angle** (run via wizard, or call directly from a script using `AudioSyncer.syncMultiple`):
+Outputs: `public/sync/output/synced-output-1.mp4`, `synced-output-2.mp4`, etc.
 
 ### 2. Transcribe
-```
-npm run transcribe
-```
-Runs Whisper on the synced audio and produces `public/transcribe/output/raw/transcript.raw.json`.
 
-If you already know the timestamp offset for this recording (see step 2a), you can bake it in at this stage:
-```
+```bash
+npm run transcribe
+npm run transcribe -- --model small.en   # faster, less accurate
 npm run transcribe -- --timestamp-offset 0.5
 ```
 
-**Model selection**
-
-The default model is `medium.en`. Larger models are more accurate but significantly slower on CPU:
-
-| Model | Speed (≈36 min audio, CPU) | Accuracy |
-|-------|---------------------------|----------|
+| Model | Speed (≈36 min, CPU) | Accuracy |
+|-------|----------------------|----------|
 | `tiny.en` | ~5 min | Low |
-| `small.en` | ~20–30 min | Good — best speed/accuracy balance |
-| `medium.en` | ~60–120 min | High |
+| `small.en` | ~20–30 min | Good |
+| `medium.en` (default) | ~60–120 min | High |
 
-To use a different model:
-```
-npm run transcribe -- --model small.en
-```
+Model downloaded automatically on first use, cached in `whisper.cpp/`.
 
-The model is downloaded automatically on first use and cached in `whisper.cpp/`. Transcription runs on CPU — expect real-time or slower depending on your machine. The wizard prints a heartbeat every 15 seconds while Whisper is running so you can confirm it is still working.
+### 2a. Caption alignment check (recommended on first recording)
 
-### 2a. Check caption alignment (recommended on first recording)
+Whisper timestamps can lag 0.3–0.6 s. Measure the offset:
 
-Whisper's token-level timestamps (`t_dtw`) can be slightly late — typically 0.3–0.6 s — causing captions to lag behind the audio. Use the alignment test tool to measure the offset before editing:
+1. `cd public/transcribe && npx serve . -p 3001`
+2. Open `http://localhost:3001/caption_test.html`
+3. Scrub to a word onset, enter the word — page calculates offset
+4. Repeat with a word 5+ min later; page shows the fix command
 
-1. Start a local server:
-   ```
-   cd public/transcribe && npx serve . -p 3001
-   ```
-2. Open `http://localhost:3001/caption_test.html` in your browser.
-3. Follow the on-screen instructions:
-   - Scrub the audio to exactly when a word begins speaking.
-   - Note the timestamp shown in green.
-   - Enter the word and time in the form — the page looks up the Whisper timestamp and calculates the offset.
-   - Repeat with a second word at least 5 minutes later.
-   - The page shows the average offset and the exact command to run.
-4. If an offset is found, apply it in step 7 (`merge-doc`) or re-run transcription with `--timestamp-offset`.
+The wizard runs this automatically and carries the offset through subsequent steps.
 
-> The wizard runs this check automatically and carries the offset through to subsequent steps.
+### 3. Diarize
 
-### 3. Diarize (speaker detection)
-`--num-speakers` is required — the model does not work well without a fixed speaker count.
-```
+```bash
 npm run diarize -- --num-speakers 2
 ```
-Outputs `public/transcribe/output/raw/diarization.json`.
+Output: `public/transcribe/output/raw/diarization.json`
 
 ### 4. Assign speakers
-```
+
+```bash
 npm run assign-speakers
 ```
-Labels each transcript segment with the detected speaker and updates `transcript.raw.json`.
+Labels each segment with detected speaker in `transcript.raw.json`.
 
-### 4a. Forced alignment (WhisperX, CPU-local)
-```
+### 4a. Forced alignment
+
+```bash
 npm run align
-```
-Refines `segments[].start/end` and `segments[].tokens[].t_dtw` inside `public/transcribe/output/raw/transcript.raw.json`. Also populates `tokens[].t_end` (word-end boundary) for each word it can align, enabling exact cut boundaries in subsequent steps instead of heuristic approximations.
-
-Use a specific Python interpreter when needed:
-```
 npm run align -- --python .venv\Scripts\python.exe
 ```
+Refines `segments[].start/end` and `tokens[].t_dtw` in `transcript.raw.json`. Populates `tokens[].t_end` (word-end boundary) enabling exact cut boundaries.
 
 ### 5. Edit transcript
-```
+
+```bash
 npm run edit-transcript
 ```
-Merges raw segments into sentences, preserves existing edits, and writes:
-- `public/transcribe/output/edit/transcript.json` — machine-readable transcript
-- `public/transcribe/output/edit/transcript.doc.txt` — human-editable doc
+Merges phrases into sentences. Outputs:
+- `public/transcribe/output/edit/transcript.json`
+- `public/transcribe/output/edit/transcript.doc.txt`
 
 ### 6. Edit the doc
-Open `transcript.doc.txt` and follow the instructions at the top:
+
+Open `transcript.doc.txt`. Follow the instructions at the top:
 - Rename speakers in the `SPEAKERS` section
 - Retype words to correct them
 - Wrap words in `{curly braces}` to cut them
-- Add `CUT` after a segment number to cut the whole segment
+- Add `CUT` after a segment number to remove the whole segment
 
 ### 7. Save edits
-```
+
+```bash
 npm run merge-doc
-```
-Applies doc edits back to `transcript.json`.
-
-The renderer plays the full recording continuously by default — only segments and words you explicitly cut are removed. To also remove inter-sentence silence (gaps between utterances longer than 0.5 s):
-```
-npm run merge-doc:cut-pauses
-```
-This writes silence time-ranges into `transcript.json` so the renderer skips them. You can adjust the threshold:
-```
+npm run merge-doc:cut-pauses               # also remove silences > 0.5 s
 npm run merge-doc:cut-pauses -- --pause-threshold 0.3
-```
-
-If you measured a timestamp offset (see step 2a), pass it here:
-```
 npm run merge-doc -- --timestamp-offset 0.5
-npm run merge-doc:cut-pauses -- --timestamp-offset 0.5
 ```
 
-Note: Running `npm run merge-doc` again will reset any pause cuts or timestamp offset created in previous editing sessions. To keep changes, run the command with the desired flags.
+Applies doc edits back to `transcript.json`. Re-running resets any previous pause cuts or offset — always pass the flags you want.
 
-### 8. Camera setup — punch-in/punch-out cuts (optional)
+### 8. Camera setup (optional)
 
-Simulates a multi-camera effect by digitally cropping and zooming into the speaking speaker's face, alternating with wide shots on a pacing schedule.
+Simulates multi-camera by digitally cropping to the speaking speaker's face on a pacing schedule. Supports multiple physical camera angles: each angle uses a separate synced video file; each speaker is assigned to an angle.
 
-**Prerequisites — install MediaPipe into your Python environment:**
-```
+**Install MediaPipe:**
+```bash
 pip install mediapipe pillow
-```
-Or using the requirements file:
-```
+# or:
 pip install -r scripts/camera/requirements.txt
 ```
 
-**Run:**
-```
+**Single angle:**
+```bash
 npm run setup-camera
 ```
-This will:
-1. Extract a single frame from the video at `transcript.meta.videoStart`
-2. Detect faces in that frame (MediaPipe BlazeFace — no internet required)
-3. Start the Next.js dev server and print the GUI URL
 
-**Assign faces to speakers:**
-
-Open `http://localhost:3000/camera` in your browser. You will see the extracted frame with numbered, colour-coded rectangles around each detected face. Use the dropdowns on the right to assign each face to the matching speaker name (names come from your transcript). Click **Save profiles** when done.
-
-This writes `public/transcribe/output/camera/camera-profiles.json`, which Remotion reads automatically.
-
-On newer MediaPipe versions (≥ 0.10.20) the bundled model API was removed. The script automatically falls back to the Tasks API and downloads the BlazeFace model (~800 KB) on first run, then caches it at `scripts/camera/blaze_face_short_range.tflite`. Subsequent runs are fully offline.
-
-The number of speakers is read from the transcript and enforced on the detector — it will iteratively lower its detection confidence until the right number of faces are found. If it still can't find all of them, a warning is printed and you can draw the missing boxes manually in the GUI.
-
-To skip auto-detection entirely and draw all boxes by hand:
+**Multi-angle:**
+```bash
+node scripts/camera/setup-camera.js --videos path/to/angle1.mp4 path/to/angle2.mp4
 ```
-npm run setup-camera -- --skip-detect
-```
+Or let the wizard handle it (recommended).
 
-If Python is not on your `PATH`, pass the binary explicitly:
-```
-npm run setup-camera -- --python python3
-```
+The script:
+1. Extracts a reference frame from each video at `transcript.meta.videoStart`
+2. Runs MediaPipe BlazeFace face detection per angle (offline after first run — model cached at `scripts/camera/blaze_face_short_range.tflite`)
+3. Starts the Next.js dev server
 
-To use a specific video or transcript:
-```
-npm run setup-camera -- --video path/to/video.mp4 --transcript path/to/transcript.json
+**Open `http://localhost:3000/camera`** in your browser:
+- Use angle tabs to switch between camera angles
+- Assign each detected face box to a speaker
+- Click **Save profiles**
+
+Output: `public/transcribe/output/camera/camera-profiles.json`
+
+**Flags:**
+```bash
+npm run setup-camera -- --skip-detect          # skip auto-detection, draw manually
+npm run setup-camera -- --video path/to/v.mp4  # specify video explicitly
+npm run setup-camera -- --python python3        # custom Python path
 ```
 
 ### 9. Preview in Remotion
-```
+
+```bash
 npm run remotion
 ```
-The composition plays the full recording continuously, skipping only what was explicitly cut in the doc. If `camera-profiles.json` exists, punch-in/punch-out camera cuts are applied automatically. To disable, remove or rename that file — the composition falls back to the standard render.
+
+Plays the full recording with all cuts applied. If `camera-profiles.json` exists, punch-in/punch-out cuts are applied automatically (including multi-angle switching). Remove or rename the file to disable camera cuts.
 
 ### 10. Cut preview (optional)
-```
+
+```bash
 npm run cut-preview
 ```
-Generates a flat MP4 with all cuts applied for quick review outside Remotion.
+Generates a flat MP4 for quick review outside Remotion.
 
 ---
 
 ## Pipeline: Carousel Generation
 
-```
+```bash
 npm run generate
 npm run generate:bulk
 ```

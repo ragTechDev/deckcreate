@@ -83,6 +83,12 @@ export type TranscriptMeta = {
   videoEnd?: number;
   /** Path to the source video relative to /public — overrides the composition's src prop */
   videoSrc?: string;
+  /**
+   * Paths to all synced video angle files relative to /public (multi-angle shoots).
+   * The first entry is the primary angle (matches videoSrc). Used by setup-camera
+   * to know which angles to run face detection on.
+   */
+  videoSrcs?: string[];
 };
 
 export type Transcript = {

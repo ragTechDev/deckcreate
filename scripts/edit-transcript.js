@@ -15,6 +15,7 @@ function parseArgs() {
     else if (args[i] === '--auto-cut-pauses' && args[i + 1]) result.autoCutPauses = parseFloat(args[++i]);
     else if (args[i] === '--timestamp-offset' && args[i + 1]) result.timestampOffset = parseFloat(args[++i]);
     else if (args[i] === '--video-src' && args[i + 1]) result.videoSrc = args[++i];
+    else if (args[i] === '--video-srcs' && args[i + 1]) result.videoSrcs = args[++i].split(',').filter(Boolean);
   }
   return result;
 }
@@ -1419,9 +1420,12 @@ async function main() {
     console.log(`Applied doc edits.`);
   }
 
-  // Store video source path in meta so Remotion can resolve the correct video file
+  // Store video source path(s) in meta so Remotion and camera setup can resolve video files
   if (cli.videoSrc) {
     transcript = { ...transcript, meta: { ...transcript.meta, videoSrc: cli.videoSrc } };
+  }
+  if (cli.videoSrcs && cli.videoSrcs.length > 0) {
+    transcript = { ...transcript, meta: { ...transcript.meta, videoSrcs: cli.videoSrcs } };
   }
 
   // Apply timestamp offset to all t_dtw values and segment boundaries

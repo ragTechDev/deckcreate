@@ -11,7 +11,10 @@ import { IconTrash } from '@tabler/icons-react';
 // ── Types ────────────────────────────────────────────────────────────────────
 
 type Detection  = { x: number; y: number; w: number; h: number; score: number };
-type FaceBox    = { id: number; x: number; y: number; w: number; h: number; speaker: string };
+/** `angleName` is set for multi-angle shoots; undefined for single-angle (legacy). */
+type FaceBox    = { id: number; x: number; y: number; w: number; h: number; speaker: string; angleName?: string };
+/** One entry per camera angle from angles.json (written by setup-camera.js). */
+type AngleInfo  = { angleName: string; videoSrc: string; frameFile: string; detectFile: string };
 type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 
 type Drag =
@@ -151,24 +154,32 @@ export default function CameraPage() {
   const [imgSize, setImgSize]             = useState<{ w: number; h: number } | null>(null);
   const boxesInitialized                  = useRef(false);
 
+  // Multi-angle state — null when angles.json is absent (single-angle mode)
+  const [angles, setAngles]               = useState<AngleInfo[] | null>(null);
+  const [currentAngleIdx, setCurrentAngleIdx] = useState(0);
+  const [angleRawDetections, setAngleRawDetections] = useState<Record<string, Detection[]>>({});
+  const [angleImgSizes, setAngleImgSizes] = useState<Record<string, { w: number; h: number }>>({});
+  const angleBoxesInitialized             = useRef<Set<string>>(new Set());
+
   const svgRef     = useRef<SVGSVGElement>(null);
   const nextId     = useRef(1);
   const dragRef    = useRef(drag);
   const imgSizeRef = useRef(imgSize);
-  dragRef.current    = drag;
-  imgSizeRef.current = imgSize;
+  // Refs so async closures (drag events) can read current angle without stale captures
+  const anglesRef        = useRef(angles);
+  const currentAngleIdxRef = useRef(currentAngleIdx);
+  dragRef.current          = drag;
+  imgSizeRef.current       = imgSize;
+  anglesRef.current        = angles;
+  currentAngleIdxRef.current = currentAngleIdx;
 
   // ── Load data ───────────────────────────────────────────────────────────────
 
   useEffect(() => {
     (async () => {
       try {
-        const detectionsRes = await fetch('/transcribe/output/camera/detections.json');
+        // ── Transcript (speakers) — same for both single and multi-angle ──────
         const transcriptRes = await fetch('/transcribe/output/edit/transcript.json');
-
-        const dets: Detection[] = detectionsRes.ok ? await detectionsRes.json() : [];
-        setRawDetections(dets);
-
         if (transcriptRes.ok) {
           const transcript = await transcriptRes.json();
           const names = [
@@ -180,12 +191,31 @@ export default function CameraPage() {
           setSpeakers(names);
         } else {
           setSpeakers([]);
+          setError('Transcript not found. You can still position boxes, but speaker list will be empty until transcript is generated.');
         }
 
+        // ── Try multi-angle (angles.json) first ───────────────────────────────
+        const anglesRes = await fetch('/transcribe/output/camera/angles.json');
+        if (anglesRes.ok) {
+          const anglesData: AngleInfo[] = await anglesRes.json();
+          if (anglesData.length > 1) {
+            setAngles(anglesData);
+            const detMap: Record<string, Detection[]> = {};
+            for (const angle of anglesData) {
+              const r = await fetch(`/transcribe/output/camera/${angle.detectFile}`);
+              detMap[angle.angleName] = r.ok ? await r.json() : [];
+            }
+            setAngleRawDetections(detMap);
+            return; // multi-angle loaded; skip single-angle path
+          }
+        }
+
+        // ── Single-angle fallback ─────────────────────────────────────────────
+        const detectionsRes = await fetch('/transcribe/output/camera/detections.json');
+        const dets: Detection[] = detectionsRes.ok ? await detectionsRes.json() : [];
+        setRawDetections(dets);
         if (!detectionsRes.ok) {
           setError('Detections file not found. Run camera setup first, or draw boxes manually.');
-        } else if (!transcriptRes.ok) {
-          setError('Transcript not found. You can still position boxes, but speaker list will be empty until transcript is generated.');
         }
       } catch (err) {
         setError(String(err));
@@ -197,7 +227,9 @@ export default function CameraPage() {
 
   // ── Initialise boxes once the real image size is known ───────────────────────
 
+  // Single-angle: initialise from rawDetections + imgSize (unchanged legacy path)
   useEffect(() => {
+    if (angles) return; // multi-angle handled below
     if (!imgSize || !rawDetections || boxesInitialized.current) return;
     boxesInitialized.current = true;
     const aspectRatio = imgSize.w / imgSize.h;
@@ -214,7 +246,33 @@ export default function CameraPage() {
         speaker: '',
       };
     }));
-  }, [imgSize, rawDetections]);
+  }, [angles, imgSize, rawDetections]);
+
+  // Multi-angle: initialise boxes for the current angle once its image has loaded
+  useEffect(() => {
+    if (!angles) return;
+    const currentAngle = angles[currentAngleIdx];
+    if (!currentAngle) return;
+    const { angleName } = currentAngle;
+    const aImgSize = angleImgSizes[angleName];
+    const rawDets  = angleRawDetections[angleName];
+    if (!aImgSize || !rawDets || angleBoxesInitialized.current.has(angleName)) return;
+    angleBoxesInitialized.current.add(angleName);
+    const aspectRatio = aImgSize.w / aImgSize.h;
+    const newBoxes: FaceBox[] = rawDets.map(d => {
+      const vp = computeCloseup(d, aspectRatio);
+      return {
+        id: nextId.current++,
+        x: vp.cx - vp.w / 2,
+        y: vp.cy - vp.h / 2,
+        w: vp.w,
+        h: vp.h,
+        speaker: '',
+        angleName,
+      };
+    });
+    if (newBoxes.length > 0) setBoxes(prev => [...prev, ...newBoxes]);
+  }, [angles, currentAngleIdx, angleImgSizes, angleRawDetections]);
 
   // ── Coordinate helpers ───────────────────────────────────────────────────────
 
@@ -261,7 +319,9 @@ export default function CameraPage() {
         const bx = Math.min(d.sx, x), by = Math.min(d.sy, y);
         const bw = Math.abs(x - d.sx), bh = Math.abs(y - d.sy);
         if (bw > MIN_BOX && bh > MIN_BOX) {
-          setBoxes(prev => [...prev, { id: nextId.current++, x: bx, y: by, w: bw, h: bh, speaker: '' }]);
+          const currentAngles = anglesRef.current;
+          const angleName = currentAngles ? currentAngles[currentAngleIdxRef.current]?.angleName : undefined;
+          setBoxes(prev => [...prev, { id: nextId.current++, x: bx, y: by, w: bw, h: bh, speaker: '', angleName }]);
         }
       }
       setDrag({ mode: 'idle' });
@@ -315,10 +375,19 @@ export default function CameraPage() {
   const deleteBox = (id: number) =>
     setBoxes(prev => prev.filter(b => b.id !== id));
 
-  const addBox = () =>
-    setBoxes(prev => [...prev, { id: nextId.current++, x: 0.1, y: 0.1, w: 0.2, h: 0.35, speaker: '' }]);
+  const addBox = () => {
+    const angleName = angles ? angles[currentAngleIdx]?.angleName : undefined;
+    setBoxes(prev => [...prev, { id: nextId.current++, x: 0.1, y: 0.1, w: 0.2, h: 0.35, speaker: '', angleName }]);
+  };
 
-  const clearBoxes = () => setBoxes([]);
+  const clearBoxes = () => {
+    if (currentAngleName) {
+      // Multi-angle: only clear boxes for the currently visible angle
+      setBoxes(prev => prev.filter(b => b.angleName !== currentAngleName));
+    } else {
+      setBoxes([]);
+    }
+  };
 
   const setSpeaker = (id: number, speaker: string) =>
     setBoxes(prev => prev.map(b => b.id === id ? { ...b, speaker } : b));
@@ -336,11 +405,31 @@ export default function CameraPage() {
         label: box.speaker,
         closeupViewport: { cx, cy, w: r4(box.w), h: r4(box.h) },
         portraitCx: cx,
+        // Include angleName so CameraPlayer knows which angle video to show
+        ...(box.angleName ? { angleName: box.angleName } : {}),
       };
     }
 
-    const sw = imgSize?.w ?? 1920;
-    const sh = imgSize?.h ?? 1080;
+    // Primary source dimensions: angle1 for multi-angle, or the single frame
+    const primaryAngleName = angles?.[0]?.angleName;
+    const primarySize = primaryAngleName ? angleImgSizes[primaryAngleName] : null;
+    const sw = primarySize?.w ?? imgSize?.w ?? 1920;
+    const sh = primarySize?.h ?? imgSize?.h ?? 1080;
+
+    // Build angles config for multi-angle shoots
+    const anglesConfig = angles
+      ? Object.fromEntries(
+          angles.map(a => {
+            const aSize = angleImgSizes[a.angleName];
+            return [a.angleName, {
+              videoSrc:     a.videoSrc,
+              sourceWidth:  aSize?.w ?? sw,
+              sourceHeight: aSize?.h ?? sh,
+            }];
+          })
+        )
+      : undefined;
+
     const profiles = {
       sourceWidth:  sw,
       sourceHeight: sh,
@@ -348,6 +437,7 @@ export default function CameraPage() {
       outputHeight: sh,
       wideViewport: { cx: 0.5, cy: 0.5, w: 1.0, h: 1.0 },
       speakers: speakerMap,
+      ...(anglesConfig ? { angles: anglesConfig } : {}),
     };
 
     setSaving(true);
@@ -371,6 +461,17 @@ export default function CameraPage() {
   const drawPreview = drag.mode === 'draw' && Math.abs(drag.cx - drag.sx) > MIN_BOX && Math.abs(drag.cy - drag.sy) > MIN_BOX
     ? { x: Math.min(drag.sx, drag.cx), y: Math.min(drag.sy, drag.cy), w: Math.abs(drag.cx - drag.sx), h: Math.abs(drag.cy - drag.sy) }
     : null;
+
+  // In multi-angle mode, only show the current angle's boxes on the canvas
+  const currentAngleName = angles ? angles[currentAngleIdx]?.angleName : undefined;
+  const visibleBoxes = currentAngleName
+    ? boxes.filter(b => b.angleName === currentAngleName)
+    : boxes;
+
+  // Frame image path: per-angle in multi-angle mode, legacy path otherwise
+  const frameSrc = angles
+    ? `/transcribe/output/camera/${angles[currentAngleIdx]?.frameFile}`
+    : '/transcribe/output/camera/frame.jpg';
 
   const assignedCount = boxes.filter(b => b.speaker).length;
 
@@ -398,12 +499,34 @@ export default function CameraPage() {
 
           {/* ── Image + SVG overlay ── */}
           <Box style={{ flex: '1 1 auto', position: 'relative', lineHeight: 0 }}>
+
+            {/* Angle tabs — only shown in multi-angle mode */}
+            {angles && angles.length > 1 && (
+              <Group mb="xs" gap="xs">
+                {angles.map((angle, i) => (
+                  <Button
+                    key={angle.angleName}
+                    size="xs"
+                    variant={i === currentAngleIdx ? 'filled' : 'light'}
+                    onClick={() => setCurrentAngleIdx(i)}
+                  >
+                    {angle.angleName}
+                  </Button>
+                ))}
+              </Group>
+            )}
+
             <img
-              src="/transcribe/output/camera/frame.jpg"
+              src={frameSrc}
               alt="Video frame"
               onLoad={e => {
                 const img = e.currentTarget;
-                setImgSize({ w: img.naturalWidth, h: img.naturalHeight });
+                const newSize = { w: img.naturalWidth, h: img.naturalHeight };
+                if (angles && currentAngleName) {
+                  setAngleImgSizes(prev => ({ ...prev, [currentAngleName]: newSize }));
+                } else {
+                  setImgSize(newSize);
+                }
               }}
               draggable={false}
               style={{ display: 'block', width: '100%', borderRadius: 8, userSelect: 'none' }}
@@ -425,10 +548,10 @@ export default function CameraPage() {
               <rect x={0} y={0} width={1} height={1} fill="transparent" />
 
               {/* Render non-selected boxes first (behind), selected box last (on top) */}
-              {[...boxes]
+              {[...visibleBoxes]
                 .sort((a, b) => (a.id === selectedId ? 1 : 0) - (b.id === selectedId ? 1 : 0))
                 .map((box) => {
-                  const i = boxes.indexOf(box);
+                  const i = visibleBoxes.indexOf(box);
                   const isSelected = box.id === selectedId;
                   const hasSelection = selectedId !== null;
                   const opacity = hasSelection && !isSelected ? 0.35 : 1;
@@ -499,10 +622,10 @@ export default function CameraPage() {
               <Button size="xs" variant="light" onClick={addBox}>
                 + Add box
               </Button>
-              <Button size="xs" variant="subtle" color="red" onClick={clearBoxes} disabled={boxes.length === 0}>
+              <Button size="xs" variant="subtle" color="red" onClick={clearBoxes} disabled={visibleBoxes.length === 0}>
                 Clear all
               </Button>
-              {boxes.length === 0 && (
+              {visibleBoxes.length === 0 && (
                 <Text size="xs" c="dimmed">
                   Click &amp; drag on the image to draw a face box.
                 </Text>
@@ -515,6 +638,7 @@ export default function CameraPage() {
             <Stack>
               <Text fw={600} size="sm">
                 {boxes.length} box{boxes.length !== 1 ? 'es' : ''}
+                {angles && angles.length > 1 && ` across ${angles.length} angles`}
               </Text>
 
               {boxes.length === 0 && (
@@ -542,7 +666,7 @@ export default function CameraPage() {
                     }}
                   />
                   <Text size="sm" fw={500} style={{ flexShrink: 0, minWidth: 44 }}>
-                    Face {i + 1}
+                    {box.angleName ? `${box.angleName} ` : ''}Face {i + 1}
                   </Text>
                   <Select
                     size="xs"

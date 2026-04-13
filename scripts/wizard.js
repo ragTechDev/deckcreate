@@ -372,6 +372,12 @@ async function main() {
 
   // ── Mode and speaker setup ─────────────────────────────────────────────────
   let mode, numSpeakers, multiSpeaker;
+  /** Number of camera angles (multi-angle shoot only). 1 = single angle (default). */
+  let numAngles = 1;
+  /** Absolute paths to extra angle video files (indices 1…N-1; index 0 is videoFile). */
+  let additionalVideoFiles = [];
+  /** Paths of all synced video outputs relative to /public — populated during sync. */
+  let videoSrcsForRemotion = null;
 
   if (resumeStep === 0) {
     // Fresh start — ask everything
@@ -382,6 +388,13 @@ async function main() {
     console.log('  4. Audio file only (transcription only)');
     const modeStr = (await ask('  > ')).trim();
     mode = [1, 2, 3, 4].includes(parseInt(modeStr)) ? parseInt(modeStr) : 3;
+
+    if (mode === 1) {
+      console.log('\n  How many camera angles are you shooting with?');
+      console.log('  (1 = single camera, 2+ = multi-angle: each angle synced to the same audio)');
+      const anglesStr = (await ask('  > [1] ')).trim() || '1';
+      numAngles = Math.max(1, parseInt(anglesStr) || 1);
+    }
 
     console.log('\n  How many speakers are in this recording?');
     console.log('  (Enter 1 if solo or unknown)');
@@ -410,12 +423,33 @@ async function main() {
   let videoFile = null, audioFile = null;
   if (resumeStep === 0) {
     ({ videoFile, audioFile } = await placeFiles(mode));
+
+    // Multi-angle: collect extra angle videos after the primary video is placed
+    if (mode === 1 && numAngles > 1) {
+      console.log('\n  ── Additional camera angle videos ────────────────────');
+      const videoExts = ['.mp4', '.mov', '.mkv'];
+      for (let angleIdx = 2; angleIdx <= numAngles; angleIdx++) {
+        const angleDir = path.join(cwd, 'public', 'input', 'video', `angle${angleIdx}`);
+        await fs.ensureDir(angleDir);
+        console.log(`  Angle ${angleIdx}: place video file in public/input/video/angle${angleIdx}/`);
+        await ask(`  Press Enter when angle ${angleIdx} video is ready...`);
+        const angleFile = await findFileIn(angleDir, videoExts);
+        if (!angleFile) {
+          console.error(`  ✗ No video file found for angle ${angleIdx} in ${angleDir}`);
+          process.exit(1);
+        }
+        additionalVideoFiles.push(angleFile);
+      }
+    }
   }
 
   // ── Determine video src for Remotion (relative to public/) ────────────────
   let videoSrcForRemotion = null;
   if (mode === 1) {
-    videoSrcForRemotion = 'sync/output/synced-output.mp4';
+    // Multi-angle: primary is angle 1; single-angle keeps legacy filename
+    videoSrcForRemotion = numAngles > 1
+      ? 'sync/output/synced-output-1.mp4'
+      : 'sync/output/synced-output.mp4';
   } else if (mode === 2 || mode === 3) {
     const vf = videoFile || existing.videoInInputPath;
     if (vf) videoSrcForRemotion = `transcribe/input/${path.basename(vf)}`;
@@ -423,16 +457,42 @@ async function main() {
 
   // ── STEP: Sync (mode 1 only) ───────────────────────────────────────────────
   let videoForExtract = videoFile;
+  const syncOutputDir = path.join(cwd, 'public', 'sync', 'output');
 
   if (resumeStep === 0 && mode === 1) {
     console.log('\n  ── Sync audio and video ─────────────────────────────');
-    await copyToSyncDirs(videoFile, audioFile);
-    await runStep(
-      'npm run sync',
-      'npm', ['run', 'sync'],
-      path.join(cwd, 'public', 'sync', 'output', 'synced-output.mp4'),
-    );
-    videoForExtract = path.join(cwd, 'public', 'sync', 'output', 'synced-output.mp4');
+
+    if (numAngles > 1) {
+      // Multi-angle: sync every video to the same audio using AudioSyncer.syncMultiple
+      const { default: AudioSyncer } = await import('./sync/AudioSyncer.js');
+      const allVideos = [videoFile, ...additionalVideoFiles];
+      console.log(`  Syncing ${numAngles} camera angles to audio...`);
+      let syncResults;
+      let syncOk = false;
+      while (!syncOk) {
+        try {
+          syncResults = await AudioSyncer.syncMultiple(allVideos, audioFile, syncOutputDir);
+          syncOk = true;
+        } catch (err) {
+          console.error(`  ✗ Sync failed: ${err.message}`);
+          const retry = await confirm('  Retry sync?');
+          if (!retry) process.exit(1);
+        }
+      }
+      videoForExtract = syncResults[0].outputPath;
+      videoSrcsForRemotion = syncResults.map((_, i) => `sync/output/synced-output-${i + 1}.mp4`);
+      console.log(`  ✓ Synced ${numAngles} angles:`);
+      syncResults.forEach((r, i) => console.log(`    Angle ${i + 1}: ${path.basename(r.outputPath)}`));
+    } else {
+      // Single angle: use existing npm run sync (writes synced-output.mp4)
+      await copyToSyncDirs(videoFile, audioFile);
+      await runStep(
+        'npm run sync',
+        'npm', ['run', 'sync'],
+        path.join(syncOutputDir, 'synced-output.mp4'),
+      );
+      videoForExtract = path.join(syncOutputDir, 'synced-output.mp4');
+    }
   }
 
   // ── STEP: Prepare audio ───────────────────────────────────────────────────
@@ -678,6 +738,7 @@ async function main() {
       const extraFlags = [
         ...(timestampOffset > 0 ? ['--timestamp-offset', String(timestampOffset)] : []),
         ...(videoSrcForRemotion ? ['--video-src', videoSrcForRemotion] : []),
+        ...(videoSrcsForRemotion ? ['--video-srcs', videoSrcsForRemotion.join(',')] : []),
       ];
       const offsetArgs = extraFlags.length > 0 ? ['--', ...extraFlags] : [];
       try {
@@ -713,6 +774,7 @@ async function main() {
     const singleExtraFlags = [
       ...(timestampOffset > 0 ? ['--timestamp-offset', String(timestampOffset)] : []),
       ...(videoSrcForRemotion ? ['--video-src', videoSrcForRemotion] : []),
+      ...(videoSrcsForRemotion ? ['--video-srcs', videoSrcsForRemotion.join(',')] : []),
     ];
     const offsetArgs = singleExtraFlags.length > 0 ? ['--', ...singleExtraFlags] : [];
     console.log('\n  ── Build editable transcript ─────────────────────────');
@@ -730,6 +792,7 @@ async function main() {
     const mergeExtraFlags = [
       ...(timestampOffset > 0 ? ['--timestamp-offset', String(timestampOffset)] : []),
       ...(videoSrcForRemotion ? ['--video-src', videoSrcForRemotion] : []),
+      ...(videoSrcsForRemotion ? ['--video-srcs', videoSrcsForRemotion.join(',')] : []),
     ];
     const mergeOffsetArgs = mergeExtraFlags.length > 0 ? ['--', ...mergeExtraFlags] : [];
     const cutPauses = await confirm('  Auto-cut silences longer than 0.5 s?', false);
@@ -754,9 +817,16 @@ async function main() {
     const doCamera = await confirm('  Set up speaker closeup cuts? (camera)', false);
     if (doCamera) {
       console.log('\n  ── Camera setup ──────────────────────────────────────');
-      console.log('  Detecting faces in video frame...');
+      console.log('  Detecting faces in video frame(s)...');
+      // Build the list of video paths to run face detection on.
+      // For multi-angle, pass all synced output files; for single-angle, omit (auto-detected).
+      const cameraDetectArgs = ['scripts/camera/setup-camera.js', '--detect-only'];
+      if (videoSrcsForRemotion && videoSrcsForRemotion.length > 1) {
+        const absPaths = videoSrcsForRemotion.map(rel => path.join(cwd, 'public', rel));
+        cameraDetectArgs.push('--videos', ...absPaths);
+      }
       try {
-        await spawnStep('node', ['scripts/camera/setup-camera.js', '--detect-only']);
+        await spawnStep('node', cameraDetectArgs);
       } catch (err) {
         console.warn(`  ⚠ Face detection failed: ${err.message}`);
         console.log('  You can draw boxes manually in the GUI.');

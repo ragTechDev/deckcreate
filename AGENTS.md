@@ -1,186 +1,250 @@
 # DeckCreate — Architecture Reference
 
-This document describes how the video editing pipeline works end-to-end, from raw recording to a Remotion composition. It is intended to orient AI agents and new contributors quickly.
+End-to-end guide for AI agents and contributors. See `CLAUDE.md` for project/brand context.
 
 ---
 
-## High-level pipeline
+## Pipeline
 
 ```
 Raw audio/video
-      ↓
-[transcribe]  Whisper.cpp → token-level timestamps
-      ↓
-[diarize]     Speaker turn detection (optional)
-      ↓
-[assign-speakers]  Labels each segment with a speaker name
-      ↓
-[align]       WhisperX refines token timings (t_dtw) via forced alignment
-      ↓
-[edit-transcript]  Merges Whisper phrases into sentences → transcript.doc.txt
-      ↓
-Human edits transcript.doc.txt (cuts, corrections, hooks, camera cues)
-      ↓
-[merge-doc]   Applies doc edits → transcript.json
-      ↓
-Remotion renderer reads transcript.json → composed video
+  ↓ [sync]            FFT cross-correlation → synced-output-{N}.mp4 (one per angle)
+  ↓ [transcribe]      Whisper.cpp → token-level timestamps → transcript.raw.json
+  ↓ [diarize]         Speaker turn detection → diarization.json
+  ↓ [assign-speakers] Labels segments with speaker names
+  ↓ [align]           WhisperX forced alignment → refines t_dtw, populates t_end
+  ↓ [edit-transcript] Merges phrases → sentences → transcript.doc.txt + transcript.json
+  Human edits doc (cuts, corrections, hooks, camera cues)
+  ↓ [merge-doc]       Applies doc edits → transcript.json
+  ↓ [setup-camera]    Face detection per angle → camera-profiles.json
+  ↓ Remotion          transcript.json + camera-profiles.json → composed video
 ```
 
-All intermediate files live under `public/transcribe/output/`.
+Intermediate files: `public/transcribe/output/`. Synced video(s): `public/sync/output/`.
 
 ---
 
-## transcript.json schema (key fields)
+## transcript.json schema
 
 ```
-Transcript
-  meta
-    videoStart?: number     — source seconds; segments before this are excluded
-    videoEnd?:   number     — source seconds; segments after this are excluded
-    videoSrc?:   string     — path relative to /public (overrides composition prop)
-    fps:         number     — always 60
-  segments[]
-    id, start, end          — source-video timestamps in seconds
-    speaker                 — display name (e.g. "Natasha")
-    text                    — human-readable sentence
-    cut: boolean            — true = entire segment removed from output
-    tokens[]
-      t_dtw: number         — word start time in seconds (WhisperX-aligned or Whisper t_dtw)
-      t_end?: number        — word end time in seconds (populated by forced alignment only)
-                              when present, deriveCuts and autoCutPauses use exact word
-                              boundaries instead of heuristic bias constants
-      text:  string         — word / punctuation
-      cut:   boolean        — true = this token is cut
-    cuts: TimeCut[]         — [{from, to}] derived from token.cut flags by edit-transcript
-                              these are INTRA-segment ranges to skip
-    hook?: boolean          — when true, prepended as a hook/teaser before main content
-    hookFrom/hookTo?        — start/end seconds of the hook clip within the segment
-    cameraCues[]            — explicit camera shot overrides (> CAM directives in doc)
+meta
+  videoSrc?:   string     path relative to /public (overrides composition src prop)
+  videoSrcs?:  string[]   all angle paths (multi-angle); used by setup-camera
+  videoStart?: number     source seconds; segments before are excluded
+  videoEnd?:   number     source seconds; segments after are excluded
+  fps:         60
+
+segments[]
+  id, start, end          source-video timestamps in seconds
+  speaker                 display name (e.g. "Natasha")
+  text                    human-readable sentence
+  cut: boolean            true = entire segment removed
+  tokens[]
+    t_dtw: number         word start time (WhisperX-aligned or Whisper t_dtw)
+    t_end?: number        word end time (forced alignment only)
+                          when present, deriveCuts uses exact boundaries
+                          when absent, falls back to heuristic CUT_START_BIAS
+    text: string
+    cut: boolean
+  cuts: TimeCut[]         [{from, to}] intra-segment ranges to skip
+                          populated by edit-transcript from token.cut flags
+                          NOT set manually — edit transcript.doc.txt instead
+  hook?: boolean          when true, prepended as hook/teaser before main
+  hookFrom?, hookTo?      clip bounds within the segment (seconds)
+  cameraCues[]            explicit camera shot overrides (> CAM directives in doc)
 ```
 
-`segment.cuts[]` is populated automatically by `edit-transcript.js` / `merge-doc` when tokens are marked for cutting. It is **not** set manually — edit `transcript.doc.txt` to cut words.
+---
+
+## camera-profiles.json schema
+
+```json
+{
+  "sourceWidth": 1920, "sourceHeight": 1080,
+  "outputWidth": 1920, "outputHeight": 1080,
+  "wideViewport": { "cx": 0.5, "cy": 0.5, "w": 1, "h": 1 },
+
+  // Multi-angle only — one entry per camera angle
+  "angles": {
+    "angle1": { "videoSrc": "sync/output/synced-output-1.mp4",
+                "sourceWidth": 1920, "sourceHeight": 1080,
+                "wideViewport": { "cx": 0.5, "cy": 0.5, "w": 1, "h": 1 } },
+    "angle2": { "videoSrc": "sync/output/synced-output-2.mp4",
+                "sourceWidth": 1920, "sourceHeight": 1080 }
+  },
+
+  "speakers": {
+    "Natasha": {
+      "label": "Natasha",
+      "angleName": "angle1",        // omit for single-angle
+      "closeupViewport": { "cx": 0.3, "cy": 0.4, "w": 0.35, "h": 0.35 },
+      "portraitCx": 0.3             // portrait-mode centre
+    }
+  }
+}
+```
+
+`CropViewport`: `cx/cy` = normalised centre (0–1), `w/h` = crop dimensions (0–1).
 
 ---
 
 ## Rendering model — "inclusive by default"
 
-The Remotion composition plays the full active range `[videoStart, lastSegment.end]` **continuously by default**. Cuts are opt-in:
+Full range `[videoStart, lastSegment.end]` plays continuously. Cuts are opt-in:
 
-| What produces a cut | How |
-|---|---|
+| Source | Mechanism |
+|--------|-----------|
 | Entire segment removed | `segment.cut = true` |
-| Intra-segment word/phrase removed | `segment.cuts[]` entries (from `{curly braces}` in doc) |
-| Inter-segment silence removed | `merge-doc:cut-pauses` writes silence ranges into `cuts[]` |
+| Intra-segment word/phrase | `segment.cuts[]` entries (from `{curly braces}` in doc) |
+| Inter-segment silence | `merge-doc:cut-pauses` writes silence ranges into `cuts[]` |
 
-**There are no implicit cuts.** Gaps between segments (natural pauses between utterances) play as silence unless you explicitly run `merge-doc:cut-pauses`.
-
-This matches how Descript, Riverside, and similar text-based editors work: the transcript is a window onto a continuous timeline, not a list of clips to concatenate.
+No implicit cuts. Gaps between segments play as silence unless you run `merge-doc:cut-pauses`.
 
 ---
 
 ## Remotion component architecture
 
 ### Data flow
-
 ```
 transcript.json
-  ↓  getActiveSegments()       filter by meta.videoStart/videoEnd
-  ↓  buildSections()           convert to {hookSections[], mainSections[]}
-  ↓  SegmentPlayer / CameraPlayer
-  ↓  SectionGroupPlayer        renders one group via OffthreadVideo + trimBefore
+  → getActiveSegments()        filter by meta.videoStart/videoEnd
+  → buildSections()            → {hookSections[], mainSections[]}
+  → SegmentPlayer / CameraPlayer
+  → SectionGroupPlayer         OffthreadVideo + trimBefore per section
 ```
 
-### buildSections (SegmentPlayer.tsx)
+### buildSections (`SegmentPlayer.tsx`)
 
-Produces two independent section arrays — hooks and main — each rendered in its own `<Sequence>` with a local frame counter. Keeping them separate prevents negative `trimBefore` values (hooks originate deep in source time).
+Two independent section arrays — hooks and main — each in its own `<Sequence>` with a local frame counter. Separation prevents negative `trimBefore` (hooks originate deep in source time).
 
-**Main section logic** (`buildMainSubClips`):
+**Main sections** (`buildMainSubClips`):
 1. Range = `[videoStart, lastActiveSegment.end]`
-2. Collect exclusions: `cut=true` segment spans + all `cuts[]` entries
-3. Merge overlapping exclusions
-4. Invert: the gaps between exclusions become the playable `SubClip[]`
-5. Convert `SubClip[]` → `Section[]` via `toSections(clips, fps)` (`trimBefore = Math.floor(start*fps)`, `trimAfter = Math.ceil(end*fps)`)
+2. Collect exclusions: `cut=true` spans + all `cuts[]` entries
+3. Merge overlapping exclusions; invert → playable `SubClip[]`
+4. Convert: `trimBefore = Math.floor(start*fps)`, `trimAfter = Math.ceil(end*fps)`
 
-**Hook section logic** (`getHookSubClips`): uses `hookFrom`/`hookTo` bounds, extends end when spoken tokens drift past `hookTo`, bridges to next hook if gap ≤ 1 s.
+**Hook sections** (`getHookSubClips`): uses `hookFrom/hookTo` bounds, extends end when spoken tokens drift past `hookTo`, bridges to next hook if gap ≤ 1 s.
 
-### SectionGroupPlayer (SegmentPlayer.tsx)
+### SectionGroupPlayer (`SegmentPlayer.tsx`)
 
-The jump-cut engine. At each composition frame `f`:
-
+Jump-cut engine. At composition frame `f`:
 ```
-summedDurations = Σ (section.trimAfter - section.trimBefore)  for sections[0..k]
-trimBefore = section.trimAfter - summedDurations          (= S(f) - f)
-sourceFrame = trimBefore + f                              (= S(f))
+summedDurations = Σ(section.trimAfter - section.trimBefore) for sections[0..k]
+trimBefore      = section.trimAfter - summedDurations    (= S(f) - f)
+sourceFrame     = trimBefore + f                         (= S(f))
+```
+`OffthreadVideo` receives `trimBefore` and renders source frame `S(f)`. Cuts are skipped because no section covers those source frames.
+
+`muted?: boolean` prop silences audio — used by `CameraPlayer` for non-active angle layers.
+
+### CameraPlayer (`CameraPlayer.tsx`)
+
+Applies viewport transforms (scale + translate) to simulate punch-in/punch-out camera cuts.
+
+**Single-angle**: wraps one `SegmentPlayer` in an `AbsoluteFill`, animates `CropViewport` transform.
+
+**Multi-angle**: stacks one `SegmentPlayer` per unique `videoSrc` referenced in shots. At each frame, the active angle layer has `opacity: 1`; all others `opacity: 0, muted`. Viewport transform and source dimensions are per-angle.
+
+**`buildCameraShots`** — builds `CameraShot[]` timeline:
+- Shot boundaries at segment start times via `sourceToOutputFrame(seg.start, mainSections, fps)`
+- `emitShot()` looks up `speaker.angleName → profiles.angles[name].videoSrc` to set `shot.videoSrc`
+- Pacing constants: `MIN_WIDE_S=1.5s`, `MAX_CLOSEUP_S=20s`, `PERIODIC_WIDE_S=45s`
+- Speaker changes trigger immediate cut to new closeup if previous shot ≥ 1 s
+
+**`CameraShot`**: `{ startFrame, endFrame, viewport: CropViewport, videoSrc?: string }`
+
+**Viewport transform**:
+```
+scale = max(outW / (srcW × vp.w), outH / (srcH × vp.h))
+tx    = (0.5 - vp.cx) × 100 %
+ty    = (0.5 - vp.cy) × 100 %
+→ CSS: scale(${scale}) translate(${tx}%, ${ty}%)
 ```
 
-`OffthreadVideo` receives `trimBefore` and renders the source frame that maps to composition frame `f`. Cuts are skipped because no section covers those source frames — the playhead jumps from one section's end directly to the next section's start.
-
-### CameraPlayer (CameraPlayer.tsx)
-
-Wraps `SegmentPlayer` inside a viewport transform (scale + translate) to simulate punch-in/punch-out camera cuts.
-
-`buildCameraShots` builds a `CameraShot[]` timeline. Shot boundaries are placed at **segment** start times using `sourceToOutputFrame(seg.start, mainSections, fps)` so positions are always in sync with the actual rendered output (including silence between segments). Duration per segment = distance to next segment's output start, which correctly includes inter-segment silence in the pacing counters.
-
-`sourceToOutputFrame(sourceSec, mainSections, fps)` maps a source timestamp to its output frame by walking `mainSections` and accumulating section durations.
+**Explicit overrides** (`cameraCues[]`): `collectCameraOverrides` maps cue timestamps to output frames via `sourceToOutputFrame`; `applyOverrides` splices them into the pacing shot list, propagating `videoSrc` from the cue's speaker profile.
 
 ### Hook rendering
 
-1. `hookSections` play at composition frames `[0, hookDuration)`
-2. `PodcastIntro` plays at `[hookDuration, hookDuration + INTRO_DURATION_FRAMES)`
-3. `mainSections` play from `hookDuration + introFrames` onward (`mainOffset` parameter)
+1. `hookSections` → frames `[0, hookDuration)`
+2. `PodcastIntro` → frames `[hookDuration, hookDuration + INTRO_DURATION_FRAMES)`
+3. `mainSections` → from `hookDuration + introFrames` (passed as `mainOffset`)
 
-Hook music is looped over the hook duration. `HookOverlay` shows karaoke captions and the Techybara mascot; it is mounted for the full composition duration and returns `null` outside hook frames.
+Hook music looped over hook duration. `HookOverlay` shows karaoke captions + Techybara mascot; mounted for full composition duration, returns `null` outside hook frames.
+
+---
+
+## Multi-angle sync (`AudioSyncer.syncMultiple`)
+
+`AudioSyncer.syncMultiple(videoPaths, audioPath, outputDir)` — static method in `scripts/sync/AudioSyncer.js`. Syncs each video independently to the same audio via FFT cross-correlation. Outputs `synced-output-1.mp4`, `synced-output-2.mp4`, etc. Returns `[{ outputPath, videoSrc, sourceWidth, sourceHeight }]`.
+
+---
+
+## Camera setup — multi-angle (`setup-camera.js`)
+
+`--videos p1 p2 ...` OR reads `meta.videoSrcs` from transcript. Per angle:
+- Extracts `frame-angle{N}.jpg` at `meta.videoStart`
+- Runs MediaPipe face detection → `detections-angle{N}.json`
+
+Writes `angles.json` (manifest for the camera GUI):
+```json
+[{ "angleName": "angle1", "videoSrc": "...", "frameFile": "frame-angle1.jpg",
+   "detectFile": "detections-angle1.json" }, ...]
+```
+
+Camera GUI (`app/camera/page.tsx`): loads `angles.json`, shows angle tabs, tags each face box with `angleName`, saves `angleName` per speaker + `angles` map to `camera-profiles.json`.
 
 ---
 
 ## Silence removal
 
-`--auto-cut-pauses N` (via `npm run merge-doc:cut-pauses`) detects silence gaps between tokens within segments and writes `TimeCut` entries into `segment.cuts[]`. The renderer then excludes those ranges the same way it handles any other cut. This is the **only** mechanism for silence removal — the renderer itself has no silence detection.
+`merge-doc:cut-pauses` (`--auto-cut-pauses N`) detects silence gaps and writes `TimeCut` entries into `segment.cuts[]`. The renderer excludes those ranges identically to any other cut. Default threshold: `0.5 s`.
 
-Key threshold: `PAUSE_THRESHOLD = 0.8s` for sentence boundaries; `--auto-cut-pauses` defaults to `0.5s`.
+With `token.t_end` (after forced alignment): silence = `next.t_dtw − curr.t_end` (exact).  
+Without: estimate = `next.t_dtw − curr.t_dtw − WORD_DURATION_ESTIMATE (0.4 s)`.
 
-When `token.t_end` is present (after forced alignment), silence is measured as `next.t_dtw - curr.t_end` — exact inter-word silence. Without it, the estimate is `next.t_dtw - curr.t_dtw - WORD_DURATION_ESTIMATE (0.4s)`.
+---
 
 ## Cut boundary precision
 
-`deriveCuts` builds `TimeCut` ranges from `token.cut` flags. Boundary precision depends on whether forced alignment was run:
+`deriveCuts` in `edit-transcript.js`:
 
 | Field available | Cut start | Cut end |
 |---|---|---|
-| `prevWord.t_end` present | `prevWord.t_end` (exact word finish) | `nextWord.t_dtw` (exact word onset) |
-| `t_end` absent | `prevWord.t_dtw + CUT_START_BIAS × gap` (heuristic) | `nextWord.t_dtw` (exact word onset) |
-
-`CUT_END_BIAS` is no longer used — the next word's `t_dtw` (its start time) is already the correct cut endpoint. `CUT_START_BIAS` is only a fallback for transcripts without alignment data.
+| `prevWord.t_end` present | `prevWord.t_end` (exact) | `nextWord.t_dtw` (exact) |
+| `t_end` absent | `prevWord.t_dtw + CUT_START_BIAS × gap` | `nextWord.t_dtw` (exact) |
 
 ---
 
 ## Key source files
 
 | File | Purpose |
-|---|---|
-| `remotion/components/SegmentPlayer.tsx` | Section model, `buildSections`, `buildMainSubClips`, jump-cut player |
-| `remotion/components/CameraPlayer.tsx` | Camera shot pacing, `sourceToOutputFrame`, viewport transforms |
-| `remotion/components/HookOverlay.tsx` | Hook captions, Techybara, hook timing logic |
-| `remotion/Composition.tsx` | Root composition, duration calculation, asset loading |
-| `remotion/types/transcript.ts` | `Segment`, `Token`, `TimeCut`, `Transcript` types |
+|------|---------|
+| `remotion/Composition.tsx` | Root composition, duration calc, asset loading |
+| `remotion/components/SegmentPlayer.tsx` | `buildSections`, `buildMainSubClips`, jump-cut player |
+| `remotion/components/CameraPlayer.tsx` | `buildCameraShots`, `sourceToOutputFrame`, multi-angle viewport |
+| `remotion/components/HookOverlay.tsx` | Hook captions, Techybara, hook timing |
+| `remotion/types/transcript.ts` | `Segment`, `Token`, `TimeCut`, `Transcript` |
+| `remotion/types/camera.ts` | `CameraProfiles`, `AngleConfig`, `SpeakerProfile`, `CameraShot`, `CropViewport` |
 | `scripts/edit-transcript.js` | Sentence merging, `deriveCuts`, doc generation |
+| `scripts/sync/AudioSyncer.js` | FFT sync, `syncMultiple` |
+| `scripts/camera/setup-camera.js` | Frame extraction, face detection, `angles.json` |
+| `app/camera/page.tsx` | Camera GUI (face box editor, angle tabs, save profiles) |
 | `scripts/wizard.js` | Interactive pipeline runner |
 
 ---
 
 ## Common constants
 
-| Constant | Value | Where | Notes |
-|---|---|---|---|
-| `PAUSE_THRESHOLD` (sentences) | 0.8 s | `edit-transcript.js` | |
-| `WORD_DURATION_ESTIMATE` | 0.4 s | `edit-transcript.js` | Fallback when `token.t_end` absent |
-| `CUT_START_BIAS` | 1.0 | `edit-transcript.js` | Fallback when `prevWord.t_end` absent |
-| `CUT_END_BIAS` | 0.75 | `edit-transcript.js` | Superseded — `nextWord.t_dtw` used directly |
+| Constant | Value | File |
+|----------|-------|------|
+| `PAUSE_THRESHOLD` (sentences) | 0.8 s | `edit-transcript.js` |
+| `WORD_DURATION_ESTIMATE` | 0.4 s | `edit-transcript.js` |
+| `CUT_START_BIAS` | 1.0 | `edit-transcript.js` |
 | `HOOK_TAIL_PAD_UNBOUNDED_SECONDS` | 0.16 s | `SegmentPlayer.tsx` |
 | `HOOK_TAIL_PAD_BOUNDED_SECONDS` | 0.02 s | `SegmentPlayer.tsx` |
 | `HOOK_BRIDGE_MAX_GAP_SECONDS` | 1.0 s | `SegmentPlayer.tsx` |
-| `HOOK_END_FADE_FRAMES` | 12 frames | `SegmentPlayer.tsx` |
+| `HOOK_END_FADE_FRAMES` | 12 | `SegmentPlayer.tsx` |
+| `DECLICK_FRAMES` | 3 | `SegmentPlayer.tsx` |
 | `MIN_WIDE_S` | 1.5 s | `CameraPlayer.tsx` |
 | `MAX_CLOSEUP_S` | 20 s | `CameraPlayer.tsx` |
 | `PERIODIC_WIDE_S` | 45 s | `CameraPlayer.tsx` |
-| `DECLICK_FRAMES` | 3 frames | `SegmentPlayer.tsx` |

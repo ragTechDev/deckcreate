@@ -159,11 +159,17 @@ export function buildCameraShots(
   let cumFrame         = 0;     // used only while processing hook segments
 
   function emitShot(endFrame: number): CameraShot {
+    const speakerProfile = shotSpeaker ? profiles.speakers[shotSpeaker] : undefined;
+    const angleName = speakerProfile?.angleName;
+    const angleConfig = angleName ? profiles.angles?.[angleName] : undefined;
+    const videoSrc = angleConfig?.videoSrc;
+
     const viewport =
-      shotType === 'closeup' && shotSpeaker && profiles.speakers[shotSpeaker]
-        ? profiles.speakers[shotSpeaker].closeupViewport
-        : profiles.wideViewport;
-    return { startFrame: shotStart, endFrame, viewport };
+      shotType === 'closeup' && shotSpeaker && speakerProfile
+        ? speakerProfile.closeupViewport
+        : (angleConfig?.wideViewport ?? profiles.wideViewport);
+
+    return { startFrame: shotStart, endFrame, viewport, videoSrc };
   }
 
   for (const seg of activeSegments) {
@@ -252,7 +258,7 @@ export function buildCameraShots(
 
 // ── Explicit camera overrides ─────────────────────────────────────────────────
 
-type OverrideEvent = { outputFrame: number; viewport: CropViewport };
+type OverrideEvent = { outputFrame: number; viewport: CropViewport; videoSrc?: string };
 
 /**
  * Walks active segments and maps each CameraCue's `at` (absolute source seconds)
@@ -281,10 +287,15 @@ function collectCameraOverrides(
     const segDur = Math.round(getOutputDuration(seg) * fps);
 
     for (const cue of (seg.cameraCues ?? [])) {
+      const cueSpeakerProfile = cue.speaker ? profiles.speakers[cue.speaker] : undefined;
+      const cueAngleName = cueSpeakerProfile?.angleName;
+      const cueAngleConfig = cueAngleName ? profiles.angles?.[cueAngleName] : undefined;
+      const cueVideoSrc = cueAngleConfig?.videoSrc;
+
       const viewport =
         cue.shot === 'wide' || !cue.speaker
-          ? profiles.wideViewport
-          : (profiles.speakers[cue.speaker]?.closeupViewport ?? profiles.wideViewport);
+          ? (cueAngleConfig?.wideViewport ?? profiles.wideViewport)
+          : (cueSpeakerProfile?.closeupViewport ?? profiles.wideViewport);
 
       let outputFrame: number;
       if (seg.hook) {
@@ -296,7 +307,7 @@ function collectCameraOverrides(
         outputFrame = hookTotalFrames + sourceToOutputFrame(cue.at, mainSections, fps);
       }
 
-      events.push({ outputFrame, viewport });
+      events.push({ outputFrame, viewport, videoSrc: cueVideoSrc });
     }
 
     if (seg.hook) hookCumFrame += segDur;
@@ -314,17 +325,17 @@ function applyOverrides(shots: CameraShot[], overrides: OverrideEvent[]): Camera
   if (!overrides.length) return shots;
   const result = [...shots];
 
-  for (const { outputFrame: F, viewport } of overrides) {
+  for (const { outputFrame: F, viewport, videoSrc } of overrides) {
     const idx = result.findIndex(s => s.startFrame <= F && F < s.endFrame);
     if (idx === -1) continue;
     const shot = result[idx];
 
     if (F === shot.startFrame) {
-      result[idx] = { ...shot, viewport };
+      result[idx] = { ...shot, viewport, ...(videoSrc !== undefined ? { videoSrc } : {}) };
     } else {
       result.splice(idx, 1,
-        { startFrame: shot.startFrame, endFrame: F,            viewport: shot.viewport },
-        { startFrame: F,              endFrame: shot.endFrame, viewport },
+        { startFrame: shot.startFrame, endFrame: F,            viewport: shot.viewport, videoSrc: shot.videoSrc },
+        { startFrame: F,              endFrame: shot.endFrame, viewport,                videoSrc: videoSrc ?? shot.videoSrc },
       );
     }
   }
@@ -384,8 +395,8 @@ export const CameraPlayer: React.FC<Props> = ({ src, hookSections, mainSections,
         result.push({ ...shot, startFrame: shot.startFrame + mainOffset, endFrame: shot.endFrame + mainOffset });
       } else {
         // Spans the boundary — split into hook portion (unchanged) and main portion (shifted)
-        result.push({ startFrame: shot.startFrame, endFrame: hookOutputFrames, viewport: shot.viewport });
-        result.push({ startFrame: hookOutputFrames + mainOffset, endFrame: shot.endFrame + mainOffset, viewport: shot.viewport });
+        result.push({ startFrame: shot.startFrame, endFrame: hookOutputFrames, viewport: shot.viewport, videoSrc: shot.videoSrc });
+        result.push({ startFrame: hookOutputFrames + mainOffset, endFrame: shot.endFrame + mainOffset, viewport: shot.viewport, videoSrc: shot.videoSrc });
       }
     }
     return result;
@@ -400,32 +411,73 @@ export const CameraPlayer: React.FC<Props> = ({ src, hookSections, mainSections,
     return shots[idx] ?? null;
   }, [frame, shots]);
 
+  // Active video source for this frame (undefined → primary src)
+  const activeVideoSrc = currentShot?.videoSrc ?? src;
   const viewport = currentShot?.viewport ?? profiles.wideViewport;
-  const { scale, tx, ty } = computeTransform(viewport, srcW, srcH, outW, outH);
+
+  // Collect every unique video source referenced across all shots (always includes primary)
+  const allVideoSrcs = useMemo(() => {
+    const srcs = new Set([src]);
+    for (const shot of shots) {
+      if (shot.videoSrc) srcs.add(shot.videoSrc);
+    }
+    return [...srcs];
+  }, [shots, src]);
+
+  // Map each video src to its source dimensions
+  const angleByVideoSrc = useMemo(() => {
+    const map = new Map<string, { srcW: number; srcH: number }>();
+    map.set(src, { srcW, srcH });
+    for (const angle of Object.values(profiles.angles ?? {})) {
+      map.set(angle.videoSrc, { srcW: angle.sourceWidth, srcH: angle.sourceHeight });
+    }
+    return map;
+  }, [src, srcW, srcH, profiles.angles]);
 
   return (
     // Outer: fills composition output dimensions, clips the zoomed video
     <AbsoluteFill style={{ overflow: 'hidden' }}>
-      {/*
-        Inner: source video dimensions, centred within the output frame.
-        left/top may be negative when output is smaller than source (e.g. portrait).
-        transform-origin defaults to 50% 50% (element centre).
-      */}
-      <div
-        style={{
-          position: 'absolute',
-          width: srcW,
-          height: srcH,
-          left: (outW - srcW) / 2,
-          top:  (outH - srcH) / 2,
-          transformOrigin: 'center center',
-          // scale THEN translate — the translate operates in scaled coordinate space,
-          // which is what the formula requires (see computeTransform).
-          transform: `scale(${scale}) translate(${tx}%, ${ty}%)`,
-        }}
-      >
-        <SegmentPlayer src={src} hookSections={hookSections} mainSections={mainSections} mainOffset={mainOffset} />
-      </div>
+      {allVideoSrcs.map(videoSrc => {
+        const dims = angleByVideoSrc.get(videoSrc) ?? { srcW, srcH };
+        const isActive = videoSrc === activeVideoSrc;
+        const { scale, tx, ty } = computeTransform(viewport, dims.srcW, dims.srcH, outW, outH);
+
+        return (
+          // Each angle layer fills the output frame; only the active one is visible.
+          // Non-active layers are still decoded by Remotion but hidden via opacity 0.
+          <AbsoluteFill
+            key={videoSrc}
+            style={{ opacity: isActive ? 1 : 0, pointerEvents: 'none' }}
+          >
+            {/*
+              Inner: source video dimensions, centred within the output frame.
+              left/top may be negative when output is smaller than source (e.g. portrait).
+              transform-origin defaults to 50% 50% (element centre).
+            */}
+            <div
+              style={{
+                position: 'absolute',
+                width: dims.srcW,
+                height: dims.srcH,
+                left: (outW - dims.srcW) / 2,
+                top:  (outH - dims.srcH) / 2,
+                transformOrigin: 'center center',
+                // scale THEN translate — the translate operates in scaled coordinate space,
+                // which is what the formula requires (see computeTransform).
+                transform: `scale(${scale}) translate(${tx}%, ${ty}%)`,
+              }}
+            >
+              <SegmentPlayer
+                src={videoSrc}
+                hookSections={hookSections}
+                mainSections={mainSections}
+                mainOffset={mainOffset}
+                muted={!isActive}
+              />
+            </div>
+          </AbsoluteFill>
+        );
+      })}
     </AbsoluteFill>
   );
 };

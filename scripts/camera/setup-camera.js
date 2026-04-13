@@ -3,15 +3,19 @@
  * Camera setup orchestrator.
  *
  * 1. Reads transcript.json → gets meta.videoStart timestamp
- * 2. Extracts a single frame from the video at that timestamp (FFmpeg)
- * 3. Runs detect-faces.py (MediaPipe) → writes detections.json
- * 4. Spawns `npm run dev` and prints the camera GUI URL
+ * 2. Extracts a single frame from each video at that timestamp (FFmpeg)
+ * 3. Runs detect-faces.py (MediaPipe) for each video → writes detections-angle{N}.json
+ * 4. Writes angles.json describing all angle configs for the camera GUI
+ * 5. Spawns `npm run dev` and prints the camera GUI URL
  *
  * Usage:
  *   node scripts/camera/setup-camera.js [--video <path>] [--python <bin>] [--transcript <path>] [--skip-detect]
+ *   node scripts/camera/setup-camera.js --videos <path1> <path2> ... [--python <bin>] [--transcript <path>] [--skip-detect]
  *
- *   --skip-detect  Skip face detection entirely. Opens the GUI with a blank canvas
- *                  so you can draw boxes manually.
+ *   --video <path>          Single video path (single-angle, legacy)
+ *   --videos <p1> <p2> ...  Multiple video paths (multi-angle). Collects all remaining args until the next flag.
+ *   --skip-detect           Skip face detection entirely. Opens the GUI with a blank canvas.
+ *   --detect-only           Run face detection but do not start the dev server.
  */
 
 import 'dotenv/config';
@@ -27,13 +31,23 @@ const cwd = process.cwd();
 
 function parseArgs() {
   const args = process.argv.slice(2);
-  const result = {};
+  const result = { videoPaths: [] };
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--video'       && args[i + 1]) result.videoPath      = args[++i];
-    if (args[i] === '--python'      && args[i + 1]) result.pythonBin      = args[++i];
-    if (args[i] === '--transcript'  && args[i + 1]) result.transcriptPath = args[++i];
-    if (args[i] === '--skip-detect')                result.skipDetect     = true;
-    if (args[i] === '--detect-only')                result.detectOnly     = true;
+    if (args[i] === '--video'      && args[i + 1]) { result.videoPath = args[++i]; }
+    else if (args[i] === '--videos') {
+      // Collect all following non-flag arguments as video paths
+      while (args[i + 1] && !args[i + 1].startsWith('--')) {
+        result.videoPaths.push(args[++i]);
+      }
+    }
+    else if (args[i] === '--python'     && args[i + 1]) { result.pythonBin      = args[++i]; }
+    else if (args[i] === '--transcript' && args[i + 1]) { result.transcriptPath = args[++i]; }
+    else if (args[i] === '--skip-detect')               { result.skipDetect     = true; }
+    else if (args[i] === '--detect-only')               { result.detectOnly     = true; }
+  }
+  // If --video was given (legacy single-angle), treat it as the only path
+  if (result.videoPath && result.videoPaths.length === 0) {
+    result.videoPaths = [result.videoPath];
   }
   return result;
 }
@@ -157,20 +171,14 @@ async function main() {
   const transcriptPath = args.transcriptPath
     || path.join(cwd, 'public', 'transcribe', 'output', 'edit', 'transcript.json');
 
-  const outputDir  = path.join(cwd, 'public', 'transcribe', 'output', 'camera');
-  const framePath  = path.join(outputDir, 'frame.jpg');
-  const detectPath = path.join(outputDir, 'detections.json');
+  const outputDir = path.join(cwd, 'public', 'transcribe', 'output', 'camera');
 
   console.log('\nCamera Setup');
   console.log('============\n');
 
-  // 1. Find video
-  const videoPath = args.videoPath || await findVideo();
-  if (!videoPath) {
-    console.error('❌ No video found. Use --video <path> or place a file in public/sync/output/ or public/transcribe/input/');
-    process.exit(1);
-  }
-  console.log(`Video:      ${videoPath}`);
+  // 1. Find video(s)
+  // CLI --videos overrides --video; fall back to transcript.meta.videoSrcs, then auto-detect.
+  let videoPaths = args.videoPaths.length > 0 ? args.videoPaths : null;
 
   // 2. Read transcript for videoStart + speaker count
   let videoStart = 0;
@@ -185,40 +193,105 @@ async function main() {
     console.log(`Transcript: ${transcriptPath}`);
     console.log(`Frame at:   ${videoStart}s (transcript.meta.videoStart)`);
     if (numSpeakers) console.log(`Speakers:   ${numSpeakers} (enforcing on face detection)`);
+
+    // Use videoSrcs from transcript if not provided via CLI
+    if (!videoPaths && transcript.meta?.videoSrcs?.length > 0) {
+      videoPaths = transcript.meta.videoSrcs.map(rel =>
+        path.join(cwd, 'public', rel.replace(/^\/+/, ''))
+      );
+    }
   } else {
     console.warn(`  ⚠ Transcript not found, using t=0s\n  (${transcriptPath})`);
   }
 
-  // 3. Extract frame
-  await fs.ensureDir(outputDir);
-  console.log(`\nExtracting frame...`);
-  await extractFrame(videoPath, videoStart, framePath);
-  console.log(`  Saved: ${framePath}`);
-
-  // 4. Detect faces (or skip for manual mode)
-  if (args.skipDetect) {
-    console.log('\nSkipping face detection (--skip-detect). Draw boxes manually in the GUI.');
-    await fs.writeJson(detectPath, [], { spaces: 2 });
-  } else {
-    console.log('\nDetecting faces (mediapipe models download on first run)...');
-    const detection = await detectFacesWithFallback({
-      pythonBin,
-      videoPath,
-      videoStart,
-      framePath,
-      numSpeakers,
-    });
-    const faces = detection.faces;
-    if (faces.length > 0) {
-      console.log(`  Best frame: t=${detection.timestamp.toFixed(2)}s`);
+  // Fall back to single auto-detected video
+  if (!videoPaths || videoPaths.length === 0) {
+    const single = await findVideo();
+    if (!single) {
+      console.error('❌ No video found. Use --video <path> or --videos <p1> <p2> ...');
+      process.exit(1);
     }
-    console.log(`  ${faces.length} face(s) detected.`);
-    await fs.writeJson(detectPath, faces, { spaces: 2 });
-    console.log(`  Saved: ${detectPath}`);
-    if (!detection.complete && faces.length === 0) {
-      console.log('  ⚠ No faces auto-detected. Continue in /camera and draw boxes manually.');
-    }
+    videoPaths = [single];
   }
+
+  const isMultiAngle = videoPaths.length > 1;
+  console.log(isMultiAngle
+    ? `Angles:     ${videoPaths.length} videos`
+    : `Video:      ${videoPaths[0]}`
+  );
+
+  await fs.ensureDir(outputDir);
+
+  // 3. Per-angle: extract frame + detect faces
+  // For single-angle keep legacy filenames (frame.jpg, detections.json).
+  // For multi-angle use frame-angle{N}.jpg and detections-angle{N}.json.
+  const angleResults = [];
+
+  for (let i = 0; i < videoPaths.length; i++) {
+    const videoPath = videoPaths[i];
+    const angleName = `angle${i + 1}`;
+    const framePath  = isMultiAngle
+      ? path.join(outputDir, `frame-${angleName}.jpg`)
+      : path.join(outputDir, 'frame.jpg');
+    const detectPath = isMultiAngle
+      ? path.join(outputDir, `detections-${angleName}.json`)
+      : path.join(outputDir, 'detections.json');
+
+    if (isMultiAngle) {
+      console.log(`\n── ${angleName}: ${path.basename(videoPath)}`);
+    }
+
+    console.log(`\nExtracting frame...`);
+    await extractFrame(videoPath, videoStart, framePath);
+    console.log(`  Saved: ${framePath}`);
+
+    if (args.skipDetect) {
+      console.log('Skipping face detection (--skip-detect). Draw boxes manually in the GUI.');
+      await fs.writeJson(detectPath, [], { spaces: 2 });
+    } else {
+      console.log('Detecting faces (mediapipe models download on first run)...');
+      const detection = await detectFacesWithFallback({
+        pythonBin,
+        videoPath,
+        videoStart,
+        framePath,
+        numSpeakers,
+      });
+      const faces = detection.faces;
+      if (faces.length > 0) {
+        console.log(`  Best frame: t=${detection.timestamp.toFixed(2)}s`);
+      }
+      console.log(`  ${faces.length} face(s) detected.`);
+      await fs.writeJson(detectPath, faces, { spaces: 2 });
+      console.log(`  Saved: ${detectPath}`);
+      if (!detection.complete && faces.length === 0) {
+        console.log('  ⚠ No faces auto-detected. Continue in /camera and draw boxes manually.');
+      }
+    }
+
+    // Store relative paths (relative to outputDir) for angles.json
+    angleResults.push({
+      angleName,
+      videoPath,
+      framePath,
+      detectPath,
+      // Path relative to /public for use in Remotion (best-effort — may not be in /public)
+      videoSrc: videoPath.includes(path.join(cwd, 'public'))
+        ? videoPath.replace(path.join(cwd, 'public') + path.sep, '').replace(/\\/g, '/')
+        : path.basename(videoPath),
+    });
+  }
+
+  // 4. Write angles.json so the camera GUI knows about all angles
+  const anglesJsonPath = path.join(outputDir, 'angles.json');
+  await fs.writeJson(anglesJsonPath, angleResults.map(a => ({
+    angleName: a.angleName,
+    videoSrc:  a.videoSrc,
+    // Paths relative to outputDir for serving via Next.js
+    frameFile:  path.relative(outputDir, a.framePath).replace(/\\/g, '/'),
+    detectFile: path.relative(outputDir, a.detectPath).replace(/\\/g, '/'),
+  })), { spaces: 2 });
+  console.log(`\n✓ Wrote ${anglesJsonPath}`);
 
   // 5. Launch Next.js dev server (skip if --detect-only)
   if (args.detectOnly) {
