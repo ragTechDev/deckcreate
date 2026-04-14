@@ -42,5 +42,6 @@ export {
 // ── Lower-third overlays (dynamic full-screen callouts) ───────────────────────
 export {
   ConceptExplainer,
-  SpeakerIntro,
+  NameTitle,
+  type NameTitleProps,
 } from './lower-thirds';

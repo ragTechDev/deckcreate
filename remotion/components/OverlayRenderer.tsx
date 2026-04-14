@@ -5,7 +5,7 @@ import type { Brand } from '../types/brand';
 import type { Section } from './SegmentPlayer';
 
 // Core / general editing overlays
-import { ConceptExplainer, SpeakerIntro } from './overlays/lower-thirds';
+import { ConceptExplainer, NameTitle } from './overlays/lower-thirds';
 
 // Keyword-triggered overlays
 import {
@@ -45,7 +45,7 @@ const COMPONENT_MAP: Record<string, React.FC<any>> = {
   EducationOverlay,
   // Lower-third overlays
   ConceptExplainer,
-  SpeakerIntro,
+  NameTitle,
 };
 
 /**

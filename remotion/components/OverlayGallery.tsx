@@ -4,7 +4,7 @@ import type { Brand } from '../types/brand';
 import { loadNunito } from '../loadFonts';
 
 import { TextOverlay, IconBadge, CodeBlock } from './overlays/core';
-import { ConceptExplainer, SpeakerIntro } from './overlays/lower-thirds';
+import { ConceptExplainer, NameTitle } from './overlays/lower-thirds';
 
 const FRAMES_PER_SLIDE = 300; // 5 seconds at 60 fps
 
@@ -63,8 +63,8 @@ const GALLERY_ENTRIES: GalleryEntry[] = [
     props: { keyPhrase: 'RAG', description: 'Retrieval Augmented Generation — grounding LLMs with real data' },
   },
 
-  // ──── SpeakerIntro ────
-  { label: 'SpeakerIntro', Component: SpeakerIntro, props: { name: 'Natasha', title: 'Software Engineer' } },
+  // ──── NameTitle ────
+  { label: 'NameTitle', Component: NameTitle, props: { name: 'Natasha', title: 'Software Engineer' } },
 ];
 
 export const GALLERY_TOTAL_FRAMES = GALLERY_ENTRIES.length * FRAMES_PER_SLIDE;
