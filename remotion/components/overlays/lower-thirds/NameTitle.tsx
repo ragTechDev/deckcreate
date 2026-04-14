@@ -3,7 +3,7 @@ import { useCurrentFrame, useVideoConfig, spring, interpolate, AbsoluteFill, sta
 import type { Brand } from '../../../types/brand';
 
 const MONO = "'SF Mono', 'Monaco', 'Cascadia Code', 'Consolas', monospace";
-const TECHYBARA = staticFile('assets/techybara/techybara-holding-laptop.png');
+const TECHYBARA = staticFile('assets/techybara/techybara-holding-mic.png');
 
 export interface NameTitleProps {
   brand: Brand;
