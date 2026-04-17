@@ -302,13 +302,16 @@ async function copyToTranscribeInput(filePath) {
 
 async function detectExistingWork() {
   const p = (...parts) => path.join(cwd, ...parts);
-  const [syncedVideo, rawTranscript, diarization, transcriptDoc, transcriptJson] = await Promise.all([
+  const [syncedVideoLegacy, syncedVideoMultiAngle, rawTranscript, diarization, transcriptDoc, transcriptJson, cameraProfiles] = await Promise.all([
     fs.pathExists(p('public', 'sync', 'output', 'synced-output.mp4')),
+    fs.pathExists(p('public', 'sync', 'output', 'synced-output-1.mp4')), // multi-angle primary
     fs.pathExists(p('public', 'transcribe', 'output', 'raw', 'transcript.raw.json')),
     fs.pathExists(p('public', 'transcribe', 'output', 'raw', 'diarization.json')),
     fs.pathExists(p('public', 'transcribe', 'output', 'edit', 'transcript.doc.txt')),
     fs.pathExists(p('public', 'transcribe', 'output', 'edit', 'transcript.json')),
+    fs.pathExists(p('public', 'transcribe', 'output', 'camera', 'camera-profiles.json')),
   ]);
+  const syncedVideo = syncedVideoLegacy || syncedVideoMultiAngle;
 
   let alignedTranscript = false;
   if (rawTranscript) {
@@ -331,6 +334,7 @@ async function detectExistingWork() {
     diarization,
     transcriptDoc,
     transcriptJson,
+    cameraProfiles,
     audioInInput,
     videoInInput,
     videoInInputPath,
@@ -353,6 +357,11 @@ async function main() {
   if (existing.transcriptDoc)  resumeStep = 3;
   if (existing.transcriptJson) resumeStep = 4;
 
+  /** When the user picks "redo a specific step", pauses after that step and asks to continue. */
+  let singleStepMode = false;
+  /** ID of the step the user is redoing — controls which blocks run and where singleStep fires. */
+  let redoStepId = null; // 'sync'|'transcribe'|'align'|'buildDoc'|'mergeDoc'|'camera'|'preview'|'remotion'
+
   if (resumeStep > 0) {
     console.log('  Found existing work from a previous session:');
     if (existing.transcriptJson) console.log('    ✓ Edits applied        — transcript.json');
@@ -360,14 +369,52 @@ async function main() {
     if (existing.alignedTranscript) console.log('    ✓ Forced alignment     — transcript.raw.json timings');
     if (existing.rawTranscript)  console.log('    ✓ Transcription done   — transcript.raw.json');
     if (existing.diarization)    console.log('    ✓ Diarization done     — diarization.json');
+    if (existing.cameraProfiles) console.log('    ✓ Camera profiles      — camera-profiles.json');
     if (existing.audioInInput)   console.log('    ✓ Audio ready          — transcribe/input/');
     if (existing.syncedVideo)    console.log('    ✓ Sync done            — synced-output.mp4');
 
-    const labels = ['', 'Transcription', 'Build transcript doc', 'Edit & apply doc', 'Camera / preview / render'];
-    console.log(`\n  Next step: ${labels[resumeStep]}`);
+    const nextStepLabels = ['', 'Transcription', 'Build transcript doc', 'Edit & apply doc', 'Camera / preview / render'];
+    console.log(`\n  Next step: ${nextStepLabels[resumeStep]}`);
+    if (resumeStep === 4 && !existing.cameraProfiles) {
+      console.log('  (Camera profiles missing — will prompt for camera setup after resume)');
+    }
 
-    const resume = await confirm('  Resume from here?');
-    if (!resume) resumeStep = 0;
+    console.log('\n  Options:');
+    console.log(`  1. Resume from next step (${nextStepLabels[resumeStep]})`);
+    console.log('  2. Jump to a specific step');
+    console.log('  3. Start fresh (redo everything)');
+    const menuChoice = (await ask('  > [1] ')).trim() || '1';
+
+    if (menuChoice === '3') {
+      resumeStep = 0;
+    } else if (menuChoice === '2') {
+      const stepDefs = [
+        { id: 'sync',       label: 'Sync audio + video',           done: existing.syncedVideo,        resumeAt: 0 },
+        { id: 'transcribe', label: 'Transcribe + Diarize',         done: existing.rawTranscript,      resumeAt: 1 },
+        { id: 'align',      label: 'Forced alignment',             done: existing.alignedTranscript,  resumeAt: 1 },
+        { id: 'buildDoc',   label: 'Build editable doc',           done: existing.transcriptDoc,      resumeAt: 2 },
+        { id: 'mergeDoc',   label: 'Merge doc → transcript.json',  done: existing.transcriptJson,     resumeAt: 3 },
+        { id: 'camera',     label: 'Camera setup',                 done: existing.cameraProfiles,     resumeAt: 4 },
+        { id: 'preview',    label: 'Cut preview (MP4)',            done: false,                       resumeAt: 4 },
+        { id: 'remotion',   label: 'Launch Remotion studio',       done: false,                       resumeAt: 4 },
+      ];
+      console.log('\n  Which step would you like to run?');
+      stepDefs.forEach((s, i) => {
+        console.log(`  ${i + 1}. ${s.done ? '✓' : '○'} ${s.label}`);
+      });
+      const raw = (await ask('  > ')).trim();
+      const stepIdx = parseInt(raw) - 1;
+      if (stepIdx >= 0 && stepIdx < stepDefs.length) {
+        const target = stepDefs[stepIdx];
+        redoStepId = target.id;
+        singleStepMode = true;
+        resumeStep = target.resumeAt;
+        console.log(`\n  → Will run: ${target.label}`);
+      } else {
+        console.log('  Invalid choice — resuming from next step.');
+      }
+    }
+    // menuChoice '1' or default: keep resumeStep unchanged (resume from next step)
   }
 
   // ── Mode and speaker setup ─────────────────────────────────────────────────
@@ -409,6 +456,24 @@ async function main() {
     else mode = 4;
     multiSpeaker = existing.diarization;
     numSpeakers = multiSpeaker ? 2 : 1; // exact count only matters for a fresh diarize run
+
+    // Check transcript for multi-angle videoSrcs to properly infer mode
+    if (mode === 4 && existing.transcriptJson) {
+      try {
+        const transcript = await fs.readJson(path.join(cwd, 'public', 'transcribe', 'output', 'edit', 'transcript.json'));
+        const hasVideoSrcs = transcript?.meta?.videoSrcs && transcript.meta.videoSrcs.length > 0;
+        const hasVideoSrc = transcript?.meta?.videoSrc;
+        if (hasVideoSrcs || hasVideoSrc) {
+          mode = 1; // Has video source(s), treat as synced video mode
+          if (hasVideoSrcs && transcript.meta.videoSrcs.length > 1) {
+            numAngles = transcript.meta.videoSrcs.length;
+            videoSrcsForRemotion = transcript.meta.videoSrcs;
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
 
     if (resumeStep < 2 && !existing.diarization) {
       // Still need to transcribe/diarize — ask speaker count
@@ -455,7 +520,7 @@ async function main() {
     if (vf) videoSrcForRemotion = `transcribe/input/${path.basename(vf)}`;
   }
 
-  // ── STEP: Sync (mode 1 only) ───────────────────────────────────────────────
+  // ── STEP: Sync (mode 1 only) — also runs prepare audio when resumeStep=0 ──
   let videoForExtract = videoFile;
   const syncOutputDir = path.join(cwd, 'public', 'sync', 'output');
 
@@ -509,6 +574,17 @@ async function main() {
     }
   }
 
+  // Redo sync: stop here (sync + prepare audio both done), then optionally continue
+  if (singleStepMode && redoStepId === 'sync') {
+    singleStepMode = false;
+    redoStepId = null;
+    if (!await confirm('  Continue with the next steps?', false)) {
+      console.log('\n  ✓ Done!\n');
+      rl.close();
+      return;
+    }
+  }
+
   // ── STEP: Choose Whisper model ────────────────────────────────────────────
   const rawTranscriptPath = path.join(cwd, 'public', 'transcribe', 'output', 'raw', 'transcript.raw.json');
   const diarizationPath   = path.join(cwd, 'public', 'transcribe', 'output', 'raw', 'diarization.json');
@@ -516,7 +592,7 @@ async function main() {
   const transcriptPath    = path.join(cwd, 'public', 'transcribe', 'output', 'edit', 'transcript.json');
 
   let whisperModel = 'medium.en';
-  if (resumeStep < 2) {
+  if (resumeStep < 2 && (!redoStepId || redoStepId === 'transcribe')) {
     console.log('\n  ── Whisper model ─────────────────────────────────────');
     console.log('  Choose a transcription model (for a ~36 min recording on CPU):\n');
     console.log('  1. tiny.en    ~5 min       Lower accuracy');
@@ -532,7 +608,8 @@ async function main() {
   const transcribeArgs = ['run', 'transcribe', '--', '--model', whisperModel];
 
   // ── STEP: Transcribe (+ diarize in parallel if multi-speaker) ─────────────
-  if (resumeStep < 2 && multiSpeaker) {
+  const shouldTranscribe = resumeStep < 2 && (!redoStepId || redoStepId === 'transcribe');
+  if (shouldTranscribe && multiSpeaker) {
     const diarizationAlreadyDone = existing.diarization;
 
     if (diarizationAlreadyDone) {
@@ -625,13 +702,27 @@ async function main() {
       console.log('  Re-run wizard from the transcription step when ready.\n');
     }
     } // end else (diarization not already done)
-  } else if (resumeStep < 2) {
+  } else if (shouldTranscribe) {
     console.log('\n  ── Transcribe ────────────────────────────────────────');
     await runStep('npm run transcribe', 'npm', transcribeArgs, rawTranscriptPath);
   }
 
+  if (singleStepMode && redoStepId === 'transcribe') {
+    singleStepMode = false;
+    redoStepId = null;
+    if (!await confirm('  Continue with the next steps?', false)) {
+      console.log('\n  ✓ Done!\n');
+      rl.close();
+      return;
+    }
+  }
+
   // ── STEP: Forced alignment (after transcribe, before assignment/editing) ──
-  const shouldRunAlignment = resumeStep < 3 && !(resumeStep >= 2 && existing.alignedTranscript);
+  const shouldRunAlignment = (() => {
+    if (redoStepId === 'align') return true;    // force re-run even if already aligned
+    if (redoStepId) return false;               // other redo targets: skip alignment
+    return resumeStep < 3 && !(resumeStep >= 2 && existing.alignedTranscript);
+  })();
   if (shouldRunAlignment) {
     console.log('\n  ── Forced alignment (WhisperX, CPU-local) ────────────');
     let alignArgs = ['run', 'align'];
@@ -684,8 +775,19 @@ async function main() {
     console.log('  (Already applied — skipping)');
   }
 
+  if (singleStepMode && redoStepId === 'align') {
+    singleStepMode = false;
+    redoStepId = null;
+    if (!await confirm('  Continue with the next steps?', false)) {
+      console.log('\n  ✓ Done!\n');
+      rl.close();
+      return;
+    }
+  }
+
   // ── STEP: Caption alignment test (optional) ──────────────────────────────
   let timestampOffset = 0;
+  if (!redoStepId) {
   console.log('');
   const doAlignTest = await confirm('  Check caption alignment? (recommended for first recording)', false);
   if (doAlignTest) {
@@ -729,9 +831,11 @@ async function main() {
       }
     }
   }
+  } // end if (!redoStepId) — caption alignment test
 
   // ── STEP: Assign speakers (multi-speaker only) ────────────────────────────
-  if (resumeStep < 3 && multiSpeaker) {
+  const shouldBuildDoc = resumeStep < 3 && (!redoStepId || redoStepId === 'buildDoc');
+  if (shouldBuildDoc && multiSpeaker) {
     let speakersOk = false;
     while (!speakersOk) {
       console.log('\n  ── Assign speakers ───────────────────────────────────');
@@ -769,7 +873,7 @@ async function main() {
 
       speakersOk = await confirm('\n  Happy with the speaker assignments?');
     }
-  } else if (resumeStep < 3) {
+  } else if (shouldBuildDoc) {
     // Single speaker: just generate the doc
     const singleExtraFlags = [
       ...(timestampOffset > 0 ? ['--timestamp-offset', String(timestampOffset)] : []),
@@ -781,8 +885,18 @@ async function main() {
     await runStep('npm run edit-transcript', 'npm', ['run', 'edit-transcript', ...offsetArgs], docPath);
   }
 
+  if (singleStepMode && redoStepId === 'buildDoc') {
+    singleStepMode = false;
+    redoStepId = null;
+    if (!await confirm('  Continue with the next steps?', false)) {
+      console.log('\n  ✓ Done!\n');
+      rl.close();
+      return;
+    }
+  }
+
   // ── STEP: Edit transcript ─────────────────────────────────────────────────
-  if (resumeStep < 4) {
+  if ((!redoStepId && resumeStep < 4) || redoStepId === 'mergeDoc') {
     console.log('\n  ── Edit transcript ───────────────────────────────────');
     console.log(`  Open and edit: ${docPath}`);
     console.log('  (See instructions at the top — cut words, fix text, mark segments CUT.)');
@@ -811,106 +925,164 @@ async function main() {
     }
   }
 
+  if (singleStepMode && redoStepId === 'mergeDoc') {
+    singleStepMode = false;
+    redoStepId = null;
+    if (!await confirm('  Continue with the next steps?', false)) {
+      console.log('\n  ✓ Done!\n');
+      rl.close();
+      return;
+    }
+  }
+
   // ── STEP: Camera setup (optional — skip for audio-only) ───────────────────
-  if (mode !== 4) {
-    console.log('');
-    const doCamera = await confirm('  Set up speaker closeup cuts? (camera)', false);
-    if (doCamera) {
-      console.log('\n  ── Camera setup ──────────────────────────────────────');
-      console.log('  Detecting faces in video frame(s)...');
-      // Build the list of video paths to run face detection on.
-      // For multi-angle, pass all synced output files; for single-angle, omit (auto-detected).
-      const cameraDetectArgs = ['scripts/camera/setup-camera.js', '--detect-only'];
-      if (videoSrcsForRemotion && videoSrcsForRemotion.length > 1) {
-        const absPaths = videoSrcsForRemotion.map(rel => path.join(cwd, 'public', rel));
-        cameraDetectArgs.push('--videos', ...absPaths);
-      }
-      try {
-        await spawnStep('node', cameraDetectArgs);
-      } catch (err) {
-        console.warn(`  ⚠ Face detection failed: ${err.message}`);
-        console.log('  You can draw boxes manually in the GUI.');
-      }
+  async function runCameraSetup() {
+    console.log('\n  ── Camera setup ──────────────────────────────────────');
+    console.log('  Detecting faces in video frame(s)...');
+    // Build the list of video paths to run face detection on.
+    // For multi-angle, pass all synced output files; for single-angle, omit (auto-detected).
+    const cameraDetectArgs = ['scripts/camera/setup-camera.js', '--detect-only'];
+    if (videoSrcsForRemotion && videoSrcsForRemotion.length > 1) {
+      const absPaths = videoSrcsForRemotion.map(rel => path.join(cwd, 'public', rel));
+      cameraDetectArgs.push('--videos', ...absPaths);
+    }
+    try {
+      await spawnStep('node', cameraDetectArgs);
+    } catch (err) {
+      console.warn(`  ⚠ Face detection failed: ${err.message}`);
+      console.log('  You can draw boxes manually in the GUI.');
+    }
 
-      // Spawn dev server and capture logs so startup failures are visible.
-      let devLog = '';
-      let devExitedCode = null;
-      const devServer = spawn('npm', ['run', 'dev', '--', '--hostname', '0.0.0.0', '--port', '3000'], {
-        cwd,
-        shell: process.platform === 'win32',
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-      const appendDevLog = (chunk) => {
-        devLog += chunk.toString();
-        if (devLog.length > 6000) devLog = devLog.slice(-6000);
-      };
-      devServer.stdout.on('data', appendDevLog);
-      devServer.stderr.on('data', appendDevLog);
-      devServer.on('close', code => { devExitedCode = code; });
+    // Spawn dev server and capture logs so startup failures are visible.
+    let devLog = '';
+    let devExitedCode = null;
+    const devServer = spawn('npm', ['run', 'dev', '--', '--hostname', '0.0.0.0', '--port', '3000'], {
+      cwd,
+      shell: process.platform === 'win32',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const appendDevLog = (chunk) => {
+      devLog += chunk.toString();
+      if (devLog.length > 6000) devLog = devLog.slice(-6000);
+    };
+    devServer.stdout.on('data', appendDevLog);
+    devServer.stderr.on('data', appendDevLog);
+    devServer.on('close', code => { devExitedCode = code; });
 
-      const cameraUrl = 'http://127.0.0.1:3000/camera';
-      const serverReady = await waitForHttp(cameraUrl, 90000, 700);
+    const cameraUrl = 'http://127.0.0.1:3000/camera';
+    const serverReady = await waitForHttp(cameraUrl, 90000, 700);
 
-      console.log('\n  → Open http://localhost:3000/camera in your browser');
-      if (isDockerEnv()) {
-        console.log('  (Docker) Ensure you started wizard with: docker-compose run --rm --service-ports wizard');
-      }
-      if (!serverReady) {
-        if (devExitedCode !== null) {
-          console.log(`  ✗ Next.js dev server exited early (code ${devExitedCode}).`);
-          if (devLog.trim()) {
-            console.log('  Last server log lines:');
-            console.log('  ─────────────────────────────────────────────────────');
-            console.log(devLog.split('\n').slice(-12).map(l => `  ${l}`).join('\n'));
-            console.log('  ─────────────────────────────────────────────────────');
-          }
-        } else {
-          console.log('  ⚠ Server is running but /camera is still unreachable.');
-          console.log('  If it does not load, confirm port 3000 is free and retry with --service-ports.');
+    console.log('\n  → Open http://localhost:3000/camera in your browser');
+    if (isDockerEnv()) {
+      console.log('  (Docker) Ensure you started wizard with: docker-compose run --rm --service-ports wizard');
+    }
+    if (!serverReady) {
+      if (devExitedCode !== null) {
+        console.log(`  ✗ Next.js dev server exited early (code ${devExitedCode}).`);
+        if (devLog.trim()) {
+          console.log('  Last server log lines:');
+          console.log('  ─────────────────────────────────────────────────────');
+          console.log(devLog.split('\n').slice(-12).map(l => `  ${l}`).join('\n'));
+          console.log('  ─────────────────────────────────────────────────────');
         }
-      }
-      console.log('  Assign faces to speakers, then click Save profiles.\n');
-      await ask('  Press Enter when done saving...');
-
-      // Best-effort kill
-      try {
-        if (process.platform === 'win32') {
-          spawn('taskkill', ['/pid', String(devServer.pid), '/f', '/t'], {
-            shell: true, stdio: 'ignore',
-          });
-        } else {
-          process.kill(devServer.pid, 'SIGTERM');
-        }
-      } catch {
-        console.log('  (Stop the dev server manually if it is still running)');
-      }
-
-      const profilePath = path.join(cwd, 'public', 'transcribe', 'output', 'camera', 'camera-profiles.json');
-      if (await fs.pathExists(profilePath)) {
-        console.log(`  ✓ camera-profiles.json saved`);
       } else {
-        console.log('  ⚠ camera-profiles.json not found — camera cuts will not be applied in Remotion');
+        console.log('  ⚠ Server is running but /camera is still unreachable.');
+        console.log('  If it does not load, confirm port 3000 is free and retry with --service-ports.');
+      }
+    }
+    console.log('  Assign faces to speakers, then click Save profiles.\n');
+    await ask('  Press Enter when done saving...');
+
+    // Best-effort kill
+    try {
+      if (process.platform === 'win32') {
+        spawn('taskkill', ['/pid', String(devServer.pid), '/f', '/t'], {
+          shell: true, stdio: 'ignore',
+        });
+      } else {
+        process.kill(devServer.pid, 'SIGTERM');
+      }
+    } catch {
+      console.log('  (Stop the dev server manually if it is still running)');
+    }
+
+    const profilePath = path.join(cwd, 'public', 'transcribe', 'output', 'camera', 'camera-profiles.json');
+    if (await fs.pathExists(profilePath)) {
+      console.log(`  ✓ camera-profiles.json saved`);
+    } else {
+      console.log('  ⚠ camera-profiles.json not found — camera cuts will not be applied in Remotion');
+    }
+  }
+
+  if (mode !== 4) {
+    if (redoStepId === 'camera') {
+      // Direct redo: run camera setup immediately without confirm prompt
+      await runCameraSetup();
+      if (singleStepMode) {
+        singleStepMode = false;
+        redoStepId = null;
+        if (!await confirm('  Continue with the next steps?', false)) {
+          console.log('\n  ✓ Done!\n');
+          rl.close();
+          return;
+        }
+      }
+    } else if (resumeStep < 4) {
+      // Fresh run: ask if they want camera setup (defaults to false)
+      console.log('');
+      const doCamera = await confirm('  Set up speaker closeup cuts? (camera)', false);
+      if (doCamera) {
+        await runCameraSetup();
+      }
+    } else if (resumeStep === 4 && !existing.cameraProfiles) {
+      // Resume at step 4: prompt if camera profiles are missing
+      console.log('');
+      const doCamera = await confirm('  Camera profiles not found. Set up speaker closeup cuts now?', true);
+      if (doCamera) {
+        await runCameraSetup();
+      } else {
+        console.log('  Skipping camera setup. Run wizard again to set up camera cuts later.');
       }
     }
   }
 
   // ── STEP: Cut preview (optional — skip for audio-only) ───────────────────
   if (mode !== 4) {
-    console.log('');
-    const doPreview = await confirm('  Generate flat MP4 preview?', false);
-    if (doPreview) {
-      const previewPath = path.join(cwd, 'public', 'transcribe', 'output', 'edit', 'preview-cut.mp4');
+    const previewPath = path.join(cwd, 'public', 'transcribe', 'output', 'edit', 'preview-cut.mp4');
+    if (redoStepId === 'preview') {
+      // Direct redo: run cut preview immediately
       await runStep('npm run cut-preview', 'npm', ['run', 'cut-preview'], previewPath);
+      if (singleStepMode) {
+        singleStepMode = false;
+        redoStepId = null;
+        if (!await confirm('  Continue with the next steps?', false)) {
+          console.log('\n  ✓ Done!\n');
+          rl.close();
+          return;
+        }
+      }
+    } else if (!redoStepId) {
+      console.log('');
+      const doPreview = await confirm('  Generate flat MP4 preview?', false);
+      if (doPreview) {
+        await runStep('npm run cut-preview', 'npm', ['run', 'cut-preview'], previewPath);
+      }
     }
   }
 
   // ── STEP: Remotion (optional — skip for audio-only) ──────────────────────
   if (mode !== 4) {
-    console.log('');
-    const doRemotion = await confirm('  Launch Remotion studio?', false);
-    if (doRemotion) {
+    if (redoStepId === 'remotion') {
+      // Direct redo: launch Remotion immediately
       console.log('\n  Starting Remotion...\n');
       await spawnStep('npm', ['run', 'remotion']);
+    } else if (!redoStepId) {
+      console.log('');
+      const doRemotion = await confirm('  Launch Remotion studio?', false);
+      if (doRemotion) {
+        console.log('\n  Starting Remotion...\n');
+        await spawnStep('npm', ['run', 'remotion']);
+      }
     }
   }
 

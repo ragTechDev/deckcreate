@@ -17,6 +17,18 @@ export type AngleConfig = {
   sourceHeight: number;
   /** Per-angle wide-shot viewport. Falls back to CameraProfiles.wideViewport when absent. */
   wideViewport?: CropViewport;
+  /**
+   * Seconds to add to every source-frame position for this angle.
+   * Use this to correct sync drift when the two video files are not perfectly
+   * aligned after the sync step.
+   *
+   * Positive → seek later into the file (video content is behind the transcript).
+   * Negative → seek earlier (video content is ahead of the transcript).
+   *
+   * Example: if angle2 replays content just before each cut, it is behind — try
+   * increasing videoOffset by small steps (e.g. 0.1 s) until cuts line up.
+   */
+  videoOffset?: number;
 };
 
 export type SpeakerProfile = {

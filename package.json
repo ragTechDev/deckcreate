@@ -29,6 +29,7 @@
     "vtt-to-srt": "node scripts/shared/vtt-to-srt.js",
     "remotion": "npx remotion studio",
     "wizard": "node scripts/wizard.js",
+    "wizard:docker": "docker compose run --rm --service-ports wizard",
     "prepare": "husky || true"
   },
   "dependencies": {

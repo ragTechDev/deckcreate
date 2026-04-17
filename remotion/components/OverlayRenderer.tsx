@@ -42,6 +42,7 @@ const COMPONENT_MAP: Record<string, React.FC<any>> = {
   // Lower-third overlays
   ConceptExplainer,
   SpeakerIntro,
+  LowerThird: SpeakerIntro,
 };
 
 /**

@@ -293,6 +293,22 @@ const SectionGroupPlayer: React.FC<{
         delayRenderTimeoutInMilliseconds={120000}
         volume={muted ? 0 : effectiveVolume}
         style={{ opacity: groupFade }}
+        onError={(err) => {
+          // eslint-disable-next-line no-console
+          console.error('[OffthreadVideo] Playback error:', err);
+          // Remotion error objects have errorCode for media errors
+          const errorCode = (err as { errorCode?: number }).errorCode;
+          if (errorCode === 4) {
+            // eslint-disable-next-line no-console
+            console.error(
+              `[OffthreadVideo] MEDIA_ERR_SRC_NOT_SUPPORTED for "${src}". ` +
+              'This may be due:\n' +
+              '1. Video file >2GB (Chrome limit) - try re-encoding with lower bitrate\n' +
+              '2. Unsupported codec (ensure H.264, not H.265/HEVC)\n' +
+              '3. Corrupted file - check source video integrity'
+            );
+          }
+        }}
       />
       {debugTiming && (
         <div

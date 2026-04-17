@@ -1,8 +1,17 @@
 import React, { useMemo } from 'react';
-import { AbsoluteFill, useCurrentFrame, useVideoConfig } from 'remotion';
+import { AbsoluteFill, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
 import { SegmentPlayer, getEffectiveDuration, Section } from './SegmentPlayer';
 import type { Segment } from '../types/transcript';
 import type { CameraProfiles, CameraShot, CropViewport } from '../types/camera';
+
+function resolveVideoSrc(videoSrc: string): string {
+  // Already resolved paths (from staticFile or URLs) don't need processing
+  if (videoSrc.startsWith('/static-') || videoSrc.startsWith('http')) {
+    return videoSrc;
+  }
+  // Relative paths need staticFile() to resolve to the hashed static URL
+  return staticFile(videoSrc);
+}
 
 /**
  * Maps a source-video time (seconds) to an output frame index within the main
@@ -412,42 +421,75 @@ export const CameraPlayer: React.FC<Props> = ({ src, hookSections, mainSections,
   }, [frame, shots]);
 
   // Active video source for this frame (undefined → primary src)
-  const activeVideoSrc = currentShot?.videoSrc ?? src;
+  // Resolve it so comparison with resolved paths in allVideoSrcs works correctly
+  const activeVideoSrc = resolveVideoSrc(currentShot?.videoSrc ?? src);
   const viewport = currentShot?.viewport ?? profiles.wideViewport;
 
   // Collect every unique video source referenced across all shots (always includes primary)
+  // Resolve all paths to ensure deduplication works (primary src is resolved, angle paths are relative)
   const allVideoSrcs = useMemo(() => {
-    const srcs = new Set([src]);
+    const srcs = new Map<string, string>(); // resolved -> resolved
+    srcs.set(src, src); // primary is already resolved
     for (const shot of shots) {
-      if (shot.videoSrc) srcs.add(shot.videoSrc);
+      if (shot.videoSrc) {
+        const resolved = resolveVideoSrc(shot.videoSrc);
+        srcs.set(resolved, resolved);
+      }
     }
-    return [...srcs];
+    return [...srcs.values()];
   }, [shots, src]);
 
-  // Map each video src to its source dimensions
+  // Map each video src to its source dimensions (use resolved paths as keys)
   const angleByVideoSrc = useMemo(() => {
     const map = new Map<string, { srcW: number; srcH: number }>();
-    map.set(src, { srcW, srcH });
+    map.set(src, { srcW, srcH }); // primary is already resolved
     for (const angle of Object.values(profiles.angles ?? {})) {
-      map.set(angle.videoSrc, { srcW: angle.sourceWidth, srcH: angle.sourceHeight });
+      const resolved = resolveVideoSrc(angle.videoSrc);
+      map.set(resolved, { srcW: angle.sourceWidth, srcH: angle.sourceHeight });
     }
     return map;
   }, [src, srcW, srcH, profiles.angles]);
 
+  // Per-angle sections with videoOffset applied (in frames).
+  // videoOffset > 0  → angle file is behind transcript → seek later into the file.
+  // videoOffset < 0  → angle file is ahead of transcript → seek earlier.
+  // The primary src always uses the unmodified sections.
+  const sectionsByVideoSrc = useMemo(() => {
+    const map = new Map<string, { hook: typeof hookSections; main: typeof mainSections }>();
+    map.set(src, { hook: hookSections, main: mainSections });
+    for (const angle of Object.values(profiles.angles ?? {})) {
+      const resolved = resolveVideoSrc(angle.videoSrc);
+      const offsetFrames = Math.round((angle.videoOffset ?? 0) * fps);
+      if (offsetFrames === 0) {
+        map.set(resolved, { hook: hookSections, main: mainSections });
+      } else {
+        map.set(resolved, {
+          hook: hookSections.map(s => ({ trimBefore: s.trimBefore + offsetFrames, trimAfter: s.trimAfter + offsetFrames })),
+          main: mainSections.map(s => ({ trimBefore: s.trimBefore + offsetFrames, trimAfter: s.trimAfter + offsetFrames })),
+        });
+      }
+    }
+    return map;
+  }, [src, hookSections, mainSections, profiles.angles, fps]);
+
   return (
     // Outer: fills composition output dimensions, clips the zoomed video
-    <AbsoluteFill style={{ overflow: 'hidden' }}>
+    <AbsoluteFill style={{ overflow: 'hidden', isolation: 'isolate' }}>
       {allVideoSrcs.map(videoSrc => {
         const dims = angleByVideoSrc.get(videoSrc) ?? { srcW, srcH };
         const isActive = videoSrc === activeVideoSrc;
         const { scale, tx, ty } = computeTransform(viewport, dims.srcW, dims.srcH, outW, outH);
+        const angleSections = sectionsByVideoSrc.get(videoSrc) ?? { hook: hookSections, main: mainSections };
 
         return (
-          // Each angle layer fills the output frame; only the active one is visible.
-          // Non-active layers are still decoded by Remotion but hidden via opacity 0.
+          // Each angle layer fills the output frame; the active one sits on top via
+          // zIndex rather than opacity:0. This keeps all layers at opacity:1 so the
+          // browser never throttles/pauses their video decode pipeline — opacity:0
+          // causes browsers to suspend decode, leaving the layer's currentTime stale
+          // and producing a content repeat when it becomes active.
           <AbsoluteFill
             key={videoSrc}
-            style={{ opacity: isActive ? 1 : 0, pointerEvents: 'none' }}
+            style={{ zIndex: isActive ? 1 : 0, pointerEvents: 'none' }}
           >
             {/*
               Inner: source video dimensions, centred within the output frame.
@@ -468,9 +510,9 @@ export const CameraPlayer: React.FC<Props> = ({ src, hookSections, mainSections,
               }}
             >
               <SegmentPlayer
-                src={videoSrc}
-                hookSections={hookSections}
-                mainSections={mainSections}
+                src={resolveVideoSrc(videoSrc)}
+                hookSections={angleSections.hook}
+                mainSections={angleSections.main}
                 mainOffset={mainOffset}
                 muted={!isActive}
               />

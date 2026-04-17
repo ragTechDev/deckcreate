@@ -321,7 +321,8 @@ class AudioSyncer {
       // must seek into the middle of the file for hook clips; without nearby
       // keyframes it snaps to the preceding one and plays from there, causing
       // the hook to start many seconds before the intended frame.
-      '-c:v', 'libx264', '-crf', '18', '-preset', 'fast',
+      '-c:v', 'libx264', '-crf', '23', '-preset', 'fast',
+      '-pix_fmt', 'yuv420p',   // force 8-bit; source may be 10-bit (High10), which Chrome rejects
       '-g', '60', '-keyint_min', '60', '-sc_threshold', '0',
       '-c:a', 'aac', '-ar', '48000', '-b:a', '192k',
       '-movflags', '+faststart',
@@ -353,23 +354,70 @@ class AudioSyncer {
 
   // ─── Orchestration ───────────────────────────────────────────────────────────
 
-  async sync() {
-    console.log('Step 1/5: Extracting audio from video (may take a while for large files)...');
+  /**
+   * Phase 1 of sync: extract audio from this video and compute its lag against
+   * the external audio track.  Does NOT write any output files.
+   *
+   * @returns {{ lagSeconds: number, snr: number, isReliable: boolean }}
+   */
+  async computeLag() {
+    console.log('  Step A: Extracting audio from video (may take a while for large files)...');
     const videoWav = await this.extractVideoAudio();
 
-    console.log('Step 2/5: Converting audio file to WAV...');
+    console.log('  Step B: Converting audio file to WAV...');
     const audioWav = await this.convertAudioToWav();
 
-    console.log('Step 3/5: Loading waveform data...');
+    console.log('  Step C: Loading waveform data...');
     const videoSamples = this.loadWavSamples(videoWav);
     const audioSamples = this.loadWavSamples(audioWav);
-    console.log(`  Video audio:    ${(videoSamples.length / this.sampleRate).toFixed(1)}s (${videoSamples.length.toLocaleString()} samples)`);
-    console.log(`  External audio: ${(audioSamples.length / this.sampleRate).toFixed(1)}s (${audioSamples.length.toLocaleString()} samples)`);
+    console.log(`    Video audio:    ${(videoSamples.length / this.sampleRate).toFixed(1)}s (${videoSamples.length.toLocaleString()} samples)`);
+    console.log(`    External audio: ${(audioSamples.length / this.sampleRate).toFixed(1)}s (${audioSamples.length.toLocaleString()} samples)`);
 
-    console.log('Step 4/5: Computing cross-correlation via FFT...');
+    console.log('  Step D: Computing cross-correlation via FFT...');
     const correlation = this.computeCrossCorrelation(videoSamples, audioSamples);
     const lagSeconds = this.findBestLag(correlation, videoSamples.length);
     const { snr, isReliable } = this.validatePeak(correlation, lagSeconds);
+
+    return { lagSeconds, snr, isReliable };
+  }
+
+  /**
+   * Phase 2 of sync: measure loudness and render the output video (and
+   * optionally a standalone processed audio WAV) using pre-computed trim points.
+   *
+   * @param {{ videoStart: number, audioStart: number, duration: number }} trimPoints
+   * @param {boolean} produceAudioFile  When true, also writes a .wav alongside the video.
+   */
+  async produceOutput(trimPoints, produceAudioFile = true) {
+    const audioChannels = await getAudioChannels(this.audioPath);
+    const isStereo = audioChannels >= 2;
+    if (isStereo) console.log(`  Input audio has ${audioChannels} channels — downmixing to mono.`);
+    const baseFilter = this.buildBaseFilterChain(isStereo);
+
+    console.log('  Measuring loudness for video output (-1 dBFS TP)...');
+    const videoStats = await this.measureLoudness(trimPoints.audioStart, trimPoints.duration, baseFilter, -16, -1);
+    console.log(`  Video audio measured: ${videoStats.input_i} LUFS integrated, ${videoStats.input_tp} dBTP`);
+
+    console.log('  Rendering video output...');
+    await this.runVideoOutput(trimPoints, baseFilter, videoStats);
+    console.log(`  Video: ${this.outputPath}`);
+
+    if (produceAudioFile) {
+      console.log('  Measuring loudness for audio output (-14 LUFS)...');
+      const audioStats = await this.measureLoudness(trimPoints.audioStart, trimPoints.duration, baseFilter, -14, -1);
+      const audioTP = parseFloat(audioStats.input_i) > -14 ? -2 : -1;
+      console.log(`  Audio measured: ${audioStats.input_i} LUFS integrated, ${audioStats.input_tp} dBTP -> using TP=${audioTP} dB`);
+
+      const audioOutputPath = this.outputPath.replace(/\.[^.]+$/, '.wav');
+      console.log('  Rendering audio output...');
+      await this.runAudioOutput(trimPoints, baseFilter, audioStats, audioOutputPath, audioTP);
+      console.log(`  Audio: ${audioOutputPath}`);
+    }
+  }
+
+  async sync() {
+    console.log('Step 1/2: Computing lag...');
+    const { lagSeconds, snr, isReliable } = await this.computeLag();
 
     console.log(`  Best lag:   ${lagSeconds.toFixed(3)}s  (SNR: ${snr.toFixed(1)}${isReliable ? '' : ' — LOW CONFIDENCE, verify output manually'})`);
     if (lagSeconds >= 0) {
@@ -383,71 +431,124 @@ class AudioSyncer {
     console.log(`  Audio start:     ${trimPoints.audioStart.toFixed(3)}s`);
     console.log(`  Output duration: ${trimPoints.duration.toFixed(3)}s`);
 
-    console.log('Step 5/5: Processing audio and producing outputs...');
-    const audioChannels = await getAudioChannels(this.audioPath);
-    const isStereo = audioChannels >= 2;
-    if (isStereo) console.log(`  Input audio has ${audioChannels} channels — downmixing to mono.`);
-    const baseFilter = this.buildBaseFilterChain(isStereo);
-
-    // Video: iZotope advice — normalise max peaks to -1 dBFS
-    console.log('  Measuring loudness for video output (-1 dBFS TP)...');
-    const videoStats = await this.measureLoudness(trimPoints.audioStart, trimPoints.duration, baseFilter, -16, -1);
-    console.log(`  Video audio measured: ${videoStats.input_i} LUFS integrated, ${videoStats.input_tp} dBTP`);
-
-    // Audio: Spotify advice — -14 LUFS integrated; TP -1 if source <= -14 LUFS, else TP -2
-    console.log('  Measuring loudness for audio output (-14 LUFS)...');
-    const audioStats = await this.measureLoudness(trimPoints.audioStart, trimPoints.duration, baseFilter, -14, -1);
-    const audioTP = parseFloat(audioStats.input_i) > -14 ? -2 : -1;
-    console.log(`  Audio measured:       ${audioStats.input_i} LUFS integrated, ${audioStats.input_tp} dBTP -> using TP=${audioTP} dB`);
-
-    console.log('  Rendering video output...');
-    await this.runVideoOutput(trimPoints, baseFilter, videoStats);
-    console.log(`  Video: ${this.outputPath}`);
-
-    const audioOutputPath = this.outputPath.replace(/\.[^.]+$/, '.wav');
-    console.log('  Rendering audio output...');
-    await this.runAudioOutput(trimPoints, baseFilter, audioStats, audioOutputPath, audioTP);
-    console.log(`  Audio: ${audioOutputPath}`);
+    console.log('Step 2/2: Processing audio and producing outputs...');
+    await this.produceOutput(trimPoints, true);
 
     console.log('Done.');
   }
-}
 
   /**
-   * Sync multiple video angles to the same audio track.
+   * Sync multiple video angles to the same audio track so that all output files
+   * are anchored to the exact same moment in the audio timeline.
    *
-   * Each video is synced independently against `audioPath`. Output files are
-   * written as `synced-output-1.mp4`, `synced-output-2.mp4`, etc. in `outputDir`.
+   * The bug with the naive "sync each video independently" approach:
+   *   - If angle-1's camera started BEFORE the audio (lag > 0): output starts at
+   *     audio time 0.
+   *   - If angle-2's camera started AFTER the audio (lag < 0): output starts at
+   *     audio time |lag|.
+   *   → The two outputs are misaligned by |lag| seconds.
+   *
+   * Fix — two-pass approach:
+   *   Pass 1  Compute the lag of every angle against the shared audio.
+   *   Pass 2  Use a single common audio start point (T_common = the latest absolute
+   *           start among all angles) so every output begins at the same audio frame.
+   *           For each angle i: videoStart_i = lag_i + T_common (always ≥ 0),
+   *           audioStart = T_common.
    *
    * @param {string[]} videoPaths   Paths to each angle's video file.
    * @param {string}   audioPath    Path to the shared audio file.
    * @param {string}   outputDir    Directory to write synced output files into.
    * @returns {Promise<Array<{outputPath: string, videoSrc: string, sourceWidth: number, sourceHeight: number}>>}
-   *   One entry per angle (in the same order as `videoPaths`).
    */
   static async syncMultiple(videoPaths, audioPath, outputDir) {
     await fs.ensureDir(outputDir);
-    const results = [];
+
+    // ── Pass 1: compute lags ──────────────────────────────────────────────────
+    console.log('\n── Pass 1/2: Computing lags for all angles ──────────────────────────────');
+
+    const syncers = [];
+    const lags = [];
 
     for (let i = 0; i < videoPaths.length; i++) {
-      const videoPath = videoPaths[i];
       const outputFileName = `synced-output-${i + 1}.mp4`;
       const outputPath = path.join(outputDir, outputFileName);
-
-      console.log(`\n── Angle ${i + 1}/${videoPaths.length}: ${path.basename(videoPath)} ──`);
-
-      const syncer = new AudioSyncer({ videoPath, audioPath, outputPath });
+      const syncer = new AudioSyncer({ videoPath: videoPaths[i], audioPath, outputPath });
       await syncer.init();
+      syncers.push(syncer);
+
+      console.log(`\n  Angle ${i + 1}/${videoPaths.length}: ${path.basename(videoPaths[i])}`);
+      const { lagSeconds, snr, isReliable } = await syncer.computeLag();
+      lags.push(lagSeconds);
+
+      console.log(`  Best lag: ${lagSeconds.toFixed(3)}s  (SNR: ${snr.toFixed(1)}${isReliable ? '' : ' — LOW CONFIDENCE'})`);
+      if (lagSeconds >= 0) {
+        console.log(`  Interpretation: external audio starts ${lagSeconds.toFixed(3)}s AFTER video audio`);
+      } else {
+        console.log(`  Interpretation: external audio starts ${Math.abs(lagSeconds).toFixed(3)}s BEFORE video audio`);
+      }
+    }
+
+    // ── Compute common reference ──────────────────────────────────────────────
+    //
+    // T_common is the external-audio time at which ALL angles have video data.
+    // Each angle i contributes video from absolute audio time max(0, -lag_i).
+    // The common start is the latest of these, i.e. max(0, -min(lags)).
+    //
+    //   videoStart_i = lag_i + T_common   (guaranteed ≥ 0 for all i)
+    //   audioStart   = T_common           (identical for all angles)
+    //
+    const T_common = Math.max(0, ...lags.map(l => -l));
+    const audioDuration = await getMediaDuration(audioPath);
+
+    // Compute per-angle video starts and find the shortest available span.
+    const videoStarts = lags.map(l => l + T_common);
+    const videoDurations = await Promise.all(syncers.map(s => getMediaDuration(s.videoPath)));
+    const commonDuration = Math.min(
+      audioDuration - T_common,
+      ...videoStarts.map((vs, i) => videoDurations[i] - vs),
+    );
+
+    if (commonDuration <= 0) {
+      throw new Error(
+        `Cannot align angles: computed common duration is ${commonDuration.toFixed(3)}s. ` +
+        `Check that all videos and the audio overlap in time.`
+      );
+    }
+
+    console.log(`\n── Common reference ─────────────────────────────────────────────────────`);
+    console.log(`  Audio start (T_common): ${T_common.toFixed(3)}s`);
+    console.log(`  Common duration:        ${commonDuration.toFixed(3)}s`);
+    for (let i = 0; i < videoPaths.length; i++) {
+      console.log(`  Angle ${i + 1} video start:   ${videoStarts[i].toFixed(3)}s  (lag ${lags[i].toFixed(3)}s)`);
+    }
+
+    // ── Pass 2: produce outputs ───────────────────────────────────────────────
+    console.log('\n── Pass 2/2: Producing aligned outputs ──────────────────────────────────');
+
+    const results = [];
+
+    for (let i = 0; i < syncers.length; i++) {
+      const syncer = syncers[i];
+      console.log(`\n  Angle ${i + 1}/${syncers.length}: ${path.basename(videoPaths[i])}`);
+
+      const trimPoints = {
+        videoStart: videoStarts[i],
+        audioStart: T_common,
+        duration: commonDuration,
+        videoDuration: videoDurations[i],
+        audioDuration,
+      };
+
+      // Produce the audio WAV master only from angle 1 (it's the same audio for all).
+      const produceAudioFile = i === 0;
       try {
-        await syncer.sync();
+        await syncer.produceOutput(trimPoints, produceAudioFile);
       } finally {
         await syncer.close();
       }
 
-      const { width: sourceWidth, height: sourceHeight } = await getVideoDimensions(outputPath);
-      // videoSrc is relative to /public (the outputDir is expected to be inside /public)
-      const videoSrc = outputPath;
-      results.push({ outputPath, videoSrc, sourceWidth, sourceHeight });
+      const { width: sourceWidth, height: sourceHeight } = await getVideoDimensions(syncer.outputPath);
+      results.push({ outputPath: syncer.outputPath, videoSrc: syncer.outputPath, sourceWidth, sourceHeight });
     }
 
     return results;

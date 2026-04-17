@@ -498,9 +498,9 @@ export default function CameraPage() {
         <Group align="flex-start" gap="xl" wrap="nowrap">
 
           {/* ── Image + SVG overlay ── */}
-          <Box style={{ flex: '1 1 auto', position: 'relative', lineHeight: 0 }}>
+          <Box style={{ flex: '1 1 auto', lineHeight: 0 }}>
 
-            {/* Angle tabs — only shown in multi-angle mode */}
+            {/* Angle tabs — only shown in multi-angle mode (outside relative container) */}
             {angles && angles.length > 1 && (
               <Group mb="xs" gap="xs">
                 {angles.map((angle, i) => (
@@ -516,7 +516,8 @@ export default function CameraPage() {
               </Group>
             )}
 
-            <img
+            <Box style={{ position: 'relative' }}>
+              <img
               src={frameSrc}
               alt="Video frame"
               onLoad={e => {
@@ -532,20 +533,20 @@ export default function CameraPage() {
               style={{ display: 'block', width: '100%', borderRadius: 8, userSelect: 'none' }}
             />
 
-            <svg
-              ref={svgRef}
-              viewBox="0 0 1 1"
-              preserveAspectRatio="none"
-              onMouseDown={onSvgDown}
-              style={{
-                position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
-                cursor: drag.mode === 'idle' ? 'crosshair' : 'default',
-                userSelect: 'none',
-                overflow: 'hidden',
-              }}
-            >
+              <svg
+                ref={svgRef}
+                viewBox="0 0 1 1"
+                preserveAspectRatio="none"
+                onMouseDown={onSvgDown}
+                style={{
+                  position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
+                  cursor: drag.mode === 'idle' ? 'crosshair' : 'default',
+                  userSelect: 'none',
+                  overflow: 'hidden',
+                }}
+              >
               {/* Transparent background to capture draw events */}
-              <rect x={0} y={0} width={1} height={1} fill="transparent" />
+              <rect x={0} y={0} width={1} height={1} fill="transparent" style={{ pointerEvents: 'none' }} />
 
               {/* Render non-selected boxes first (behind), selected box last (on top) */}
               {[...visibleBoxes]
@@ -632,6 +633,7 @@ export default function CameraPage() {
               )}
             </Group>
           </Box>
+          </Box>
 
           {/* ── Assignment panel ── */}
           <Paper withBorder p="md" style={{ flex: '0 0 270px' }}>
@@ -648,7 +650,7 @@ export default function CameraPage() {
                 </Text>
               )}
 
-              {boxes.map((box, i) => (
+              {visibleBoxes.map((box, i) => (
                 <Group
                   key={box.id} gap="xs" wrap="nowrap" align="center"
                   onClick={() => setSelectedId(id => id === box.id ? null : box.id)}
@@ -666,7 +668,7 @@ export default function CameraPage() {
                     }}
                   />
                   <Text size="sm" fw={500} style={{ flexShrink: 0, minWidth: 44 }}>
-                    {box.angleName ? `${box.angleName} ` : ''}Face {i + 1}
+                    Face {i + 1}
                   </Text>
                   <Select
                     size="xs"
@@ -696,10 +698,10 @@ export default function CameraPage() {
                 </Alert>
               )}
 
-              {boxes.length > 0 && (
+              {visibleBoxes.length > 0 && (
                 <>
                   <Text size="xs" c="dimmed">
-                    {assignedCount} / {boxes.length} assigned
+                    {visibleBoxes.filter(b => b.speaker).length} / {visibleBoxes.length} assigned (this angle)
                   </Text>
                   <Button
                     onClick={handleSave}
