@@ -11,7 +11,8 @@ export type SplitSections = { hookSections: Section[]; mainSections: Section[] }
 
 /** Splits a segment's time range into playable sub-clips, skipping cuts[] ranges. */
 export function getSubClips(segment: Segment): SubClip[] {
-  if (!segment.cuts || segment.cuts.length === 0) {
+  const allCuts = [...(segment.cuts ?? []), ...(segment.visualCuts ?? [])];
+  if (allCuts.length === 0) {
     return [{ sourceStart: segment.start, sourceEnd: segment.end }];
   }
 
@@ -21,7 +22,7 @@ export function getSubClips(segment: Segment): SubClip[] {
   // Clamp cuts to [segment.start, segment.end] and discard invalid ones.
   // Whisper t_dtw values can drift outside the segment window, producing
   // inverted (from > to) or zero-duration cuts that would corrupt playback.
-  const sorted = [...segment.cuts]
+  const sorted = [...allCuts]
     .map(c => ({ from: Math.max(c.from, segment.start), to: Math.min(c.to, segment.end) }))
     .filter(c => c.to > c.from)
     .sort((a: TimeCut, b: TimeCut) => a.from - b.from);
@@ -68,7 +69,7 @@ export function buildMainSubClips(
     if (seg.cut) cutRanges.push({ from: seg.start, to: seg.end });
   }
   for (const seg of activeMain) {
-    for (const c of seg.cuts ?? []) {
+    for (const c of [...(seg.cuts ?? []), ...(seg.visualCuts ?? [])]) {
       const from = Math.max(c.from, seg.start);
       const to   = Math.min(c.to,   seg.end);
       if (to > from) cutRanges.push({ from, to });

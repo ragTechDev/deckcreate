@@ -570,6 +570,9 @@ function buildDoc(transcript) {
     for (const g of (seg.graphics || [])) {
       lines.push('    ' + buildGraphicLine(g, seg.tokens));
     }
+    for (const vc of (seg.visualCuts || [])) {
+      lines.push(`    > CUT ${vc.from.toFixed(3)}-${vc.to.toFixed(3)}`);
+    }
 
     if (videoEnd !== undefined && seg.end === videoEnd) lines.push('> END');
   }
@@ -940,6 +943,7 @@ function mergeDocIntoTranscript(transcript, docContent) {
   let pendingGraphicLines = [];
   let pendingCamLines = [];
   let pendingHookLine = null;
+  let pendingVisualCuts = [];
   let videoStart = transcript.meta.videoStart;
   let videoEnd = transcript.meta.videoEnd;
   let nextSegIsVideoStart = false;
@@ -970,11 +974,12 @@ function mergeDocIntoTranscript(transcript, docContent) {
         else console.warn(`  ⚠ HOOK phrase not found in segment [${pendingSeg.id}]: "${hookPhrase}" — hooking full segment`);
       }
     }
-    byId[pendingSeg.id] = { ...pendingSeg, hook, hookPhrase, hookFrom, hookTo, hookChar, hookGraphic, graphics, cameraCues };
+    byId[pendingSeg.id] = { ...pendingSeg, hook, hookPhrase, hookFrom, hookTo, hookChar, hookGraphic, graphics, cameraCues, visualCuts: pendingVisualCuts.length ? [...pendingVisualCuts] : (pendingSeg.visualCuts ?? []) };
     pendingSeg = null;
     pendingGraphicLines = [];
     pendingCamLines = [];
     pendingHookLine = null;
+    pendingVisualCuts = [];
   }
 
   for (const line of stripped.split('\n')) {
@@ -1006,6 +1011,11 @@ function mergeDocIntoTranscript(transcript, docContent) {
         if (pendingSeg) pendingCamLines.push(annotation.slice(3).trim());
       } else if (annotation.startsWith('HOOK')) {
         if (pendingSeg) pendingHookLine = annotation.slice(4).trim();
+      } else if (annotation.startsWith('CUT')) {
+        if (pendingSeg) {
+          const timeMatch = annotation.slice(3).trim().match(/^([\d.]+)-([\d.]+)$/);
+          if (timeMatch) pendingVisualCuts.push({ from: parseFloat(timeMatch[1]), to: parseFloat(timeMatch[2]) });
+        }
       } else {
         if (pendingSeg) pendingGraphicLines.push(annotation);
       }

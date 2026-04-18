@@ -55,6 +55,8 @@ export type Segment = {
   tokens: Token[];
   /** Derived from token cut flags by edit-transcript. Used by Remotion for time remapping. */
   cuts: TimeCut[];
+  /** Time-range cuts created by the visual editor. Written as > CUT from-to in the doc. */
+  visualCuts?: TimeCut[];
   graphics: GraphicsCue[];
   /** Explicit camera cut overrides — take priority over the pacing algorithm */
   cameraCues?: CameraCue[];
