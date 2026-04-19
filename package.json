@@ -22,7 +22,11 @@
     "edit-transcript": "node scripts/edit-transcript.js",
     "merge-doc": "node scripts/edit-transcript.js --merge-doc public/transcribe/output/edit/transcript.doc.txt",
     "merge-doc:cut-pauses": "node scripts/edit-transcript.js --merge-doc public/transcribe/output/edit/transcript.doc.txt --auto-cut-pauses 0.5",
+    "guest-review": "node scripts/guest-review.js",
     "setup-camera": "node scripts/camera/setup-camera.js",
+    "setup-camera:docker": "docker compose run --rm --service-ports setup-camera",
+    "color-match": "tsx scripts/camera/color-match.ts",
+    "color-match:docker": "docker compose run --rm color-match",
     "cut-preview": "node scripts/cut-preview.js",
     "hook-qa": "node scripts/hook-qa.js",
     "hook-qa:docker": "docker compose run --rm hook-qa",
@@ -87,6 +91,7 @@
     "postcss-preset-mantine": "^1.18.0",
     "postcss-simple-vars": "^7.0.1",
     "tailwindcss": "^4",
+    "tsx": "^4.21.0",
     "typescript": "^5"
   }
 }

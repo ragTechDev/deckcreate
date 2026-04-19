@@ -23,6 +23,7 @@ import fs from 'fs-extra';
 import path from 'path';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
+import { detectHDR, HDR_TONEMAP_VF, SDR_FORMAT_VF } from '../shared/hdr-detect.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const cwd = process.cwd();
@@ -73,12 +74,15 @@ async function findVideo() {
   return null;
 }
 
-function extractFrame(videoPath, timestamp, outputPath) {
+async function extractFrame(videoPath, timestamp, outputPath) {
+  const isHDR = await detectHDR(videoPath);
+  const vf = isHDR ? HDR_TONEMAP_VF : SDR_FORMAT_VF;
   return new Promise((resolve, reject) => {
     const proc = spawn('ffmpeg', [
       '-ss', String(timestamp),
       '-i', videoPath,
       '-frames:v', '1',
+      '-vf', vf,
       '-q:v', '2',
       '-y', outputPath,
     ], { stdio: ['ignore', 'ignore', 'pipe'] });

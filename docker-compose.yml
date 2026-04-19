@@ -82,6 +82,36 @@ services:
     tty: true
     command: npm run remotion
 
+  # Camera setup service - face detection + launches /camera GUI
+  setup-camera:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app:delegated
+      - node_modules:/app/node_modules
+      - ./public:/app/public
+    ports:
+      - "3000:3000"  # Camera setup GUI (/camera)
+    environment:
+      - PYTHON_PATH=/usr/local/bin/python
+    stdin_open: true
+    tty: true
+    command: npm run setup-camera
+
+  # Color match service - per-angle colour correction into camera-profiles.json
+  color-match:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app:delegated
+      - node_modules:/app/node_modules
+      - ./public:/app/public
+    environment:
+      - PYTHON_PATH=/usr/local/bin/python
+    command: npm run color-match
+
   # Hook QA service
   hook-qa:
     build:

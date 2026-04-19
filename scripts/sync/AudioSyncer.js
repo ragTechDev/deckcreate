@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import fs from 'fs-extra';
 import wavefileModule from 'wavefile';
+import { detectHDR, HDR_TONEMAP_VF, SDR_FORMAT_VF } from '../shared/hdr-detect.js';
 const { WaveFile } = wavefileModule;
 import FFT from 'fft.js';
 
@@ -306,14 +307,24 @@ class AudioSyncer {
   async runVideoOutput(trimPoints, baseFilter, videoStats) {
     const { videoStart, audioStart, duration } = trimPoints;
     const loudnorm = this.buildLoudnormFilter(videoStats, -16, -1);
-    const audioFilter = `[1:a]${baseFilter},${loudnorm}[a_out]`;
+
+    // Detect HDR so we can tonemap to BT.709 before encoding to H.264.
+    // Without tonemapping, HDR transfer functions (HLG/PQ) produce washed-out
+    // 8-bit output because the luminance values are interpreted as SDR.
+    const isHDR = await detectHDR(this.videoPath);
+    if (isHDR) console.log('  HDR source detected — applying HLG/PQ→BT.709 tonemapping.');
+    const videoVf = isHDR ? HDR_TONEMAP_VF : SDR_FORMAT_VF;
+
+    // Both video and audio go through filter_complex so we can map the
+    // tonemapped video stream alongside the loudness-normalised audio stream.
+    const filterComplex = `[0:v]${videoVf}[v_out];[1:a]${baseFilter},${loudnorm}[a_out]`;
 
     await spawnProcess('ffmpeg', [
       '-ss', String(videoStart), '-i', this.videoPath,
       '-ss', String(audioStart), '-i', this.audioPath,
       '-t', String(duration),
-      '-filter_complex', audioFilter,
-      '-map', '0:v:0',
+      '-filter_complex', filterComplex,
+      '-map', '[v_out]',
       '-map', '[a_out]',
       // Re-encode video so keyframes land every 1 s (g=fps). Stream-copying
       // preserves the original recording's sparse keyframe structure, which
@@ -322,7 +333,7 @@ class AudioSyncer {
       // keyframes it snaps to the preceding one and plays from there, causing
       // the hook to start many seconds before the intended frame.
       '-c:v', 'libx264', '-crf', '23', '-preset', 'fast',
-      '-pix_fmt', 'yuv420p',   // force 8-bit; source may be 10-bit (High10), which Chrome rejects
+      // format=yuv420p is already at the end of both videoVf chains
       '-g', '60', '-keyint_min', '60', '-sc_threshold', '0',
       '-c:a', 'aac', '-ar', '48000', '-b:a', '192k',
       '-movflags', '+faststart',

@@ -450,6 +450,16 @@ export const CameraPlayer: React.FC<Props> = ({ src, hookSections, mainSections,
     return map;
   }, [src, srcW, srcH, profiles.angles]);
 
+  // Map each video src to its color correction matrix (if color-match has been run)
+  const colorCorrectionByVideoSrc = useMemo(() => {
+    const map = new Map<string, number[] | null>();
+    for (const angle of Object.values(profiles.angles ?? {})) {
+      const resolved = resolveVideoSrc(angle.videoSrc);
+      map.set(resolved, angle.colorCorrection?.matrix ?? null);
+    }
+    return map;
+  }, [profiles.angles]);
+
   // Per-angle sections with videoOffset applied (in frames).
   // videoOffset > 0  → angle file is behind transcript → seek later into the file.
   // videoOffset < 0  → angle file is ahead of transcript → seek earlier.
@@ -475,11 +485,29 @@ export const CameraPlayer: React.FC<Props> = ({ src, hookSections, mainSections,
   return (
     // Outer: fills composition output dimensions, clips the zoomed video
     <AbsoluteFill style={{ overflow: 'hidden', isolation: 'isolate' }}>
-      {allVideoSrcs.map(videoSrc => {
+      {/* SVG color correction filters — one per angle with a colorCorrection matrix.
+          filter: url(#cm-N) on the angle's div routes its pixels through feColorMatrix
+          before compositing, matching colour grading across cameras. */}
+      <svg style={{ position: 'absolute', width: 0, height: 0, overflow: 'hidden' }} aria-hidden="true">
+        <defs>
+          {allVideoSrcs.map((videoSrc, i) => {
+            const matrix = colorCorrectionByVideoSrc.get(videoSrc);
+            if (!matrix) return null;
+            return (
+              <filter key={i} id={`cm-${i}`} colorInterpolationFilters="sRGB" x="0" y="0" width="100%" height="100%">
+                <feColorMatrix type="matrix" values={matrix.join(' ')} />
+              </filter>
+            );
+          })}
+        </defs>
+      </svg>
+
+      {allVideoSrcs.map((videoSrc, i) => {
         const dims = angleByVideoSrc.get(videoSrc) ?? { srcW, srcH };
         const isActive = videoSrc === activeVideoSrc;
         const { scale, tx, ty } = computeTransform(viewport, dims.srcW, dims.srcH, outW, outH);
         const angleSections = sectionsByVideoSrc.get(videoSrc) ?? { hook: hookSections, main: mainSections };
+        const matrix = colorCorrectionByVideoSrc.get(videoSrc);
 
         return (
           // Each angle layer fills the output frame; the active one sits on top via
@@ -507,6 +535,7 @@ export const CameraPlayer: React.FC<Props> = ({ src, hookSections, mainSections,
                 // scale THEN translate — the translate operates in scaled coordinate space,
                 // which is what the formula requires (see computeTransform).
                 transform: `scale(${scale}) translate(${tx}%, ${ty}%)`,
+                filter: matrix ? `url(#cm-${i})` : undefined,
               }}
             >
               <SegmentPlayer
