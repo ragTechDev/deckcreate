@@ -8,9 +8,12 @@ import {
 import { notifications } from '@mantine/notifications';
 import {
   IconPlayerPlay, IconPlayerPause, IconScissors, IconDeviceFloppy,
+  IconArrowsMaximize,
 } from '@tabler/icons-react';
-import type { Transcript, TimeCut } from '../../remotion/types/transcript';
+import type { Transcript, TimeCut, CameraCue } from '../../remotion/types/transcript';
+import type { CameraProfiles } from '../../remotion/types/camera';
 import { Timeline, fmtTimecode } from './Timeline';
+import { useTimelineNav } from './useTimelineNav';
 
 const PALETTE = ['#4C6EF5', '#27AE60', '#E67700', '#9B59B6', '#0C8599', '#E03131'];
 
@@ -27,25 +30,31 @@ function fmt(s: number): string {
   return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}.${cs.toString().padStart(2, '0')}`;
 }
 
-function clamp(v: number, lo: number, hi: number) {
-  return Math.max(lo, Math.min(hi, v));
-}
-
 type VisualCutsMap = Map<number, TimeCut[]>;
+type CameraCuesMap = Map<number, CameraCue[]>;
 
 export default function EditorPage() {
   const [transcript, setTranscript] = useState<Transcript | null>(null);
   const [speakerColors, setSpeakerColors] = useState<Record<string, string>>({});
   const [visualCuts, setVisualCuts] = useState<VisualCutsMap>(new Map());
+  const [cameraCues, setCameraCues] = useState<CameraCuesMap>(new Map());
+  const [cameraProfiles, setCameraProfiles] = useState<CameraProfiles | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [videoDuration, setVideoDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [markIn, setMarkIn] = useState<number | null>(null);
   const [dirty, setDirty] = useState(false);
-  const [zoom, setZoom] = useState(1);
-  const [panOffset, setPanOffset] = useState(0);
 
   const videoRef = useRef<HTMLVideoElement>(null);
+
+  const totalForNav = videoDuration || (transcript?.meta.duration ?? 0);
+  const { zoom, pan: panOffset, setZoomAndPan, panTo, fitAll, zoomToPreset } = useTimelineNav({
+    totalDuration: totalForNav,
+    currentTime,
+    isPlaying,
+    videoStart: transcript?.meta.videoStart,
+    videoEnd: transcript?.meta.videoEnd,
+  });
 
   useEffect(() => {
     fetch('/transcribe/output/edit/transcript.json')
@@ -53,12 +62,20 @@ export default function EditorPage() {
       .then((data: Transcript) => {
         setTranscript(data);
         setSpeakerColors(buildSpeakerColors(data.segments));
-        const map: VisualCutsMap = new Map();
+        const vcMap: VisualCutsMap = new Map();
+        const ccMap: CameraCuesMap = new Map();
         for (const seg of data.segments) {
-          map.set(seg.id, [...(seg.visualCuts ?? [])]);
+          vcMap.set(seg.id, [...(seg.visualCuts ?? [])]);
+          ccMap.set(seg.id, [...(seg.cameraCues ?? [])]);
         }
-        setVisualCuts(map);
+        setVisualCuts(vcMap);
+        setCameraCues(ccMap);
       });
+    // Load camera profiles — non-fatal if absent
+    fetch('/transcribe/output/camera/camera-profiles.json')
+      .then(r => r.ok ? r.json() : null)
+      .then((data: CameraProfiles | null) => { if (data) setCameraProfiles(data); })
+      .catch(() => {});
   }, []);
 
   const togglePlay = useCallback(() => {
@@ -72,21 +89,6 @@ export default function EditorPage() {
     if (!v) return;
     v.currentTime = time;
     setCurrentTime(time);
-  }, []);
-
-  // Auto-follow playhead when zoomed in
-  useEffect(() => {
-    if (zoom <= 1 || !videoDuration) return;
-    const visDur = videoDuration / zoom;
-    const margin = visDur * 0.1;
-    if (currentTime < panOffset + margin || currentTime > panOffset + visDur - margin) {
-      setPanOffset(clamp(currentTime - visDur / 2, 0, videoDuration - visDur));
-    }
-  }, [currentTime, zoom, videoDuration]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const handleZoomChange = useCallback((newZoom: number, newPan: number) => {
-    setZoom(newZoom);
-    setPanOffset(newPan);
   }, []);
 
   const handleAddVisualCut = useCallback((segId: number, cut: TimeCut) => {
@@ -122,6 +124,39 @@ export default function EditorPage() {
     setDirty(true);
   }, []);
 
+  const handleCueMoved = useCallback((segId: number, cueIdx: number, newAt: number) => {
+    setCameraCues(prev => {
+      const next = new Map(prev);
+      const arr = [...(next.get(segId) ?? [])];
+      if (arr[cueIdx]) arr[cueIdx] = { ...arr[cueIdx], at: newAt };
+      next.set(segId, arr);
+      return next;
+    });
+    setDirty(true);
+  }, []);
+
+  const handleCueAdded = useCallback((segId: number, at: number, shot: 'closeup' | 'wide', speaker?: string) => {
+    setCameraCues(prev => {
+      const next = new Map(prev);
+      const arr = [...(next.get(segId) ?? []), { shot, speaker, at }];
+      arr.sort((a, b) => a.at - b.at);
+      next.set(segId, arr);
+      return next;
+    });
+    setDirty(true);
+  }, []);
+
+  const handleCueDeleted = useCallback((segId: number, cueIdx: number) => {
+    setCameraCues(prev => {
+      const next = new Map(prev);
+      const arr = [...(next.get(segId) ?? [])];
+      arr.splice(cueIdx, 1);
+      next.set(segId, arr);
+      return next;
+    });
+    setDirty(true);
+  }, []);
+
   const handleSave = useCallback(async () => {
     if (!transcript) return;
     const updated: Transcript = {
@@ -129,6 +164,7 @@ export default function EditorPage() {
       segments: transcript.segments.map(seg => ({
         ...seg,
         visualCuts: visualCuts.get(seg.id) ?? seg.visualCuts ?? [],
+        cameraCues: cameraCues.get(seg.id) ?? seg.cameraCues ?? [],
       })),
     };
     const res = await fetch('/api/editor/save-transcript', {
@@ -142,7 +178,7 @@ export default function EditorPage() {
     } else {
       notifications.show({ message: 'Save failed', color: 'red' });
     }
-  }, [transcript, visualCuts]);
+  }, [transcript, visualCuts, cameraCues]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -249,7 +285,9 @@ export default function EditorPage() {
         {/* Timeline */}
         <Paper withBorder p="sm" style={{ background: '#111213' }}>
           <Group justify="space-between" mb={8}>
-            <Text size="xs" style={{ color: 'rgba(255,255,255,0.45)' }}>scroll to zoom · drag to pan · drag clip edges to trim</Text>
+            <Group gap="xs">
+              <Text size="xs" style={{ color: 'rgba(255,255,255,0.45)' }}>scroll to zoom · drag to pan · drag clip edges to trim</Text>
+            </Group>
             <Group gap="xs">
               {zoom > 1 && (
                 <Text size="xs" ff="monospace" style={{ color: 'rgba(255,255,255,0.45)' }}>
@@ -259,10 +297,26 @@ export default function EditorPage() {
               <Text
                 size="xs" ff="monospace"
                 style={{ cursor: zoom > 1 ? 'pointer' : 'default', color: zoom > 1 ? '#74c0fc' : 'rgba(255,255,255,0.45)' }}
-                onClick={() => { setZoom(1); setPanOffset(0); }}
+                onClick={fitAll}
               >
                 {zoom.toFixed(1)}×
               </Text>
+              <Tooltip label="Fit entire video">
+                <ActionIcon size="xs" variant="subtle" color="gray" onClick={fitAll}>
+                  <IconArrowsMaximize size={12} />
+                </ActionIcon>
+              </Tooltip>
+              <Button.Group>
+                <Tooltip label="Fit full video (zoom out)">
+                  <Button size="xs" variant="subtle" color="gray" px={8} onClick={() => zoomToPreset('full')}>Full</Button>
+                </Tooltip>
+                <Tooltip label="Fit content window">
+                  <Button size="xs" variant="subtle" color="gray" px={8} onClick={() => zoomToPreset('clips')}>Clips</Button>
+                </Tooltip>
+                <Tooltip label="Max zoom at playhead">
+                  <Button size="xs" variant="subtle" color="gray" px={8} onClick={() => zoomToPreset('frames')}>Frames</Button>
+                </Tooltip>
+              </Button.Group>
             </Group>
           </Group>
 
@@ -276,9 +330,14 @@ export default function EditorPage() {
             panOffset={panOffset}
             markIn={markIn}
             onSeek={seekTo}
-            onZoomChange={handleZoomChange}
-            onPanChange={setPanOffset}
+            onZoomChange={(z, p) => setZoomAndPan(z, p)}
+            onPanChange={panTo}
             onAddVisualCut={handleAddVisualCut}
+            cameraProfiles={cameraProfiles}
+            cameraCues={cameraCues}
+            onCueMoved={handleCueMoved}
+            onCueAdded={handleCueAdded}
+            onCueDeleted={handleCueDeleted}
           />
 
           {/* Legend */}

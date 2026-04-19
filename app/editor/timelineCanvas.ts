@@ -1,14 +1,58 @@
-import type { Segment, TimeCut } from '../../remotion/types/transcript';
+import type { Segment, TimeCut, CameraCue } from '../../remotion/types/transcript';
+import type { CameraProfiles } from '../../remotion/types/camera';
 
 // ─── Layout constants ────────────────────────────────────────────────────────
 export const RULER_H = 24;
 export const TRACK_H = 54;
 export const TRACK_GAP = 2;
 export const N_TRACKS = 2;
-export const CANVAS_H = RULER_H + N_TRACKS * (TRACK_H + TRACK_GAP);
 export const CLIP_PAD = 7;          // vertical padding inside track row for clip rect
 export const CLIP_H = TRACK_H - CLIP_PAD * 2;
 export const TRIM_W = 11;           // px width of trim handle zone
+export const CAM_TRACK_H = 28;
+export const CAM_TRACK_Y = RULER_H + N_TRACKS * (TRACK_H + TRACK_GAP) + TRACK_GAP;
+export const CANVAS_H = CAM_TRACK_Y + CAM_TRACK_H;
+export const CAM_HANDLE_HIT = 7;   // px half-width hit zone for cue handles
+
+// ─── Camera region ────────────────────────────────────────────────────────────
+export interface CamRegion {
+  from: number;
+  to: number;
+  shot: 'closeup' | 'wide';
+  speaker?: string;
+  segId: number;
+}
+
+/** Build flat list of camera shot regions from segments + their cues. */
+export function buildCamRegions(
+  segments: Segment[],
+  cameraCues: Map<number, CameraCue[]>,
+  overlay?: { segId: number; cueIdx: number; at: number } | null,
+): CamRegion[] {
+  const regions: CamRegion[] = [];
+  for (const seg of segments) {
+    if (seg.cut) continue;
+    let cues = [...(cameraCues.get(seg.id) ?? [])];
+    if (overlay && overlay.segId === seg.id && cues[overlay.cueIdx]) {
+      cues = cues.map((c, i) => i === overlay.cueIdx ? { ...c, at: overlay.at } : c);
+    }
+    cues.sort((a, b) => a.at - b.at);
+
+    let from = seg.start;
+    let shot: 'closeup' | 'wide' = 'closeup';
+    let speaker: string | undefined = seg.speaker;
+
+    for (const cue of cues) {
+      const at = Math.max(seg.start, Math.min(seg.end, cue.at));
+      if (at > from) regions.push({ from, to: at, shot, speaker, segId: seg.id });
+      from = at;
+      shot = cue.shot;
+      speaker = cue.shot === 'closeup' ? cue.speaker : undefined;
+    }
+    if (from < seg.end) regions.push({ from, to: seg.end, shot, speaker, segId: seg.id });
+  }
+  return regions;
+}
 
 // ─── Draw state ──────────────────────────────────────────────────────────────
 export interface TimelineDrawState {
@@ -28,7 +72,12 @@ export interface TimelineDrawState {
   trimPreview: { segId: number; side: 'left' | 'right'; time: number } | null;
   hoverSegId: number | null;
   selectedSegId: number | null;
-  activeDrag: 'playhead' | 'pan' | 'trim' | null;
+  activeDrag: 'playhead' | 'pan' | 'trim' | 'cue' | null;
+  // Camera
+  cameraCues: Map<number, CameraCue[]>;
+  cameraProfiles: CameraProfiles | null;
+  hoveredCueHandle: { segId: number; cueIdx: number } | null;
+  cueDragOverlay: { segId: number; cueIdx: number; at: number } | null;
 }
 
 // ─── Coordinate helpers ───────────────────────────────────────────────────────
@@ -113,7 +162,6 @@ export function drawTimeline(canvas: HTMLCanvasElement, s: TimelineDrawState) {
     const ty = RULER_H + ti * (TRACK_H + TRACK_GAP);
     ctx.fillStyle = ti === 0 ? '#1e2024' : '#191c1f';
     ctx.fillRect(0, ty, width, TRACK_H);
-    // Track label
     ctx.fillStyle = 'rgba(255,255,255,0.1)';
     ctx.font = '700 9px monospace';
     ctx.textBaseline = 'middle';
@@ -247,6 +295,80 @@ export function drawTimeline(canvas: HTMLCanvasElement, s: TimelineDrawState) {
     }
   }
 
+  // ── Camera track ──────────────────────────────────────────────────────────
+  const camY = CAM_TRACK_Y;
+  const camClipTop = camY + 2;
+  const camClipH = CAM_TRACK_H - 4;
+
+  // Gap + background
+  ctx.fillStyle = '#2c2e33';
+  ctx.fillRect(0, camY - TRACK_GAP, width, TRACK_GAP);
+  ctx.fillStyle = '#14161a';
+  ctx.fillRect(0, camY, width, CAM_TRACK_H);
+
+  // Track label
+  ctx.fillStyle = 'rgba(255,255,255,0.1)';
+  ctx.font = '700 9px monospace';
+  ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+  ctx.fillText('CAM', 5, camY + CAM_TRACK_H / 2);
+
+  // Shot regions
+  const regions = buildCamRegions(s.segments, s.cameraCues, s.cueDragOverlay);
+  for (const region of regions) {
+    if (region.to < s.visStart || region.from > visEnd) continue;
+    const rx = timeToX(region.from, s);
+    const rw = Math.max(timeToX(region.to, s) - rx, 1);
+
+    ctx.globalAlpha = 0.55;
+    ctx.fillStyle = region.shot === 'wide'
+      ? 'rgb(70, 100, 130)'
+      : (s.speakerColors[region.speaker ?? ''] ?? '#888');
+    ctx.fillRect(rx, camClipTop, rw, camClipH);
+    ctx.globalAlpha = 1;
+
+    if (rw > 36) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(rx + 1, camClipTop, Math.max(0, rw - 2), camClipH);
+      ctx.clip();
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.font = '600 9px -apple-system,system-ui,sans-serif';
+      ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+      ctx.shadowColor = 'rgba(0,0,0,0.8)'; ctx.shadowBlur = 2;
+      const label = region.shot === 'wide' ? 'Wide' : (region.speaker ?? 'Close');
+      ctx.fillText(label, rx + 5, camY + CAM_TRACK_H / 2);
+      ctx.restore();
+    }
+  }
+
+  // Cue handle lines + grab circles
+  for (const [segId, cues] of s.cameraCues) {
+    const seg = s.segments.find(sg => sg.id === segId);
+    if (!seg || seg.cut) continue;
+    for (let i = 0; i < cues.length; i++) {
+      let at = cues[i].at;
+      if (s.cueDragOverlay?.segId === segId && s.cueDragOverlay?.cueIdx === i) {
+        at = s.cueDragOverlay.at;
+      }
+      if (at < s.visStart || at > visEnd) continue;
+      const hx = timeToX(at, s);
+      const isHov = s.hoveredCueHandle?.segId === segId && s.hoveredCueHandle?.cueIdx === i;
+      const isDrag = s.cueDragOverlay?.segId === segId && s.cueDragOverlay?.cueIdx === i;
+
+      ctx.save();
+      ctx.strokeStyle = isDrag ? 'rgba(255,220,50,0.9)' : isHov ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.5)';
+      ctx.lineWidth = isDrag || isHov ? 2 : 1.5;
+      ctx.beginPath(); ctx.moveTo(hx, camY); ctx.lineTo(hx, camY + CAM_TRACK_H); ctx.stroke();
+
+      // Grab circle
+      ctx.fillStyle = isDrag ? 'rgba(255,220,50,0.9)' : isHov ? 'white' : 'rgba(255,255,255,0.5)';
+      ctx.beginPath();
+      ctx.arc(hx, camY + CAM_TRACK_H / 2, isDrag || isHov ? 4 : 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
   // ── Mark In ────────────────────────────────────────────────────────────────
   if (s.markIn !== null) {
     const x = timeToX(s.markIn, s);
@@ -324,7 +446,6 @@ export function drawTimeline(canvas: HTMLCanvasElement, s: TimelineDrawState) {
     ctx.fillStyle = '#111';
     ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
     ctx.fillText(tc, tcX + 5, tcY + 8);
-    // ▼ triangle at ruler bottom, centered on playhead
     ctx.beginPath();
     ctx.moveTo(phX - 6, RULER_H - 1);
     ctx.lineTo(phX + 6, RULER_H - 1);
