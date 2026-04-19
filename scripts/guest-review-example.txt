@@ -1,0 +1,56 @@
+═══════════════════════════════════════════════════════════════════
+  PODCAST TRANSCRIPT REVIEW — Guest Copy
+═══════════════════════════════════════════════════════════════════
+
+Hi! Below is the transcript of our conversation. Please review and
+mark anything you'd prefer to remove.
+
+HOW TO MARK CUTS:
+  • Word/phrase: Wrap in {curly braces} — like {um} or {you know}
+  • Entire line: Add "CUT" at the start — like "CUT [3] I said something..."
+  • Note: Don't change the [numbers] — they're timestamps
+
+───────────────────────────────────────────────────────────────────
+
+=== SPEAKER_01 ===
+
+[1]  00:00:05  Welcome to the show, Natasha! Thanks for joining us today.
+
+[2]  00:00:12  Thanks for having me. I'm really excited to be here and {um} talk about AI.
+       ↑ guest marked "um" to cut
+
+[3]  00:00:18  So let's dive right in. What got you interested in machine learning?
+
+[4]  00:00:25  Well, it started back in college when I {sort of like} stumbled upon
+       ↑ guest marked filler phrase
+       a neural networks course.
+
+[5]  00:00:35  And from there, I was hooked. I mean, the possibilities are endless.
+       ↑ guest might mark "I mean" as casual filler
+
+=== SPEAKER_02 ===
+
+[6]  00:00:42  That's fascinating. So would you say {you know} the field has
+       ↑ filler to cut
+       changed dramatically since then?
+
+[7]  00:00:51  Absolutely. The pace of progress has been incredible.
+
+CUT [8]  00:00:58  Sorry, can we take that again? I fumbled my words.
+       ↑ guest wants entire segment removed
+
+[9]  00:01:05  What I meant to say was, the transformer architecture really
+    changed everything in 2017.
+
+[10] 00:01:15  And now with large language models, we're seeing capabilities
+     that seemed impossible just a few years ago.
+
+───────────────────────────────────────────────────────────────────
+
+QUICK REFERENCE: Common things guests cut
+  • Filler words: um, uh, like, you know, I mean, sort of
+  • False starts: "Sorry, let me rephrase..."
+  • Tangents that went too far
+  • Personal details they forgot were mentioned
+
+═══════════════════════════════════════════════════════════════════
