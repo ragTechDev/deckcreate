@@ -11,12 +11,14 @@ export type Token = {
 /** Maps 1:1 to a component in remotion/components/graphics/ or remotion/components/overlays/ */
 export type GraphicType =
   // Legacy graphics
-  | 'LowerThird' | 'Callout' | 'ChapterMarker'
+  | 'LowerThird' | 'Callout'
+  // Chapter markers (persistent overlays)
+  | 'ChapterMarker' | 'ChapterMarkerEnd'
   // Overlay components
   | 'AwardsOverlay' | 'CodingOverlay' | 'EngineeringOverlay'
   | 'AIOverlay' | 'InfrastructureOverlay' | 'PracticeOverlay'
   | 'RoleOverlay' | 'LanguageOverlay' | 'FrameworkOverlay'
-  | 'EducationOverlay';
+  | 'EducationOverlay' | 'RagtechOverlay';
 
 export type CameraCue = {
   /** 'closeup' on a named speaker, or 'wide' for the wide shot */

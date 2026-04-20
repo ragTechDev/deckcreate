@@ -5,7 +5,7 @@ import type { Brand } from '../types/brand';
 import type { Section } from './SegmentPlayer';
 
 // Core / general editing overlays
-import { ConceptExplainer, NameTitle } from './overlays/lower-thirds';
+import { ConceptExplainer, NameTitle, ChapterMarker } from './overlays/lower-thirds';
 
 // Keyword-triggered overlays
 import {
@@ -48,6 +48,7 @@ const COMPONENT_MAP: Record<string, React.FC<any>> = {
   // Lower-third overlays
   ConceptExplainer,
   NameTitle,
+  ChapterMarker,
 };
 
 /**
@@ -124,11 +125,41 @@ export const OverlayRenderer: React.FC<OverlayRendererProps> = ({
     });
 
     // Sort by startFrame, then cap each duration so it ends when the next one starts.
+    // Special handling for ChapterMarker: extends until next ChapterMarker or ChapterMarkerEnd cue.
     cues.sort((a, b) => a.startFrame - b.startFrame);
-    for (let i = 0; i < cues.length - 1; i++) {
-      const maxDuration = cues[i + 1].startFrame - cues[i].startFrame;
-      if (cues[i].durationInFrames > maxDuration) {
-        cues[i] = { ...cues[i], durationInFrames: Math.max(1, maxDuration) };
+    for (let i = 0; i < cues.length; i++) {
+      const cue = cues[i];
+      const isChapterMarker = cue.cue.type === 'ChapterMarker';
+      const isChapterMarkerEnd = cue.cue.type === 'ChapterMarkerEnd';
+
+      if (isChapterMarkerEnd) {
+        // End cues don't render - they just mark the end of a chapter marker
+        cue.durationInFrames = 1;
+        continue;
+      }
+
+      if (isChapterMarker) {
+        // Find the next ChapterMarker or ChapterMarkerEnd cue
+        let endFrame = Infinity;
+        for (let j = i + 1; j < cues.length; j++) {
+          if (cues[j].cue.type === 'ChapterMarker' || cues[j].cue.type === 'ChapterMarkerEnd') {
+            endFrame = cues[j].startFrame;
+            break;
+          }
+        }
+        // Extend duration to reach the next chapter marker/end, but respect requested minimum
+        const requestedDuration = cue.durationInFrames;
+        const extendedDuration = Math.min(requestedDuration, endFrame - cue.startFrame);
+        // Use the longer of the two - either the requested duration or until the next marker
+        cues[i] = { ...cue, durationInFrames: Math.max(requestedDuration, extendedDuration) };
+      } else {
+        // Normal cues: cap at next cue's start
+        if (i < cues.length - 1) {
+          const maxDuration = cues[i + 1].startFrame - cue.startFrame;
+          if (cue.durationInFrames > maxDuration) {
+            cues[i] = { ...cue, durationInFrames: Math.max(1, maxDuration) };
+          }
+        }
       }
     }
 
