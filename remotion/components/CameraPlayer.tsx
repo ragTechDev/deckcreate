@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { AbsoluteFill, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
 import { SegmentPlayer, getEffectiveDuration, Section } from './SegmentPlayer';
 import type { Segment } from '../types/transcript';
-import type { CameraProfiles, CameraShot, CropViewport } from '../types/camera';
+import type { CameraProfiles, CameraShot, CropViewport, AngleConfig, SpeakerProfile } from '../types/camera';
 
 function resolveVideoSrc(videoSrc: string): string {
   // Already resolved paths (from staticFile or URLs) don't need processing
@@ -37,7 +37,7 @@ function sourceToOutputFrame(sourceSec: number, mainSections: Section[], fps: nu
 // ── Pacing constants ──────────────────────────────────────────────────────────
 
 const MIN_WIDE_S      = 1.5;   // minimum wide-shot duration before cutting to closeup
-const MAX_CLOSEUP_S   = 20.0;  // force return to wide after this long in closeup
+const MAX_CLOSEUP_S   = 10.0;  // force return to wide after this long in closeup (10s cycle)
 const PERIODIC_WIDE_S = 45.0;  // insert a wide every ~45 s of total closeup time
 const HOOK_TAIL_PAD_UNBOUNDED_SECONDS = 0.16;
 const HOOK_TAIL_PAD_BOUNDED_SECONDS = 0.02;
@@ -65,6 +65,59 @@ function computeTransform(
   const tx = (0.5 - vp.cx) * 100;
   const ty = (0.5 - vp.cy) * 100;
   return { scale, tx, ty };
+}
+
+// ── Time-keyed viewport helpers ───────────────────────────────────────────────
+
+import type { TimeKeyedViewport } from '../types/camera';
+
+/**
+ * Select the appropriate viewport for a given source time.
+ * If time-keyed viewports are available, picks the one whose time range contains sourceSec.
+ * Falls back to defaultViewport if no matching time range found.
+ */
+function selectViewportForTime(
+  sourceSec: number,
+  timeKeyedViewports: TimeKeyedViewport[] | undefined,
+  defaultViewport: CropViewport,
+): CropViewport {
+  if (!timeKeyedViewports || timeKeyedViewports.length === 0) {
+    return defaultViewport;
+  }
+
+  // Find the viewport whose time range contains sourceSec
+  // Time ranges are [from, to) - inclusive of from, exclusive of to
+  const match = timeKeyedViewports.find(
+    tk => sourceSec >= tk.from && sourceSec < tk.to
+  );
+
+  return match ? match.viewport : defaultViewport;
+}
+
+/**
+ * Look up speaker profile from CameraProfiles.
+ * Tries speaker:angleName format first (new format from GUI with timeframes),
+ * then searches for any key matching the speaker (speaker:angle or speaker-only).
+ */
+function getSpeakerProfile(
+  profiles: CameraProfiles,
+  speaker: string,
+  angleName?: string
+): SpeakerProfile | undefined {
+  // Try speaker:angle format first if angleName provided
+  if (angleName) {
+    const key = `${speaker}:${angleName}`;
+    if (profiles.speakers[key]) return profiles.speakers[key];
+  }
+  // Try legacy speaker-only format
+  if (profiles.speakers[speaker]) return profiles.speakers[speaker];
+  // Search for any key that starts with "speaker:" (speaker:angle format)
+  for (const key of Object.keys(profiles.speakers)) {
+    if (key === speaker || key.startsWith(`${speaker}:`)) {
+      return profiles.speakers[key];
+    }
+  }
+  return undefined;
 }
 
 
@@ -163,28 +216,84 @@ export function buildCameraShots(
   let shotType: 'wide' | 'closeup' = 'wide';
   let shotStart        = 0;
   let shotSpeaker      = '';    // speaker the current shot is focused on
+  let shotAngleIndex   = 0;     // which angle of the current speaker we're using
   let framesInShot     = 0;
   let totalCloseupF    = 0;     // total closeup frames since last wide
   let cumFrame         = 0;     // used only while processing hook segments
+  let currentSourceTime = 0;    // track source time for time-keyed viewports
 
   const firstAngleVideoSrc = profiles.angles
     ? Object.values(profiles.angles)[0]?.videoSrc
     : undefined;
 
-  function emitShot(endFrame: number): CameraShot {
-    const speakerProfile = shotSpeaker ? profiles.speakers[shotSpeaker] : undefined;
-    const angleName = speakerProfile?.angleName;
+  // Helper: get all angles where this speaker has a configured profile
+  // Speakers are keyed as "speakerName:angleName" in the profiles
+  function getSpeakerAngles(speaker: string): Array<{angleName: string; angleConfig: AngleConfig; speakerProfile: SpeakerProfile}> {
+    if (!profiles.angles) return [];
+
+    const result: Array<{angleName: string; angleConfig: AngleConfig; speakerProfile: SpeakerProfile}> = [];
+
+    // Find all speaker:angle keys for this speaker
+    for (const [key, profile] of Object.entries(profiles.speakers)) {
+      if (!key.includes(':')) continue; // Skip legacy format
+
+      const [speakerName, angleName] = key.split(':');
+      if (speakerName !== speaker) continue; // Not this speaker
+
+      const angleConfig = profiles.angles[angleName];
+      if (!angleConfig) continue; // Angle doesn't exist
+
+      result.push({
+        angleName,
+        angleConfig,
+        speakerProfile: profile,
+      });
+    }
+
+    return result;
+  }
+
+  function emitShot(endFrame: number, sourceTime: number): CameraShot {
+    // Get available angles for this speaker first to determine which angle we're on
+    const speakerAngles = shotSpeaker ? getSpeakerAngles(shotSpeaker) : [];
+    const hasMultipleAngles = speakerAngles.length > 1;
+
+    // Determine which angle to use based on cycle position
+    let selectedAngle = speakerAngles[0];
+    if (hasMultipleAngles && speakerAngles.length > 0) {
+      // Cycle through angles: closeup angle N, wide angle N, closeup angle N+1, wide angle N+1, etc.
+      // shotAngleIndex tracks our position in the cycle
+      const angleIdx = Math.floor(shotAngleIndex / 2) % speakerAngles.length;
+      selectedAngle = speakerAngles[angleIdx];
+    }
+
+    const angleName = selectedAngle?.angleName;
+    // Now get the speaker profile with the specific angleName to avoid cross-angle matching
+    const speakerProfile = shotSpeaker ? getSpeakerProfile(profiles, shotSpeaker, angleName) : undefined;
     const angleConfig = angleName ? profiles.angles?.[angleName] : undefined;
-    // For wide shots in multi-angle setups, use the first angle's video so the
-    // primary src (which may not exist as a standalone file) is never the active layer.
+
+    // For wide shots in multi-angle setups, use the selected angle's video
     const videoSrc = angleConfig?.videoSrc ?? firstAngleVideoSrc;
 
-    const viewport =
-      shotType === 'closeup' && shotSpeaker && speakerProfile
-        ? speakerProfile.closeupViewport
-        : (angleConfig?.wideViewport ?? profiles.wideViewport);
+    // Select viewport based on shot type and time-keyed viewports if available
+    let viewport: CropViewport;
+    if (shotType === 'closeup' && speakerProfile) {
+      // Use time-keyed closeup viewport if available, otherwise use default
+      viewport = selectViewportForTime(
+        sourceTime,
+        speakerProfile.closeupViewportsByTime,
+        speakerProfile.closeupViewport
+      );
+    } else {
+      // Wide shot - use time-keyed wide viewport if available
+      viewport = selectViewportForTime(
+        sourceTime,
+        angleConfig?.wideViewportsByTime,
+        angleConfig?.wideViewport ?? profiles.wideViewport
+      );
+    }
 
-    return { startFrame: shotStart, endFrame, viewport, videoSrc };
+    return { startFrame: shotStart, endFrame, viewport, videoSrc, sourceTime };
   }
 
   for (const seg of activeSegments) {
@@ -212,15 +321,27 @@ export function buildCameraShots(
       segDur = Math.max(1, segOutputEnd - segStart);
     }
 
-    const profile = profiles.speakers[seg.speaker];
+    // Determine the angle for this segment's speaker to get the correct profile
+    const segSpeakerAngles = seg.speaker ? getSpeakerAngles(seg.speaker) : [];
+    const segAngleName = segSpeakerAngles[0]?.angleName;
+    const profile = getSpeakerProfile(profiles, seg.speaker, segAngleName);
+
+    // Track source time for time-keyed viewport selection
+    currentSourceTime = seg.hook ? (seg.hookFrom ?? seg.start) : seg.start;
 
     if (shotType === 'wide') {
       // Switch to closeup at this segment boundary when ready
       if (framesInShot >= MIN_WIDE_F && profile) {
-        if (segStart > shotStart) shots.push(emitShot(segStart));
+        if (segStart > shotStart) shots.push(emitShot(segStart, currentSourceTime));
         shotStart    = segStart;
         shotType     = 'closeup';
-        shotSpeaker  = seg.speaker;
+        // If same speaker, increment angle index when entering closeup (completes a full cycle: wide->closeup)
+        if (shotSpeaker === seg.speaker) {
+          shotAngleIndex++;
+        } else {
+          shotSpeaker  = seg.speaker;
+          shotAngleIndex = 0;
+        }
         framesInShot = 0;
         totalCloseupF = 0;
       }
@@ -233,11 +354,21 @@ export function buildCameraShots(
       const speakerChange = !!profile && seg.speaker !== shotSpeaker;
 
       if (forceWide || !profile) {
-        // Return to wide shot
-        if (segStart > shotStart) shots.push(emitShot(segStart));
+        // Return to wide shot (cycling angle if speaker continues)
+        if (segStart > shotStart) shots.push(emitShot(segStart, currentSourceTime));
+        const prevSpeaker = shotSpeaker;
         shotStart     = segStart;
         shotType      = 'wide';
-        shotSpeaker   = '';
+        // Keep speaker context if we're just cycling angles within same speaker
+        // Only clear speaker if profile is missing (unknown speaker)
+        if (!profile) shotSpeaker = '';
+        // Increment angle index when we hit wide after closeup (completes a half-cycle)
+        if (profile && shotSpeaker === prevSpeaker) {
+          shotAngleIndex++;
+        } else if (shotSpeaker !== prevSpeaker) {
+          // New speaker - reset angle cycle
+          shotAngleIndex = 0;
+        }
         framesInShot  = segDur;   // count this segment as wide time
         totalCloseupF = 0;
 
@@ -246,7 +377,7 @@ export function buildCameraShots(
         // Only gate: don't cut if the previous closeup was extremely short (<1 s)
         // to avoid flash-cuts on single-word segments.
         if (framesInShot >= fps || shotStart === segStart) {
-          if (segStart > shotStart) shots.push(emitShot(segStart));
+          if (segStart > shotStart) shots.push(emitShot(segStart, currentSourceTime));
           shotStart     = segStart;
           shotSpeaker   = seg.speaker;
           framesInShot  = segDur;
@@ -266,7 +397,9 @@ export function buildCameraShots(
 
   // Close the final shot at the end of the full output timeline
   const totalOutputFrames = hookTotalFrames + mainTotalFrames;
-  if (totalOutputFrames > shotStart) shots.push(emitShot(totalOutputFrames));
+  const lastSeg = activeSegments.filter(s => !s.cut).pop();
+  const finalSourceTime = lastSeg ? (lastSeg.hook ? (lastSeg.hookFrom ?? lastSeg.start) : lastSeg.start) : 0;
+  if (totalOutputFrames > shotStart) shots.push(emitShot(totalOutputFrames, finalSourceTime));
 
   return shots;
 }
@@ -302,7 +435,8 @@ function collectCameraOverrides(
     const segDur = Math.round(getOutputDuration(seg) * fps);
 
     for (const cue of (seg.cameraCues ?? [])) {
-      const cueSpeakerProfile = cue.speaker ? profiles.speakers[cue.speaker] : undefined;
+      // For camera cues, get speaker profile (without angle restriction since cues specify shot explicitly)
+      const cueSpeakerProfile = cue.speaker ? getSpeakerProfile(profiles, cue.speaker) : undefined;
       const cueAngleName = cueSpeakerProfile?.angleName;
       const cueAngleConfig = cueAngleName ? profiles.angles?.[cueAngleName] : undefined;
       const cueVideoSrc = cueAngleConfig?.videoSrc;

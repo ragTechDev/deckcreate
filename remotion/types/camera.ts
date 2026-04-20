@@ -7,6 +7,19 @@ export type CropViewport = {
 };
 
 /**
+ * A viewport that applies to a specific time range in the video.
+ * Used when camera angles change (e.g., droop) during filming.
+ */
+export type TimeKeyedViewport = {
+  /** Start time in seconds (inclusive) when this viewport applies */
+  from: number;
+  /** End time in seconds (exclusive) when this viewport applies */
+  to: number;
+  /** The viewport configuration for this time range */
+  viewport: CropViewport;
+};
+
+/**
  * Configuration for one camera angle in a multi-angle shoot.
  * Each angle corresponds to a separate synced video file.
  */
@@ -27,6 +40,12 @@ export type AngleConfig = {
   sourceHeight: number;
   /** Per-angle wide-shot viewport. Falls back to CameraProfiles.wideViewport when absent. */
   wideViewport?: CropViewport;
+  /**
+   * Time-keyed wide viewports for when the camera angle changes during filming.
+   * If provided, these override wideViewport within their time ranges.
+   * Must be sorted by time and non-overlapping.
+   */
+  wideViewportsByTime?: TimeKeyedViewport[];
   /** Per-channel color correction computed by color-match. Applied as SVG feColorMatrix in Remotion. */
   colorCorrection?: ColorCorrection;
   /**
@@ -47,6 +66,12 @@ export type SpeakerProfile = {
   label: string;
   /** Landscape close-up crop region */
   closeupViewport: CropViewport;
+  /**
+   * Time-keyed closeup viewports for when the camera angle changes during filming.
+   * If provided, these override closeupViewport within their time ranges.
+   * Must be sorted by time and non-overlapping.
+   */
+  closeupViewportsByTime?: TimeKeyedViewport[];
   /** Portrait reel: horizontal strip centre (0–1). w/h fixed by output aspect ratio. */
   portraitCx?: number;
   /**
@@ -85,4 +110,9 @@ export type CameraShot = {
    * Undefined means use the primary `src` passed to CameraPlayer.
    */
   videoSrc?: string;
+  /**
+   * Source video timestamp (seconds) at the start of this shot.
+   * Used for time-keyed viewport selection when camera angles change during filming.
+   */
+  sourceTime?: number;
 };

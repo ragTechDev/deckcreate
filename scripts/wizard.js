@@ -27,6 +27,18 @@ async function confirm(q, defaultYes = true) {
   return defaultYes ? ans !== 'n' : ans === 'y';
 }
 
+/** Ask a yes/no question (similar to confirm but doesn't support quit). */
+async function askYesNo(q, defaultYes = true) {
+  const hint = defaultYes ? '[Y/n]' : '[y/N]';
+  const ans = (await ask(`  ${q} ${hint} `)).trim().toLowerCase();
+  return defaultYes ? ans !== 'n' : ans === 'y';
+}
+
+/** Ask a free-form question and return the answer. */
+async function askQuestion(q) {
+  return (await ask(`  ${q}`)).trim();
+}
+
 function quit() {
   console.log('\nExiting wizard.\n');
   rl.close();
@@ -458,17 +470,35 @@ async function main() {
     numSpeakers = multiSpeaker ? 2 : 1; // exact count only matters for a fresh diarize run
 
     // Check transcript for multi-angle videoSrcs to properly infer mode
-    if (mode === 4 && existing.transcriptJson) {
+    if ((mode === 4 || mode === 1) && existing.transcriptJson) {
       try {
         const transcript = await fs.readJson(path.join(cwd, 'public', 'transcribe', 'output', 'edit', 'transcript.json'));
         const hasVideoSrcs = transcript?.meta?.videoSrcs && transcript.meta.videoSrcs.length > 0;
         const hasVideoSrc = transcript?.meta?.videoSrc;
         if (hasVideoSrcs || hasVideoSrc) {
           mode = 1; // Has video source(s), treat as synced video mode
-          if (hasVideoSrcs && transcript.meta.videoSrcs.length > 1) {
+          if (hasVideoSrcs) {
             numAngles = transcript.meta.videoSrcs.length;
             videoSrcsForRemotion = transcript.meta.videoSrcs;
           }
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    // If still no videoSrcs but we have synced videos, detect them from sync/output
+    if (!videoSrcsForRemotion && existing.syncedVideo) {
+      try {
+        const syncOutputDir = path.join(cwd, 'public', 'sync', 'output');
+        const files = await fs.readdir(syncOutputDir);
+        const syncedVideos = files
+          .filter(f => f.startsWith('synced-output-') && f.endsWith('.mp4'))
+          .sort();
+        if (syncedVideos.length > 0) {
+          videoSrcsForRemotion = syncedVideos.map(f => `sync/output/${f}`);
+          numAngles = syncedVideos.length;
+          mode = 1;
         }
       } catch {
         // ignore
@@ -938,13 +968,50 @@ async function main() {
   // ── STEP: Camera setup (optional — skip for audio-only) ───────────────────
   async function runCameraSetup() {
     console.log('\n  ── Camera setup ──────────────────────────────────────');
+
+    // Ask about dynamic angles (camera drooping/changing during filming)
+    const useDynamicAngles = await askYesNo('  Does your camera switch angles while filming (e.g., drooping)?', false);
+    let intervalMinutes = 5;
+    let dynamicAngleIndices = null; // null = all angles, or array of indices
+
+    if (useDynamicAngles) {
+      console.log('  Dynamic angles mode: Capturing frames at intervals to account for camera movement.');
+      const intervalInput = await askQuestion('  Enter sampling interval in minutes (default: 5): ');
+      intervalMinutes = parseFloat(intervalInput) || 5;
+      console.log(`  Using interval: ${intervalMinutes} minutes`);
+
+      // If multi-angle, ask which specific angles need dynamic capture
+      if (numAngles > 1 && videoSrcsForRemotion) {
+        console.log('\n  Which angles need dynamic angle capture?');
+        console.log('  (Some angles may be fixed while others move)');
+        videoSrcsForRemotion.forEach((src, i) => {
+          console.log(`    ${i + 1}. Angle ${i + 1}: ${path.basename(src)}`);
+        });
+        console.log(`    A. All angles`);
+        const angleInput = await askQuestion('  Enter numbers (e.g., 1,3) or A for all (default: A): ');
+        if (angleInput.trim() && angleInput.trim().toUpperCase() !== 'A') {
+          dynamicAngleIndices = angleInput.split(',').map(s => parseInt(s.trim()) - 1).filter(n => !isNaN(n) && n >= 0 && n < numAngles);
+          if (dynamicAngleIndices.length === 0) dynamicAngleIndices = null;
+          else console.log(`  Dynamic angles enabled for: ${dynamicAngleIndices.map(i => `Angle ${i + 1}`).join(', ')}`);
+        }
+        if (!dynamicAngleIndices) console.log('  Dynamic angles enabled for all angles');
+      }
+      console.log('');
+    }
+
     console.log('  Detecting faces in video frame(s)...');
     // Build the list of video paths to run face detection on.
-    // For multi-angle, pass all synced output files; for single-angle, omit (auto-detected).
+    // Pass all synced output files so setup-camera can find them in Docker.
     const cameraDetectArgs = ['scripts/camera/setup-camera.js', '--detect-only'];
-    if (videoSrcsForRemotion && videoSrcsForRemotion.length > 1) {
+    if (videoSrcsForRemotion && videoSrcsForRemotion.length > 0) {
       const absPaths = videoSrcsForRemotion.map(rel => path.join(cwd, 'public', rel));
       cameraDetectArgs.push('--videos', ...absPaths);
+    }
+    if (useDynamicAngles) {
+      cameraDetectArgs.push('--dynamic-angles', '--interval-minutes', String(intervalMinutes));
+      if (dynamicAngleIndices) {
+        cameraDetectArgs.push('--dynamic-angles-indices', dynamicAngleIndices.join(','));
+      }
     }
     try {
       await spawnStep('node', cameraDetectArgs);

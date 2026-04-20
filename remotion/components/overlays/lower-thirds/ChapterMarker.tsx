@@ -9,6 +9,7 @@ export interface ChapterMarkerProps {
   brand: Brand;
   chapterTitle?: string;
   durationInFrames: number;
+  nextMarkerFrame?: number;
 }
 
 // Loop duration for typing animation (in seconds)
@@ -19,9 +20,11 @@ export const ChapterMarker: React.FC<ChapterMarkerProps> = ({
   brand,
   chapterTitle = 'Chapter',
   durationInFrames,
+  nextMarkerFrame,
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
+  const currentGlobalFrame = frame; // frame within this Sequence
 
   const { colors, shape } = brand;
 
@@ -44,6 +47,26 @@ export const ChapterMarker: React.FC<ChapterMarkerProps> = ({
 
   const slideIn = interpolate(entrySpring, [0, 1], [-80, 0]);
   const entryOpacity = interpolate(frame, [0, 8], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
+
+  // Fade to 0.5 opacity after 3 seconds
+  const FADE_START_FRAMES = 3 * fps;
+  let opacity = interpolate(
+    frame,
+    [0, FADE_START_FRAMES, FADE_START_FRAMES + 30],
+    [entryOpacity, 1, 0.5],
+    { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
+  );
+
+  // Fade out before next marker appears
+  if (nextMarkerFrame !== undefined) {
+    const fadeOutStart = durationInFrames - 60; // Start fading 1s before end
+    if (frame > fadeOutStart) {
+      opacity = interpolate(frame, [fadeOutStart, durationInFrames], [opacity, 0], {
+        extrapolateLeft: 'clamp',
+        extrapolateRight: 'clamp',
+      });
+    }
+  }
 
   // Terminal content
   const chapterLine = `chapter: "${chapterTitle}",`;
@@ -115,7 +138,7 @@ export const ChapterMarker: React.FC<ChapterMarkerProps> = ({
         justifyContent: 'flex-start',
         pointerEvents: 'none',
         transform: `translateX(${slideIn}px)`,
-        opacity: entryOpacity,
+        opacity,
       }}
     >
         {/* Terminal window */}

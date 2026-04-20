@@ -14,7 +14,9 @@ export type GraphicType =
   | 'LowerThird' | 'Callout'
   // Chapter markers (persistent overlays)
   | 'ChapterMarker' | 'ChapterMarkerEnd'
-  // Overlay components
+  // Lower-third overlays
+  | 'ConceptExplainer' | 'NameTitle'
+  // Keyword overlay components
   | 'AwardsOverlay' | 'CodingOverlay' | 'EngineeringOverlay'
   | 'AIOverlay' | 'InfrastructureOverlay' | 'PracticeOverlay'
   | 'RoleOverlay' | 'LanguageOverlay' | 'FrameworkOverlay'

@@ -12,9 +12,28 @@ import { IconTrash } from '@tabler/icons-react';
 
 type Detection  = { x: number; y: number; w: number; h: number; score: number };
 /** `angleName` is set for multi-angle shoots; undefined for single-angle (legacy). */
-type FaceBox    = { id: number; x: number; y: number; w: number; h: number; speaker: string; angleName?: string };
+type FaceBox    = { id: number; x: number; y: number; w: number; h: number; speaker: string; angleName?: string; timeframeIdx?: number };
+
+/** One timeframe entry for dynamic angles (camera angle changes over time). */
+type TimeframeInfo = {
+  timestamp: number;
+  fromTime: number;
+  toTime: number;
+  frameFile: string;
+  detectFile: string;
+  timeLabel: string;
+};
+
 /** One entry per camera angle from angles.json (written by setup-camera.js). */
-type AngleInfo  = { angleName: string; videoSrc: string; frameFile: string; detectFile: string };
+type AngleInfo  = {
+  angleName: string;
+  videoSrc: string;
+  frameFile: string;
+  detectFile: string;
+  /** Multiple timeframes when camera angle changes during filming (dynamic angles). */
+  timeframes?: TimeframeInfo[];
+};
+
 type ResizeHandle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 
 type Drag =
@@ -157,6 +176,7 @@ export default function CameraPage() {
   // Multi-angle state — null when angles.json is absent (single-angle mode)
   const [angles, setAngles]               = useState<AngleInfo[] | null>(null);
   const [currentAngleIdx, setCurrentAngleIdx] = useState(0);
+  const [currentTimeframeIdx, setCurrentTimeframeIdx] = useState(0); // For dynamic angles
   const [angleRawDetections, setAngleRawDetections] = useState<Record<string, Detection[]>>({});
   const [angleImgSizes, setAngleImgSizes] = useState<Record<string, { w: number; h: number }>>({});
   const angleBoxesInitialized             = useRef<Set<string>>(new Set());
@@ -168,10 +188,12 @@ export default function CameraPage() {
   // Refs so async closures (drag events) can read current angle without stale captures
   const anglesRef        = useRef(angles);
   const currentAngleIdxRef = useRef(currentAngleIdx);
+  const currentTimeframeIdxRef = useRef(currentTimeframeIdx);
   dragRef.current          = drag;
   imgSizeRef.current       = imgSize;
   anglesRef.current        = angles;
   currentAngleIdxRef.current = currentAngleIdx;
+  currentTimeframeIdxRef.current = currentTimeframeIdx;
 
   // ── Load data ───────────────────────────────────────────────────────────────
 
@@ -198,15 +220,26 @@ export default function CameraPage() {
         const anglesRes = await fetch('/transcribe/output/camera/angles.json');
         if (anglesRes.ok) {
           const anglesData: AngleInfo[] = await anglesRes.json();
-          if (anglesData.length > 1) {
+          if (anglesData.length >= 1) {
             setAngles(anglesData);
             const detMap: Record<string, Detection[]> = {};
             for (const angle of anglesData) {
+              // Load detections for primary frame or all timeframes
               const r = await fetch(`/transcribe/output/camera/${angle.detectFile}`);
               detMap[angle.angleName] = r.ok ? await r.json() : [];
+
+              // Also load detections for each timeframe if dynamic angles
+              if (angle.timeframes) {
+                for (const tf of angle.timeframes) {
+                  const tfRes = await fetch(`/transcribe/output/camera/${tf.detectFile}`);
+                  if (tfRes.ok) {
+                    detMap[`${angle.angleName}-${tf.timeLabel}`] = await tfRes.json();
+                  }
+                }
+              }
             }
             setAngleRawDetections(detMap);
-            return; // multi-angle loaded; skip single-angle path
+            if (anglesData.length > 1) return; // multi-angle loaded; skip single-angle path
           }
         }
 
@@ -248,16 +281,31 @@ export default function CameraPage() {
     }));
   }, [angles, imgSize, rawDetections]);
 
-  // Multi-angle: initialise boxes for the current angle once its image has loaded
+  // Multi-angle: initialise boxes for the current angle/timeframe once its image has loaded
   useEffect(() => {
     if (!angles) return;
     const currentAngle = angles[currentAngleIdx];
     if (!currentAngle) return;
-    const { angleName } = currentAngle;
-    const aImgSize = angleImgSizes[angleName];
-    const rawDets  = angleRawDetections[angleName];
-    if (!aImgSize || !rawDets || angleBoxesInitialized.current.has(angleName)) return;
-    angleBoxesInitialized.current.add(angleName);
+    const { angleName, timeframes } = currentAngle;
+
+    // Check if we're in dynamic angle mode (multiple timeframes)
+    const hasTimeframes = timeframes && timeframes.length > 0;
+    const timeframeIdx = hasTimeframes ? currentTimeframeIdx : undefined;
+    const timeframe = hasTimeframes ? timeframes[timeframeIdx!] : undefined;
+
+    // Use timeframe-specific key for tracking initialization
+    const initKey = hasTimeframes
+      ? `${angleName}-${timeframe?.timeLabel}`
+      : angleName;
+
+    const aImgSize = angleImgSizes[initKey] || angleImgSizes[angleName];
+    const rawDets = hasTimeframes
+      ? angleRawDetections[`${angleName}-${timeframe?.timeLabel}`]
+      : angleRawDetections[angleName];
+
+    if (!aImgSize || !rawDets || angleBoxesInitialized.current.has(initKey)) return;
+    angleBoxesInitialized.current.add(initKey);
+
     const aspectRatio = aImgSize.w / aImgSize.h;
     const newBoxes: FaceBox[] = rawDets.map(d => {
       const vp = computeCloseup(d, aspectRatio);
@@ -269,10 +317,11 @@ export default function CameraPage() {
         h: vp.h,
         speaker: '',
         angleName,
+        timeframeIdx: hasTimeframes ? timeframeIdx : undefined,
       };
     });
     if (newBoxes.length > 0) setBoxes(prev => [...prev, ...newBoxes]);
-  }, [angles, currentAngleIdx, angleImgSizes, angleRawDetections]);
+  }, [angles, currentAngleIdx, currentTimeframeIdx, angleImgSizes, angleRawDetections]);
 
   // ── Coordinate helpers ───────────────────────────────────────────────────────
 
@@ -320,8 +369,11 @@ export default function CameraPage() {
         const bw = Math.abs(x - d.sx), bh = Math.abs(y - d.sy);
         if (bw > MIN_BOX && bh > MIN_BOX) {
           const currentAngles = anglesRef.current;
-          const angleName = currentAngles ? currentAngles[currentAngleIdxRef.current]?.angleName : undefined;
-          setBoxes(prev => [...prev, { id: nextId.current++, x: bx, y: by, w: bw, h: bh, speaker: '', angleName }]);
+          const currentAngle = currentAngles ? currentAngles[currentAngleIdxRef.current] : undefined;
+          const angleName = currentAngle?.angleName;
+          const hasTimeframes = currentAngle?.timeframes && currentAngle.timeframes.length > 0;
+          const timeframeIdx = hasTimeframes ? currentTimeframeIdxRef.current : undefined;
+          setBoxes(prev => [...prev, { id: nextId.current++, x: bx, y: by, w: bw, h: bh, speaker: '', angleName, timeframeIdx }]);
         }
       }
       setDrag({ mode: 'idle' });
@@ -376,14 +428,24 @@ export default function CameraPage() {
     setBoxes(prev => prev.filter(b => b.id !== id));
 
   const addBox = () => {
-    const angleName = angles ? angles[currentAngleIdx]?.angleName : undefined;
-    setBoxes(prev => [...prev, { id: nextId.current++, x: 0.1, y: 0.1, w: 0.2, h: 0.35, speaker: '', angleName }]);
+    const currentAngle = angles?.[currentAngleIdx];
+    const angleName = currentAngle?.angleName;
+    const hasTimeframes = currentAngle?.timeframes && currentAngle.timeframes.length > 0;
+    const timeframeIdx = hasTimeframes ? currentTimeframeIdx : undefined;
+    setBoxes(prev => [...prev, { id: nextId.current++, x: 0.1, y: 0.1, w: 0.2, h: 0.35, speaker: '', angleName, timeframeIdx }]);
   };
 
   const clearBoxes = () => {
     if (currentAngleName) {
-      // Multi-angle: only clear boxes for the currently visible angle
-      setBoxes(prev => prev.filter(b => b.angleName !== currentAngleName));
+      // Multi-angle with timeframes: only clear boxes for the currently visible timeframe
+      const currentAngle = angles?.[currentAngleIdx];
+      const hasTimeframes = currentAngle?.timeframes && currentAngle.timeframes.length > 0;
+      if (hasTimeframes) {
+        setBoxes(prev => prev.filter(b => !(b.angleName === currentAngleName && b.timeframeIdx === currentTimeframeIdx)));
+      } else {
+        // Multi-angle without timeframes: clear all boxes for this angle
+        setBoxes(prev => prev.filter(b => b.angleName !== currentAngleName));
+      }
     } else {
       setBoxes([]);
     }
@@ -392,22 +454,128 @@ export default function CameraPage() {
   const setSpeaker = (id: number, speaker: string) =>
     setBoxes(prev => prev.map(b => b.id === id ? { ...b, speaker } : b));
 
+  // ── Timeframe switching with speaker label carryover ─────────────────────────
+
+  const switchToTimeframe = (newTimeframeIdx: number) => {
+    const currentAngle = angles?.[currentAngleIdx];
+    if (!currentAngle?.timeframes) {
+      setCurrentTimeframeIdx(newTimeframeIdx);
+      return;
+    }
+
+    const angleName = currentAngle.angleName;
+    const prevTimeframeIdx = currentTimeframeIdx;
+
+    // Get speaker assignments from current timeframe boxes
+    const prevBoxes = boxes.filter(b => b.angleName === angleName && b.timeframeIdx === prevTimeframeIdx);
+    const speakerAssignments = new Map<number, string>(); // box id -> speaker
+    prevBoxes.forEach((box, idx) => {
+      if (box.speaker) {
+        speakerAssignments.set(idx, box.speaker); // Use index as key for matching
+      }
+    });
+
+    setCurrentTimeframeIdx(newTimeframeIdx);
+
+    // Apply speaker labels to new timeframe boxes if they exist
+    if (speakerAssignments.size > 0) {
+      setTimeout(() => {
+        setBoxes(prev => {
+          const newBoxes = [...prev];
+          const targetBoxes = newBoxes.filter(b => b.angleName === angleName && b.timeframeIdx === newTimeframeIdx);
+
+          // Match by spatial proximity or index
+          targetBoxes.forEach((box, idx) => {
+            const speaker = speakerAssignments.get(idx);
+            if (speaker && !box.speaker) {
+              box.speaker = speaker;
+            }
+          });
+
+          return newBoxes;
+        });
+      }, 0);
+    }
+  };
+
   // ── Save ─────────────────────────────────────────────────────────────────────
 
   const handleSave = async () => {
     const speakerMap: Record<string, object> = {};
     const r4 = (n: number) => Math.round(n * 10000) / 10000;
+
+    // Group boxes by speaker and angle (critical for multi-angle with timeframes)
+    const boxesBySpeakerAngle = new Map<string, FaceBox[]>();
     for (const box of boxes) {
       if (!box.speaker) continue;
-      const cx = r4(box.x + box.w / 2);
-      const cy = r4(box.y + box.h / 2);
-      speakerMap[box.speaker] = {
-        label: box.speaker,
-        closeupViewport: { cx, cy, w: r4(box.w), h: r4(box.h) },
-        portraitCx: cx,
-        // Include angleName so CameraPlayer knows which angle video to show
-        ...(box.angleName ? { angleName: box.angleName } : {}),
-      };
+      const key = `${box.speaker}:${box.angleName || 'default'}`;
+      if (!boxesBySpeakerAngle.has(key)) {
+        boxesBySpeakerAngle.set(key, []);
+      }
+      boxesBySpeakerAngle.get(key)!.push(box);
+    }
+
+    // Build speaker profiles with time-keyed viewports when applicable
+    for (const [key, speakerBoxes] of boxesBySpeakerAngle) {
+      const speaker = key.split(':')[0];
+      // Check if this speaker has time-keyed viewports (different boxes at different times)
+      const hasTimeframes = speakerBoxes.some(b => b.timeframeIdx !== undefined);
+
+      if (hasTimeframes) {
+        // Sort by timeframe index
+        const sortedBoxes = [...speakerBoxes].sort((a, b) =>
+          (a.timeframeIdx ?? 0) - (b.timeframeIdx ?? 0)
+        );
+
+        // Get the angle info to determine time ranges
+        const angleName = sortedBoxes[0].angleName;
+        const angle = angles?.find(a => a.angleName === angleName);
+        const timeframes = angle?.timeframes;
+
+        // Build closeupViewportsByTime
+        const closeupViewportsByTime = sortedBoxes.map(box => {
+          const tfIdx = box.timeframeIdx ?? 0;
+          const timeframe = timeframes?.[tfIdx];
+          return {
+            from: timeframe?.fromTime ?? 0,
+            to: timeframe?.toTime ?? 0,
+            viewport: {
+              cx: r4(box.x + box.w / 2),
+              cy: r4(box.y + box.h / 2),
+              w: r4(box.w),
+              h: r4(box.h),
+            },
+          };
+        });
+
+        // Use first viewport as default closeupViewport
+        const firstBox = sortedBoxes[0];
+        const cx = r4(firstBox.x + firstBox.w / 2);
+        const cy = r4(firstBox.y + firstBox.h / 2);
+
+        // Use speaker+angle as key to prevent overwriting when speaker appears on multiple angles
+        const mapKey = angleName ? `${speaker}:${angleName}` : speaker;
+        speakerMap[mapKey] = {
+          label: speaker,
+          closeupViewport: { cx, cy, w: r4(firstBox.w), h: r4(firstBox.h) },
+          closeupViewportsByTime,
+          portraitCx: cx,
+          ...(angleName ? { angleName } : {}),
+        };
+      } else {
+        // Single viewport (no timeframes)
+        const box = speakerBoxes[0];
+        const cx = r4(box.x + box.w / 2);
+        const cy = r4(box.y + box.h / 2);
+        const boxAngleName = box.angleName;
+        const mapKey = boxAngleName ? `${speaker}:${boxAngleName}` : speaker;
+        speakerMap[mapKey] = {
+          label: speaker,
+          closeupViewport: { cx, cy, w: r4(box.w), h: r4(box.h) },
+          portraitCx: cx,
+          ...(boxAngleName ? { angleName: boxAngleName } : {}),
+        };
+      }
     }
 
     // Primary source dimensions: angle1 for multi-angle, or the single frame
@@ -416,16 +584,25 @@ export default function CameraPage() {
     const sw = primarySize?.w ?? imgSize?.w ?? 1920;
     const sh = primarySize?.h ?? imgSize?.h ?? 1080;
 
-    // Build angles config for multi-angle shoots
+    // Build angles config for multi-angle shoots (include time-keyed wide viewports per angle if needed)
     const anglesConfig = angles
       ? Object.fromEntries(
           angles.map(a => {
             const aSize = angleImgSizes[a.angleName];
-            return [a.angleName, {
+            const result: Record<string, unknown> = {
               videoSrc:     a.videoSrc,
               sourceWidth:  aSize?.w ?? sw,
               sourceHeight: aSize?.h ?? sh,
-            }];
+            };
+
+            // If angle has timeframes, include wideViewportsByTime
+            if (a.timeframes && a.timeframes.length > 0) {
+              // For now, wide viewports are constant per angle
+              // In future, could support time-keyed wide viewports too
+              result.wideViewport = { cx: 0.5, cy: 0.5, w: 1.0, h: 1.0 };
+            }
+
+            return [a.angleName, result];
           })
         )
       : undefined;
@@ -462,15 +639,23 @@ export default function CameraPage() {
     ? { x: Math.min(drag.sx, drag.cx), y: Math.min(drag.sy, drag.cy), w: Math.abs(drag.cx - drag.sx), h: Math.abs(drag.cy - drag.sy) }
     : null;
 
-  // In multi-angle mode, only show the current angle's boxes on the canvas
-  const currentAngleName = angles ? angles[currentAngleIdx]?.angleName : undefined;
+  // In multi-angle mode, only show the current angle/timeframe's boxes on the canvas
+  const currentAngle = angles?.[currentAngleIdx];
+  const currentAngleName = currentAngle?.angleName;
+  const currentTimeframes = currentAngle?.timeframes;
+  const hasTimeframes = currentTimeframes && currentTimeframes.length > 0;
+
   const visibleBoxes = currentAngleName
-    ? boxes.filter(b => b.angleName === currentAngleName)
+    ? hasTimeframes
+      ? boxes.filter(b => b.angleName === currentAngleName && b.timeframeIdx === currentTimeframeIdx)
+      : boxes.filter(b => b.angleName === currentAngleName)
     : boxes;
 
-  // Frame image path: per-angle in multi-angle mode, legacy path otherwise
+  // Frame image path: per-angle/timeframe in multi-angle mode, legacy path otherwise
   const frameSrc = angles
-    ? `/transcribe/output/camera/${angles[currentAngleIdx]?.frameFile}`
+    ? hasTimeframes
+      ? `/transcribe/output/camera/${currentTimeframes[currentTimeframeIdx]?.frameFile}`
+      : `/transcribe/output/camera/${angles[currentAngleIdx]?.frameFile}`
     : '/transcribe/output/camera/frame.jpg';
 
   const assignedCount = boxes.filter(b => b.speaker).length;
@@ -500,7 +685,7 @@ export default function CameraPage() {
           {/* ── Image + SVG overlay ── */}
           <Box style={{ flex: '1 1 auto', lineHeight: 0 }}>
 
-            {/* Angle tabs — only shown in multi-angle mode (outside relative container) */}
+            {/* Angle tabs — shown in multi-angle mode or when timeframes exist */}
             {angles && angles.length > 1 && (
               <Group mb="xs" gap="xs">
                 {angles.map((angle, i) => (
@@ -508,9 +693,30 @@ export default function CameraPage() {
                     key={angle.angleName}
                     size="xs"
                     variant={i === currentAngleIdx ? 'filled' : 'light'}
-                    onClick={() => setCurrentAngleIdx(i)}
+                    onClick={() => {
+                      setCurrentAngleIdx(i);
+                      setCurrentTimeframeIdx(0); // Reset timeframe when switching angles
+                    }}
                   >
                     {angle.angleName}
+                  </Button>
+                ))}
+              </Group>
+            )}
+
+            {/* Timeframe tabs — shown when current angle has multiple timeframes (dynamic angles) */}
+            {hasTimeframes && currentTimeframes && (
+              <Group mb="xs" gap="xs">
+                <Text size="xs" c="dimmed" mr="xs">Timeframe:</Text>
+                {currentTimeframes.map((tf, i) => (
+                  <Button
+                    key={tf.timeLabel}
+                    size="xs"
+                    variant={i === currentTimeframeIdx ? 'filled' : 'light'}
+                    color={i === currentTimeframeIdx ? 'teal' : 'gray'}
+                    onClick={() => switchToTimeframe(i)}
+                  >
+                    {tf.timeLabel}
                   </Button>
                 ))}
               </Group>

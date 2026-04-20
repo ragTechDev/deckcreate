@@ -1,5 +1,5 @@
 import React from 'react';
-import { useCurrentFrame, useVideoConfig, spring, interpolate, AbsoluteFill, staticFile } from 'remotion';
+import { useCurrentFrame, useVideoConfig, spring, interpolate, staticFile } from 'remotion';
 import type { Brand } from '../../../types/brand';
 
 const MONO = "'SF Mono', 'Monaco', 'Cascadia Code', 'Consolas', monospace";
@@ -81,12 +81,12 @@ export const ConceptExplainer: React.FC<ConceptExplainerProps> = ({
   );
 
   return (
-    <AbsoluteFill
+    <div
       style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'flex-end',
-        padding: '0 0 52px',
+        position: 'absolute',
+        top: '50%',
+        right: '10%',
+        transform: 'translateY(-50%)',
         pointerEvents: 'none',
       }}
     >
@@ -189,6 +189,6 @@ export const ConceptExplainer: React.FC<ConceptExplainerProps> = ({
           </div>
         </div>
       </div>
-    </AbsoluteFill>
+    </div>
   );
 };

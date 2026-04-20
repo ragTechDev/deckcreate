@@ -95,6 +95,7 @@ export const OverlayRenderer: React.FC<OverlayRendererProps> = ({
       startFrame: number;
       durationInFrames: number;
       key: string;
+      nextMarkerFrame?: number;
     }> = [];
 
     let totalGraphics = 0;
@@ -104,23 +105,53 @@ export const OverlayRenderer: React.FC<OverlayRendererProps> = ({
       totalGraphics += segment.graphics.length;
 
       segment.graphics.forEach((graphic, idx) => {
-        let startFrame: number;
+        const fullDurationFrames = Math.round(graphic.duration * fps);
+
         if (segment.hook) {
-          // Hook segment: remap raw audio time within the hook group (starts at frame 0)
-          startFrame = rawTimeToGroupFrame(graphic.at, hookSections, fps);
+          // Hook segment: add cue to BOTH hook and main timelines
+
+          // 1. Hook timeline (capped to hook clip length, or to hook section end for ChapterMarkers)
+          const hookStartFrame = rawTimeToGroupFrame(graphic.at, hookSections, fps);
+          let hookDuration = fullDurationFrames;
+          if (segment.hookFrom !== undefined && segment.hookTo !== undefined) {
+            const hookClipDuration = Math.round((segment.hookTo - segment.hookFrom) * fps);
+            hookDuration = Math.min(hookDuration, hookClipDuration);
+          }
+          // For ChapterMarkers in hooks: cap to total hook sections duration so they don't carry into main
+          if (graphic.type === 'ChapterMarker' && hookSections.length > 0) {
+            const totalHookDuration = hookSections.reduce((sum, s) => sum + (s.trimAfter - s.trimBefore), 0);
+            const maxAllowedDuration = totalHookDuration - hookStartFrame;
+            console.log(`[OverlayRenderer] ChapterMarker hook calc: totalHookDuration=${totalHookDuration}, hookStartFrame=${hookStartFrame}, maxAllowed=${maxAllowedDuration}, originalDuration=${hookDuration}`);
+            hookDuration = Math.min(hookDuration, maxAllowedDuration);
+          }
+          const finalDuration = Math.max(1, Math.floor(hookDuration));
+          cues.push({
+            cue: graphic,
+            startFrame: hookStartFrame,
+            durationInFrames: finalDuration,
+            key: `${segment.id}-${idx}-hook-${graphic.type}`,
+          });
+          console.log(`[OverlayRenderer] Hook cue ${graphic.type} on seg ${segment.id}: hookStart=${hookStartFrame}, duration=${finalDuration}, endFrame=${hookStartFrame + finalDuration}`);
+
+          // 2. Main timeline (full duration at original position)
+          const mainCueStartFrame = mainStartFrame + rawTimeToGroupFrame(graphic.at, mainSections, fps);
+          cues.push({
+            cue: graphic,
+            startFrame: mainCueStartFrame,
+            durationInFrames: fullDurationFrames,
+            key: `${segment.id}-${idx}-main-${graphic.type}`,
+          });
+          console.log(`[OverlayRenderer] Main cue ${graphic.type} on seg ${segment.id}: mainStart=${mainCueStartFrame}, duration=${fullDurationFrames}`);
         } else {
-          // Main segment: remap raw audio time and offset by hook + intro frames
-          startFrame = mainStartFrame + rawTimeToGroupFrame(graphic.at, mainSections, fps);
+          // Non-hook segment: add to main timeline only
+          const startFrame = mainStartFrame + rawTimeToGroupFrame(graphic.at, mainSections, fps);
+          cues.push({
+            cue: graphic,
+            startFrame,
+            durationInFrames: fullDurationFrames,
+            key: `${segment.id}-${idx}-${graphic.type}`,
+          });
         }
-
-        const durationInFrames = Math.round(graphic.duration * fps);
-
-        cues.push({
-          cue: graphic,
-          startFrame,
-          durationInFrames,
-          key: `${segment.id}-${idx}-${graphic.type}`,
-        });
       });
     });
 
@@ -139,19 +170,37 @@ export const OverlayRenderer: React.FC<OverlayRendererProps> = ({
       }
 
       if (isChapterMarker) {
+        // Skip extension for hook ChapterMarkers - they should end when hook ends
+        const isHookCue = cue.key.includes('-hook-');
+        if (isHookCue) {
+          // Just pass nextMarkerFrame for fade-out, don't extend duration
+          let nextMarkerStartFrame = Infinity;
+          for (let j = i + 1; j < cues.length; j++) {
+            if (cues[j].cue.type === 'ChapterMarker' || cues[j].cue.type === 'ChapterMarkerEnd') {
+              nextMarkerStartFrame = cues[j].startFrame;
+              break;
+            }
+          }
+          cues[i] = { ...cue, nextMarkerFrame: nextMarkerStartFrame };
+          continue;
+        }
+
         // Find the next ChapterMarker or ChapterMarkerEnd cue
-        let endFrame = Infinity;
+        let nextMarkerStartFrame = Infinity;
         for (let j = i + 1; j < cues.length; j++) {
           if (cues[j].cue.type === 'ChapterMarker' || cues[j].cue.type === 'ChapterMarkerEnd') {
-            endFrame = cues[j].startFrame;
+            nextMarkerStartFrame = cues[j].startFrame;
             break;
           }
         }
-        // Extend duration to reach the next chapter marker/end, but respect requested minimum
+        // Previous marker fades out as next one starts - no gap
+        // Fade-out is 60 frames, so marker ends exactly when next starts
+        const FADE_OUT_FRAMES = 60;
         const requestedDuration = cue.durationInFrames;
-        const extendedDuration = Math.min(requestedDuration, endFrame - cue.startFrame);
-        // Use the longer of the two - either the requested duration or until the next marker
-        cues[i] = { ...cue, durationInFrames: Math.max(requestedDuration, extendedDuration) };
+        const availableDuration = nextMarkerStartFrame - cue.startFrame;
+        // Cap duration so fade-out completes exactly when next marker starts
+        const maxDuration = Math.min(Math.max(requestedDuration, availableDuration), nextMarkerStartFrame - cue.startFrame);
+        cues[i] = { ...cue, durationInFrames: maxDuration, nextMarkerFrame: nextMarkerStartFrame };
       } else {
         // Normal cues: cap at next cue's start
         if (i < cues.length - 1) {
@@ -164,6 +213,7 @@ export const OverlayRenderer: React.FC<OverlayRendererProps> = ({
     }
 
     console.log(`[OverlayRenderer] Found ${totalGraphics} graphics in ${segments.length} segments`);
+    console.log('[OverlayRenderer] All cues:', cues.map(c => ({ type: c.cue.type, start: c.startFrame, dur: c.durationInFrames })));
     return cues;
   }, [segments, fps, mainSections, hookSections, mainStartFrame]);
 
@@ -180,7 +230,7 @@ export const OverlayRenderer: React.FC<OverlayRendererProps> = ({
 
   return (
     <>
-      {visibleCues.map(({ cue, startFrame, durationInFrames, key }) => {
+      {visibleCues.map(({ cue, startFrame, durationInFrames, key, nextMarkerFrame }) => {
         const Component = COMPONENT_MAP[cue.type];
         if (!Component) {
           console.warn(`Unknown overlay component: ${cue.type}`);
@@ -189,11 +239,16 @@ export const OverlayRenderer: React.FC<OverlayRendererProps> = ({
 
         // Pass brand, durationInFrames, and other props (excluding brand string from transcript)
         const { brand: _, ...otherProps } = cue.props || {};
-        const props = {
+        const props: any = {
           ...otherProps,
           brand,
           durationInFrames,
         };
+
+        // Pass nextMarkerFrame to ChapterMarker for fade-out timing
+        if (cue.type === 'ChapterMarker' && nextMarkerFrame !== undefined) {
+          props.nextMarkerFrame = nextMarkerFrame;
+        }
 
         console.log(`[OverlayRenderer] Rendering ${cue.type} at frame ${startFrame} for ${durationInFrames} frames`);
 
