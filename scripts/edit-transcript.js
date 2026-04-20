@@ -342,17 +342,6 @@ function buildTextWithCuts(seg) {
   return fixContractions([seg.text, ...cutMarkers].filter(Boolean).join(' ') || parts.join(' '));
 }
 
-function findNearestToken(atSeconds, tokens) {
-  if (!tokens.length) return null;
-  let best = tokens[0];
-  let bestDelta = Math.abs(tokens[0].t_dtw - atSeconds);
-  for (const token of tokens) {
-    const delta = Math.abs(token.t_dtw - atSeconds);
-    if (delta < bestDelta) { bestDelta = delta; best = token; }
-  }
-  return best;
-}
-
 /**
  * Returns the raw token index of the first token of a phrase match, or -1.
  * Uses the same BPE word-group logic as resolvePhraseToTimeRange.
@@ -458,17 +447,37 @@ function resolvePhraseToTimeRange(phrase, tokens, segEnd) {
   return null;
 }
 
+function buildWordGroups(tokens) {
+  const groups = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (isSpecialToken(t) || normalize(t.text) === '') continue;
+    if (groups.length === 0 || t.text.startsWith(' ')) {
+      groups.push({ text: t.text, t_dtw: t.t_dtw });
+    } else {
+      groups[groups.length - 1].text += t.text;
+    }
+  }
+  return groups;
+}
+
 function buildGraphicLine(graphic, tokens) {
-  const nearest = findNearestToken(graphic.at, tokens);
+  const wordGroups = buildWordGroups(tokens);
   let atValue;
 
-  if (nearest) {
-    const word = stripPunctuation(nearest.text);
-    const tokenIdx = tokens.indexOf(nearest);
+  if (wordGroups.length) {
+    let best = wordGroups[0];
+    let bestDelta = Math.abs(best.t_dtw - graphic.at);
+    for (const g of wordGroups) {
+      const d = Math.abs(g.t_dtw - graphic.at);
+      if (d < bestDelta) { bestDelta = d; best = g; }
+    }
+    const word = stripPunctuation(best.text).trim();
     const normalizedWord = word.toLowerCase();
-    const occurrencesBefore = tokens
-      .slice(0, tokenIdx)
-      .filter(t => normalize(t.text) === normalizedWord).length;
+    const groupIdx = wordGroups.indexOf(best);
+    const occurrencesBefore = wordGroups
+      .slice(0, groupIdx)
+      .filter(g => normalize(g.text) === normalizedWord).length;
     atValue = occurrencesBefore > 0 ? `"${word}:${occurrencesBefore + 1}"` : `"${word}"`;
   } else {
     atValue = String(graphic.at);
@@ -646,17 +655,22 @@ function parseCameraLine(line, tokens, segStart) {
   if (kv.at !== undefined) {
     const raw = kv.at;
     const colonIdx = raw.lastIndexOf(':');
-    let word, occurrence;
+    let phrase, occurrence;
     if (colonIdx > 0 && !isNaN(raw.slice(colonIdx + 1))) {
-      word = raw.slice(0, colonIdx).toLowerCase();
+      phrase = raw.slice(0, colonIdx);
       occurrence = parseInt(raw.slice(colonIdx + 1)) - 1;
     } else {
-      word = raw.toLowerCase();
+      phrase = raw;
       occurrence = 0;
     }
-    const matches = tokens.filter(t => normalize(t.text) === word);
-    const token = matches[occurrence] ?? null;
-    at = token ? token.t_dtw : parseFloat(raw) || segStart;
+    if (occurrence === 0) {
+      const tokenIdx = resolvePhraseToFirstTokenIndex(phrase, tokens);
+      at = tokenIdx !== -1 ? tokens[tokenIdx].t_dtw : (parseFloat(raw) || segStart);
+    } else {
+      const matches = tokens.filter(t => normalize(t.text) === phrase.toLowerCase());
+      const token = matches[occurrence] ?? null;
+      at = token ? token.t_dtw : (parseFloat(raw) || segStart);
+    }
   }
 
   const shot = target.toLowerCase() === 'wide' ? 'wide' : 'closeup';
@@ -672,15 +686,21 @@ function buildCameraLine(cue, tokens, segStart) {
   if (!tokens.length || Math.abs(cue.at - segStart) < 0.05) {
     return `> CAM ${target}`;
   }
-  const nearest = findNearestToken(cue.at, tokens);
+  const wordGroups = buildWordGroups(tokens);
   let atValue;
-  if (nearest) {
-    const word = stripPunctuation(nearest.text);
-    const tokenIdx = tokens.indexOf(nearest);
+  if (wordGroups.length) {
+    let best = wordGroups[0];
+    let bestDelta = Math.abs(best.t_dtw - cue.at);
+    for (const g of wordGroups) {
+      const d = Math.abs(g.t_dtw - cue.at);
+      if (d < bestDelta) { bestDelta = d; best = g; }
+    }
+    const word = stripPunctuation(best.text).trim();
     const normalizedWord = word.toLowerCase();
-    const occurrencesBefore = tokens
-      .slice(0, tokenIdx)
-      .filter(t => normalize(t.text) === normalizedWord).length;
+    const groupIdx = wordGroups.indexOf(best);
+    const occurrencesBefore = wordGroups
+      .slice(0, groupIdx)
+      .filter(g => normalize(g.text) === normalizedWord).length;
     atValue = occurrencesBefore > 0 ? `"${word}:${occurrencesBefore + 1}"` : `"${word}"`;
   } else {
     atValue = String(cue.at);
@@ -688,30 +708,36 @@ function buildCameraLine(cue, tokens, segStart) {
   return `> CAM ${target}  at=${atValue}`;
 }
 
-function parseGraphicLine(line, tokens) {
+function parseGraphicLine(line, tokens, segStart = 0) {
   const spaceIdx = line.search(/\s/);
   const type = spaceIdx === -1 ? line : line.slice(0, spaceIdx);
   const kvStr = spaceIdx === -1 ? '' : line.slice(spaceIdx);
   const kv = parseKv(kvStr);
 
-  // Resolve at="word" or at="word:2" to absolute seconds via token t_dtw
-  let at = 0;
+  // Resolve at="word" or at="word:2" to absolute seconds via token t_dtw.
+  // Uses word-group matching so contractions (e.g. "I'm" → [" I", "'m"]) resolve correctly.
+  let at = segStart;
   if (kv.at !== undefined) {
     const raw = kv.at;
     const colonIdx = raw.lastIndexOf(':');
-    let word, occurrence;
+    let phrase, occurrence;
 
     if (colonIdx > 0 && !isNaN(raw.slice(colonIdx + 1))) {
-      word = raw.slice(0, colonIdx).toLowerCase();
+      phrase = raw.slice(0, colonIdx);
       occurrence = parseInt(raw.slice(colonIdx + 1)) - 1;
     } else {
-      word = raw.toLowerCase();
+      phrase = raw;
       occurrence = 0;
     }
 
-    const matches = tokens.filter(t => normalize(t.text) === word);
-    const token = matches[occurrence] ?? null;
-    at = token ? token.t_dtw : parseFloat(raw) || 0;
+    if (occurrence === 0) {
+      const tokenIdx = resolvePhraseToFirstTokenIndex(phrase, tokens);
+      at = tokenIdx !== -1 ? tokens[tokenIdx].t_dtw : (parseFloat(raw) || segStart);
+    } else {
+      const matches = tokens.filter(t => normalize(t.text) === phrase.toLowerCase());
+      const token = matches[occurrence] ?? null;
+      at = token ? token.t_dtw : (parseFloat(raw) || segStart);
+    }
   }
 
   const duration = parseFloat(kv.duration) || 5;
@@ -992,7 +1018,7 @@ function mergeDocIntoTranscript(transcript, docContent) {
 
   function flushPending() {
     if (!pendingSeg) return;
-    const graphics   = pendingGraphicLines.map(l => parseGraphicLine(l, pendingSeg.tokens));
+    const graphics   = pendingGraphicLines.map(l => parseGraphicLine(l, pendingSeg.tokens, pendingSeg.start));
     const cameraCues = pendingCamLines.map(l => parseCameraLine(l, pendingSeg.tokens, pendingSeg.start));
     let hook = false, hookPhrase = null, hookFrom, hookTo, hookChar = null, hookGraphic = null;
     if (pendingHookLine !== null) {
