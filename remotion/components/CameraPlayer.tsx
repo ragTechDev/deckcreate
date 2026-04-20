@@ -167,11 +167,17 @@ export function buildCameraShots(
   let totalCloseupF    = 0;     // total closeup frames since last wide
   let cumFrame         = 0;     // used only while processing hook segments
 
+  const firstAngleVideoSrc = profiles.angles
+    ? Object.values(profiles.angles)[0]?.videoSrc
+    : undefined;
+
   function emitShot(endFrame: number): CameraShot {
     const speakerProfile = shotSpeaker ? profiles.speakers[shotSpeaker] : undefined;
     const angleName = speakerProfile?.angleName;
     const angleConfig = angleName ? profiles.angles?.[angleName] : undefined;
-    const videoSrc = angleConfig?.videoSrc;
+    // For wide shots in multi-angle setups, use the first angle's video so the
+    // primary src (which may not exist as a standalone file) is never the active layer.
+    const videoSrc = angleConfig?.videoSrc ?? firstAngleVideoSrc;
 
     const viewport =
       shotType === 'closeup' && shotSpeaker && speakerProfile
@@ -189,7 +195,7 @@ export function buildCameraShots(
 
     if (seg.hook) {
       // Hook segments: unchanged — accumulate via cumFrame
-      const next = activeSegments.find((cand) => cand.hook && !cand.cut && cand.id > seg.id);
+      const next = activeSegments.find((cand) => cand.hook && !cand.cut && cand.start > seg.start);
       const nextHookStart = next ? (next.hookFrom ?? next.start) : undefined;
       segDur   = Math.round(getOutputDuration(seg, nextHookStart) * fps);
       segStart = cumFrame;
@@ -199,7 +205,7 @@ export function buildCameraShots(
       // segments is accounted for. Duration = distance to next segment's output
       // start (includes trailing silence) for accurate pacing counters.
       segStart = hookTotalFrames + sourceToOutputFrame(seg.start, mainSections, fps);
-      const nextMainSeg = mainSegsNonCut.find(s => s.id > seg.id);
+      const nextMainSeg = mainSegsNonCut.find(s => s.start > seg.start);
       const segOutputEnd = nextMainSeg
         ? hookTotalFrames + sourceToOutputFrame(nextMainSeg.start, mainSections, fps)
         : hookTotalFrames + mainTotalFrames;

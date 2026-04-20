@@ -354,6 +354,33 @@ function findNearestToken(atSeconds, tokens) {
 }
 
 /**
+ * Returns the raw token index of the first token of a phrase match, or -1.
+ * Uses the same BPE word-group logic as resolvePhraseToTimeRange.
+ */
+function resolvePhraseToFirstTokenIndex(phrase, tokens) {
+  const words = phrase.trim().split(/\s+/).map(normalize).filter(Boolean);
+  if (!words.length) return -1;
+
+  const wordGroups = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (isSpecialToken(t) || normalize(t.text) === '') continue;
+    if (wordGroups.length === 0 || t.text.startsWith(' ')) {
+      wordGroups.push({ text: t.text, firstRawIdx: i });
+    } else {
+      wordGroups[wordGroups.length - 1].text += t.text;
+    }
+  }
+
+  for (let i = 0; i <= wordGroups.length - words.length; i++) {
+    if (words.every((w, j) => normalize(wordGroups[i + j].text) === w)) {
+      return wordGroups[i].firstRawIdx;
+    }
+  }
+  return -1;
+}
+
+/**
  * Finds a phrase (space-separated words) in a segment's token list and returns
  * the time range {from, to} covering it. `to` is the next token's t_dtw so the
  * last word isn't clipped; falls back to segEnd when no next token exists.
@@ -491,6 +518,18 @@ function buildInstructionsBlock() {
     '',
     '  OVERRIDE SPEAKER Override the speaker for one segment:',
     '                    [10] SPEAKER: Alice  text...',
+    '                  Or use an annotation (no inline text change needed):',
+    '                    [10] text...',
+    '                    > SPEAKER Alice',
+    '',
+    '  SPLIT SPEAKER   Change speaker mid-segment with > SPEAKER Name at="word".',
+    '                  Splits the segment at that word — everything from the word',
+    '                  onward becomes a new segment owned by the new speaker:',
+    '                    [11] software engineer. I\'m Victoria, solutions engineer.',
+    '                    > SPEAKER Victoria  at="I\'m"',
+    '                  The split is permanent: on the next doc rebuild the two',
+    '                  halves appear as separate numbered blocks.',
+    '                  Speaker names must match the SPEAKERS section exactly.',
     '',
     '  CAMERA          Add a > CAM line after a segment to force a specific shot.',
     '                  Applies at the start of the segment, or at a specific word:',
@@ -937,6 +976,8 @@ function mergeDocIntoTranscript(transcript, docContent) {
   const stripped = stripSpeakersSection(docContent);
 
   const byId = Object.fromEntries(transcript.segments.map(s => [s.id, s]));
+  const syntheticSegsAfter = {};
+  let nextSyntheticId = Math.max(0, ...transcript.segments.map(s => s.id)) + 1;
   let applied = 0;
   let currentSpeaker = null;
   let pendingSeg = null;
@@ -944,6 +985,7 @@ function mergeDocIntoTranscript(transcript, docContent) {
   let pendingCamLines = [];
   let pendingHookLine = null;
   let pendingVisualCuts = [];
+  let pendingSpeakerSplits = [];
   let videoStart = transcript.meta.videoStart;
   let videoEnd = transcript.meta.videoEnd;
   let nextSegIsVideoStart = false;
@@ -975,11 +1017,56 @@ function mergeDocIntoTranscript(transcript, docContent) {
       }
     }
     byId[pendingSeg.id] = { ...pendingSeg, hook, hookPhrase, hookFrom, hookTo, hookChar, hookGraphic, graphics, cameraCues, visualCuts: pendingVisualCuts.length ? [...pendingVisualCuts] : (pendingSeg.visualCuts ?? []) };
+
+    for (const splitStr of pendingSpeakerSplits) {
+      const nameMatch = splitStr.match(/^(\S+)/);
+      if (!nameMatch) continue;
+      const newSpeaker = renames[nameMatch[1]] ?? nameMatch[1];
+      const kv = parseKv(splitStr.slice(nameMatch[1].length));
+
+      if (!kv.at) {
+        byId[pendingSeg.id] = { ...byId[pendingSeg.id], speaker: newSpeaker };
+        continue;
+      }
+
+      const parentSeg = byId[pendingSeg.id];
+      const splitIdx = resolvePhraseToFirstTokenIndex(kv.at, parentSeg.tokens);
+      if (splitIdx === -1) {
+        console.warn(`  ⚠ SPEAKER split word "${kv.at}" not found in segment [${parentSeg.id}]`);
+        continue;
+      }
+
+      const tokensA = parentSeg.tokens.slice(0, splitIdx);
+      const tokensB = parentSeg.tokens.slice(splitIdx);
+      const splitTime = tokensB[0]?.t_dtw ?? parentSeg.end;
+      const textA = fixContractions(joinTokenTexts(tokensA.filter(t => !isSpecialToken(t)))).trim();
+      const textB = fixContractions(joinTokenTexts(tokensB.filter(t => !isSpecialToken(t)))).trim();
+
+      byId[parentSeg.id] = { ...parentSeg, tokens: tokensA, end: splitTime, text: textA };
+
+      const synthId = nextSyntheticId++;
+      const synthSeg = {
+        ...parentSeg,
+        id: synthId,
+        speaker: newSpeaker,
+        tokens: tokensB,
+        start: splitTime,
+        text: textB,
+        cut: false,
+        hook: false, hookPhrase: null, hookFrom: undefined, hookTo: undefined,
+        hookChar: null, hookGraphic: null,
+        graphics: [], cameraCues: [], visualCuts: [], cuts: [],
+      };
+      if (!syntheticSegsAfter[parentSeg.id]) syntheticSegsAfter[parentSeg.id] = [];
+      syntheticSegsAfter[parentSeg.id].push(synthSeg);
+    }
+
     pendingSeg = null;
     pendingGraphicLines = [];
     pendingCamLines = [];
     pendingHookLine = null;
     pendingVisualCuts = [];
+    pendingSpeakerSplits = [];
   }
 
   for (const line of stripped.split('\n')) {
@@ -1011,6 +1098,8 @@ function mergeDocIntoTranscript(transcript, docContent) {
         if (pendingSeg) pendingCamLines.push(annotation.slice(3).trim());
       } else if (annotation.startsWith('HOOK')) {
         if (pendingSeg) pendingHookLine = annotation.slice(4).trim();
+      } else if (annotation.startsWith('SPEAKER')) {
+        if (pendingSeg) pendingSpeakerSplits.push(annotation.slice(7).trim());
       } else if (annotation.startsWith('CUT')) {
         if (pendingSeg) {
           const timeMatch = annotation.slice(3).trim().match(/^([\d.]+)-([\d.]+)$/);
@@ -1077,10 +1166,15 @@ function mergeDocIntoTranscript(transcript, docContent) {
   if (videoStart !== transcript.meta.videoStart) console.log(`  Video start: ${videoStart}s`);
   if (videoEnd !== transcript.meta.videoEnd) console.log(`  Video end: ${videoEnd}s`);
   console.log(`  ${applied} segments merged.`);
+  const outSegments = [];
+  for (const s of transcript.segments) {
+    outSegments.push(byId[s.id] ?? s);
+    for (const syn of (syntheticSegsAfter[s.id] ?? [])) outSegments.push(syn);
+  }
   return {
     ...transcript,
     meta: { ...transcript.meta, videoStart, videoEnd },
-    segments: transcript.segments.map(s => byId[s.id] ?? s),
+    segments: outSegments,
   };
 }
 
@@ -1357,12 +1451,15 @@ async function main() {
       return best;
     }
 
+    const matchedExistingIds = new Set();
+
     transcript = {
       ...transcript,
       meta: { ...transcript.meta, ...existing.meta },
       segments: transcript.segments.map(seg => {
         const prev = findPrev(seg);
         if (!prev) return seg;
+        matchedExistingIds.add(prev.id);
 
         const prevTokensByTdtw = buildPrevTokensByTdtw(prev.tokens || []);
         const rawCountByBase = {};
@@ -1406,6 +1503,30 @@ async function main() {
         return { ...seg, speaker, cut: prev.cut, text, graphics: prev.graphics, tokens };
       }),
     };
+
+    // Re-inject synthetic segments (created by > SPEAKER splits) that were never
+    // matched by findPrev — these have no corresponding raw sentence.
+    const syntheticSegs = existing.segments.filter(s => !matchedExistingIds.has(s.id));
+    if (syntheticSegs.length > 0) {
+      const syntheticStarts = new Set(syntheticSegs.map(s => s.start));
+      const merged = [...transcript.segments, ...syntheticSegs].sort((a, b) => a.start - b.start);
+
+      // Re-trim any parent segment that overlaps its following synthetic — the raw
+      // re-segmentation restores the original end time, undoing the split trim.
+      const trimmed = merged.map((seg, i) => {
+        const next = merged[i + 1];
+        if (next && syntheticStarts.has(next.start) && seg.end > next.start + 0.01) {
+          const trimEnd = next.start;
+          const trimTokens = seg.tokens.filter(t => t.t_dtw < trimEnd);
+          const trimText = fixContractions(joinTokenTexts(trimTokens.filter(t => !isSpecialToken(t)))).trim() || seg.text;
+          return { ...seg, end: trimEnd, tokens: trimTokens, text: trimText };
+        }
+        return seg;
+      });
+
+      transcript = { ...transcript, segments: trimmed };
+    }
+
     console.log(`Merged into existing ${path.basename(outputPath)} — manual edits preserved.`);
   }
 
@@ -1483,4 +1604,4 @@ if (_argv1.endsWith('/edit-transcript.js') || _argv1.endsWith('/edit-transcript'
 }
 
 export default main;
-export { buildTextWithCuts, applyTextPartsToTokens, mergeDocIntoTranscript, buildDoc, deriveCuts, cleanCaptionText, buildSentencesVtt, buildSentencesSrt, getSubClips, getHookClips, resolvePhraseToTimeRange, autoCutPauses, autoCutDisfluencies, rebalanceBoundaryTokens, buildPrevTokensByTdtw, WORD_DURATION_ESTIMATE, CUT_START_BIAS, CUT_END_BIAS, isSpecialToken, isDisfluencyToken };
+export { buildTextWithCuts, applyTextPartsToTokens, mergeDocIntoTranscript, buildDoc, deriveCuts, cleanCaptionText, buildSentencesVtt, buildSentencesSrt, getSubClips, getHookClips, resolvePhraseToTimeRange, resolvePhraseToFirstTokenIndex, autoCutPauses, autoCutDisfluencies, rebalanceBoundaryTokens, buildPrevTokensByTdtw, WORD_DURATION_ESTIMATE, CUT_START_BIAS, CUT_END_BIAS, isSpecialToken, isDisfluencyToken };

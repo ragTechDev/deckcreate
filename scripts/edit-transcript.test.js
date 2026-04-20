@@ -10,6 +10,7 @@ import {
   getSubClips,
   getHookClips,
   resolvePhraseToTimeRange,
+  resolvePhraseToFirstTokenIndex,
   autoCutPauses,
   autoCutDisfluencies,
   rebalanceBoundaryTokens,
@@ -1169,5 +1170,100 @@ describe('applyTextPartsToTokens — t_dtw collision corruption cascade', () => 
     // With correct input D=G=12, simple path runs — no token synthesis occurs.
     // Token count should equal the input token count (no spliced-in synthetics).
     expect(result.length).toBe(corruptedTokens.length);
+  });
+});
+
+// ─── > SPEAKER split ──────────────────────────────────────────────────────────
+
+describe('> SPEAKER split', () => {
+  function makeSplitTranscript() {
+    return {
+      meta: { title: '', duration: 100, fps: 60 },
+      segments: [
+        {
+          id: 1, start: 10, end: 20, speaker: 'Inch', cut: false, cuts: [], graphics: [], cameraCues: [], visualCuts: [],
+          text: 'creative endeavor to me. Right so in the essence',
+          tokens: [
+            { text: ' creative', t_dtw: 10.1, cut: false },
+            { text: ' endeavor', t_dtw: 11.0, cut: false },
+            { text: ' to',       t_dtw: 11.8, cut: false },
+            { text: ' me',       t_dtw: 12.2, cut: false },
+            { text: '.',         t_dtw: 12.5, cut: false },
+            { text: ' Right',    t_dtw: 13.0, cut: false },
+            { text: ' so',       t_dtw: 13.8, cut: false },
+            { text: ' in',       t_dtw: 14.2, cut: false },
+            { text: ' the',      t_dtw: 14.9, cut: false },
+            { text: ' essence',  t_dtw: 15.4, cut: false },
+          ],
+        },
+        {
+          id: 2, start: 20.1, end: 25, speaker: 'Natasha', cut: false, cuts: [], graphics: [], cameraCues: [], visualCuts: [],
+          text: 'how do you describe',
+          tokens: [
+            { text: ' how', t_dtw: 20.2, cut: false },
+            { text: ' do',  t_dtw: 21.0, cut: false },
+            { text: ' you', t_dtw: 21.8, cut: false },
+          ],
+        },
+      ],
+    };
+  }
+
+  const doc = `# SPEAKERS\nInch: Inch\nNatasha: Natasha\n\n---\n\n=== Inch ===\n\n[1]  creative endeavor to me. Right so in the essence\n    > SPEAKER Natasha  at="Right"\n\n=== Natasha ===\n\n[2]  how do you describe\n`;
+
+  test('splits segment at the specified word', () => {
+    const result = mergeDocIntoTranscript(makeSplitTranscript(), doc);
+    const seg1 = result.segments.find(s => s.id === 1);
+    const synth = result.segments.find(s => s.id !== 1 && s.id !== 2 && s.speaker === 'Natasha' && s.start < 20);
+    expect(seg1).toBeDefined();
+    expect(synth).toBeDefined();
+    expect(seg1.speaker).toBe('Inch');
+    expect(synth.speaker).toBe('Natasha');
+  });
+
+  test('parent segment ends at split point, synthetic starts there — no overlap', () => {
+    const result = mergeDocIntoTranscript(makeSplitTranscript(), doc);
+    const seg1 = result.segments.find(s => s.id === 1);
+    const synth = result.segments.find(s => s.id !== 1 && s.id !== 2 && s.speaker === 'Natasha' && s.start < 20);
+    expect(seg1.end).toBeCloseTo(synth.start, 3);
+    expect(seg1.end).toBeLessThan(synth.start + 0.01);
+  });
+
+  test('parent text does not contain split-off words', () => {
+    const result = mergeDocIntoTranscript(makeSplitTranscript(), doc);
+    const seg1 = result.segments.find(s => s.id === 1);
+    expect(seg1.text).not.toMatch(/Right/i);
+    expect(seg1.text).toMatch(/me/i);
+  });
+
+  test('synthetic text starts at the split word', () => {
+    const result = mergeDocIntoTranscript(makeSplitTranscript(), doc);
+    const synth = result.segments.find(s => s.id !== 1 && s.id !== 2 && s.speaker === 'Natasha' && s.start < 20);
+    expect(synth.text).toMatch(/^Right/i);
+  });
+
+  test('no segment overlaps in output', () => {
+    const result = mergeDocIntoTranscript(makeSplitTranscript(), doc);
+    const active = result.segments.filter(s => !s.cut).sort((a, b) => a.start - b.start);
+    for (let i = 0; i < active.length - 1; i++) {
+      expect(active[i].end).toBeLessThanOrEqual(active[i + 1].start + 0.01);
+    }
+  });
+
+  test('synthetic segment is preserved on a second merge-doc pass (no re-overlap)', () => {
+    // Simulate the second merge-doc run: the split result becomes the new transcript.json
+    // and mergeDocIntoTranscript is called again with the rebuilt doc (no > SPEAKER annotation).
+    const firstPass = mergeDocIntoTranscript(makeSplitTranscript(), doc);
+    const rebuiltDoc = buildDoc(firstPass);
+    // Second pass: transcript is the result of the first pass (as if loaded from transcript.json).
+    // Simulate main()'s re-injection by passing firstPass directly (synthetic already in segments).
+    const secondPass = mergeDocIntoTranscript(firstPass, rebuiltDoc);
+    const active = secondPass.segments.filter(s => !s.cut).sort((a, b) => a.start - b.start);
+    for (let i = 0; i < active.length - 1; i++) {
+      expect(active[i].end).toBeLessThanOrEqual(active[i + 1].start + 0.01);
+    }
+    // Synthetic speaker attribution preserved
+    const synth = active.find(s => s.speaker === 'Natasha' && s.start < 20);
+    expect(synth).toBeDefined();
   });
 });
