@@ -17,6 +17,7 @@ import {
   RoleOverlay,
   LanguageOverlay, FrameworkOverlay,
   EducationOverlay,
+  RagtechOverlay,
 } from './overlays/keywords';
 
 interface OverlayRendererProps {
@@ -43,6 +44,7 @@ const COMPONENT_MAP: Record<string, React.FC<any>> = {
   LanguageOverlay,
   FrameworkOverlay,
   EducationOverlay,
+  RagtechOverlay,
   // Lower-third overlays
   ConceptExplainer,
   NameTitle,

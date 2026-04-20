@@ -10,3 +10,4 @@ export { InfrastructureOverlay, type InfrastructureOverlayProps } from './infras
 export { AIOverlay, type AIOverlayProps } from './ai';
 export { EducationOverlay, type EducationOverlayProps } from './education';
 export { AwardsOverlay, type AwardsOverlayProps } from './awards';
+export { RagtechOverlay, type RagtechOverlayProps } from './ragtech';
