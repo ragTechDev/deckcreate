@@ -1,6 +1,6 @@
 import React from 'react';
-import { TextOverlay, type TextOverlayProps } from '../core';
-import type { Brand } from '../../../types/brand';
+import { TextOverlay, type TextOverlayProps } from '../../core';
+import type { Brand } from '../../../../types/brand';
 
 export type AIOverlayProps = Omit<TextOverlayProps, 'brand' | 'text' | 'subtext' | 'keyword' | 'accentColor'> & {
   brand: Brand;

@@ -4,16 +4,20 @@ import type { Segment, GraphicsCue } from '../types/transcript';
 import type { Brand } from '../types/brand';
 import type { Section } from './SegmentPlayer';
 
-// Import all overlay components
-import { AwardsOverlay } from './overlays/awards';
-import { CodingOverlay, EngineeringOverlay } from './overlays/concepts';
-import { AIOverlay } from './overlays/ai';
-import { InfrastructureOverlay } from './overlays/infrastructure';
-import { PracticeOverlay } from './overlays/practices';
-import { RoleOverlay } from './overlays/roles';
-import { LanguageOverlay, FrameworkOverlay } from './overlays/tech';
-import { EducationOverlay } from './overlays/education';
-import { ConceptExplainer, SpeakerIntro } from './overlays/lower-thirds';
+// Core / general editing overlays
+import { ConceptExplainer, NameTitle } from './overlays/lower-thirds';
+
+// Keyword-triggered overlays
+import {
+  AwardsOverlay,
+  CodingOverlay, EngineeringOverlay,
+  AIOverlay,
+  InfrastructureOverlay,
+  PracticeOverlay,
+  RoleOverlay,
+  LanguageOverlay, FrameworkOverlay,
+  EducationOverlay,
+} from './overlays/keywords';
 
 interface OverlayRendererProps {
   segments: Segment[];
@@ -41,8 +45,7 @@ const COMPONENT_MAP: Record<string, React.FC<any>> = {
   EducationOverlay,
   // Lower-third overlays
   ConceptExplainer,
-  SpeakerIntro,
-  LowerThird: SpeakerIntro,
+  NameTitle,
 };
 
 /**
