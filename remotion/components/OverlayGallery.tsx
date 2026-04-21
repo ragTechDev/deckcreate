@@ -5,6 +5,8 @@ import { loadNunito } from '../loadFonts';
 
 import { TextOverlay, IconBadge, CodeBlock } from './overlays/core';
 import { ConceptExplainer, NameTitle } from './overlays/lower-thirds';
+import { ImageWindowOverlay } from './overlays/ImageWindowOverlay';
+import { GifWindowOverlay } from './overlays/GifWindowOverlay';
 
 const FRAMES_PER_SLIDE = 300; // 5 seconds at 60 fps
 
@@ -65,6 +67,37 @@ const GALLERY_ENTRIES: GalleryEntry[] = [
 
   // ──── NameTitle ────
   { label: 'NameTitle', Component: NameTitle, props: { name: 'Natasha', title: 'Software Engineer' } },
+
+  // ──── ImageWindow ────
+  {
+    label: 'ImageWindow — external URL with caption',
+    Component: ImageWindowOverlay,
+    props: {
+      src: 'https://images.unsplash.com/photo-1461749280684-dccba630e2f6?w=800&q=80',
+      title: 'Code Screenshot',
+      caption: 'Example image overlay with caption',
+    },
+  },
+  {
+    label: 'ImageWindow — no caption',
+    Component: ImageWindowOverlay,
+    props: {
+      src: 'https://images.unsplash.com/photo-1461749280684-dccba630e2f6?w=800&q=80',
+      title: 'No Caption Example',
+    },
+  },
+
+  // ──── GifWindow ────
+  {
+    label: 'GifWindow — looping with caption',
+    Component: GifWindowOverlay,
+    props: {
+      src: 'https://media.giphy.com/media/3o7TKSjRrfIPjeiVyM/giphy.gif',
+      title: 'Coding in Progress',
+      caption: 'Example GIF overlay',
+      gifHeight: 405,
+    },
+  },
 ];
 
 export const GALLERY_TOTAL_FRAMES = GALLERY_ENTRIES.length * FRAMES_PER_SLIDE;

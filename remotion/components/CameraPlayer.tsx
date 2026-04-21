@@ -23,14 +23,19 @@ function resolveVideoSrc(videoSrc: string): string {
  */
 function sourceToOutputFrame(sourceSec: number, mainSections: Section[], fps: number): number {
   let outputFrame = 0;
+  const sourceFrame = Math.round(sourceSec * fps);
+  console.log(`[CameraDebug] sourceToOutputFrame: sourceSec=${sourceSec}s sourceFrame=${sourceFrame}, sections=${mainSections.length}`);
   for (const sec of mainSections) {
     const secDur = sec.trimAfter - sec.trimBefore;
-    const sourceFrame = Math.round(sourceSec * fps);
+    console.log(`[CameraDebug]   section trimBefore=${sec.trimBefore} trimAfter=${sec.trimAfter} secDur=${secDur}`);
     if (sourceFrame <= sec.trimAfter) {
-      return outputFrame + Math.max(0, sourceFrame - sec.trimBefore);
+      const result = outputFrame + Math.max(0, sourceFrame - sec.trimBefore);
+      console.log(`[CameraDebug]   -> returning ${result}`);
+      return result;
     }
     outputFrame += secDur;
   }
+  console.log(`[CameraDebug]   -> fallback ${outputFrame}`);
   return outputFrame;
 }
 
@@ -186,25 +191,30 @@ function getOutputDuration(seg: Segment, nextHookStart?: number): number {
  * silence fills inter-segment gaps.
  */
 export function buildCameraShots(
-  activeSegments: Segment[],
+  activeSegmentsInput: Segment[],
   profiles: CameraProfiles,
   fps: number,
   mainSections: Section[],
+  hookSections: Section[],
 ): CameraShot[] {
+  // Sort all segments by start time to ensure chronological processing
+  const activeSegments = [...activeSegmentsInput].sort((a, b) => a.start - b.start);
+  console.log('[CameraDebug] buildCameraShots called with', activeSegments.length, 'segments');
+  console.log('[CameraDebug] First 5 segments by time:', activeSegments.slice(0, 5).map(s => `id=${s.id} start=${s.start} speaker=${s.speaker}`));
+
   const MIN_WIDE_F    = Math.round(MIN_WIDE_S    * fps);
   const MAX_CLOSEUP_F = Math.round(MAX_CLOSEUP_S * fps);
   const PERIODIC_F    = Math.round(PERIODIC_WIDE_S * fps);
 
   const shots: CameraShot[] = [];
 
-  // Pre-compute total hook output frames so we can anchor main-segment positions.
+  // Derive hookTotalFrames from the same hookSections that SegmentPlayer uses for playback.
+  // Using getOutputDuration here would produce a different value (different token-extension
+  // formula) and create a timing gap at the hook/main boundary where the camera falls back
+  // to the last hook shot rather than the first main-content speaker.
   const hookSegs = activeSegments.filter(s => s.hook && !s.cut);
-  let hookTotalFrames = 0;
-  for (let i = 0; i < hookSegs.length; i++) {
-    const next = hookSegs[i + 1];
-    const nextHookStart = next ? (next.hookFrom ?? next.start) : undefined;
-    hookTotalFrames += Math.round(getOutputDuration(hookSegs[i], nextHookStart) * fps);
-  }
+  const hookTotalFrames = hookSections.reduce((sum, s) => sum + s.trimAfter - s.trimBefore, 0);
+  console.log('[CameraDebug] hookTotalFrames:', hookTotalFrames, '= seconds:', (hookTotalFrames/fps).toFixed(1));
 
   const mainTotalFrames = mainSections.reduce((sum, s) => sum + s.trimAfter - s.trimBefore, 0);
 
@@ -293,101 +303,63 @@ export function buildCameraShots(
       );
     }
 
-    return { startFrame: shotStart, endFrame, viewport, videoSrc, sourceTime };
+    const shot = { startFrame: shotStart, endFrame, viewport, videoSrc, sourceTime };
+    console.log(`[CameraDebug] EMIT shot ${shotStart}-${endFrame} type=${shotType} speaker=${shotSpeaker} angle=${angleName}`);
+    return shot;
   }
 
-  for (const seg of activeSegments) {
-    if (seg.cut) continue;
+  // ── Pacing logic (shared between both passes) ────────────────────────────────
 
-    let segStart: number;
-    let segDur: number;
-
-    if (seg.hook) {
-      // Hook segments: unchanged — accumulate via cumFrame
-      const next = activeSegments.find((cand) => cand.hook && !cand.cut && cand.start > seg.start);
-      const nextHookStart = next ? (next.hookFrom ?? next.start) : undefined;
-      segDur   = Math.round(getOutputDuration(seg, nextHookStart) * fps);
-      segStart = cumFrame;
-      cumFrame += segDur;
-    } else {
-      // Main segments: derive output position from mainSections so silence between
-      // segments is accounted for. Duration = distance to next segment's output
-      // start (includes trailing silence) for accurate pacing counters.
-      segStart = hookTotalFrames + sourceToOutputFrame(seg.start, mainSections, fps);
-      const nextMainSeg = mainSegsNonCut.find(s => s.start > seg.start);
-      const segOutputEnd = nextMainSeg
-        ? hookTotalFrames + sourceToOutputFrame(nextMainSeg.start, mainSections, fps)
-        : hookTotalFrames + mainTotalFrames;
-      segDur = Math.max(1, segOutputEnd - segStart);
-    }
-
-    // Determine the angle for this segment's speaker to get the correct profile
-    const segSpeakerAngles = seg.speaker ? getSpeakerAngles(seg.speaker) : [];
-    const segAngleName = segSpeakerAngles[0]?.angleName;
-    const profile = getSpeakerProfile(profiles, seg.speaker, segAngleName);
-
-    // Track source time for time-keyed viewport selection
-    currentSourceTime = seg.hook ? (seg.hookFrom ?? seg.start) : seg.start;
-
+  function applyPacing(segStart: number, segDur: number, profile: SpeakerProfile | undefined, speaker: string, segId?: number): void {
+    const isEarlySeg = segId === 9 || segId === 10 || segId === 11 || segId === 600 || segId === 608;
     if (shotType === 'wide') {
-      // Switch to closeup at this segment boundary when ready
-      if (framesInShot >= MIN_WIDE_F && profile) {
-        if (segStart > shotStart) shots.push(emitShot(segStart, currentSourceTime));
-        shotStart    = segStart;
-        shotType     = 'closeup';
-        // If same speaker, increment angle index when entering closeup (completes a full cycle: wide->closeup)
-        if (shotSpeaker === seg.speaker) {
-          shotAngleIndex++;
-        } else {
-          shotSpeaker  = seg.speaker;
-          shotAngleIndex = 0;
+      // At segment start with a speaker who has a profile, immediately cut to closeup
+      const speakerAtStart = segStart === shotStart && profile && speaker;
+      if (isEarlySeg) console.log(`[CameraDebug] seg=${segId} start=${segStart} shotStart=${shotStart} speaker=${speaker} profile=${!!profile} speakerAtStart=${speakerAtStart} framesInShot=${framesInShot} MIN_WIDE_F=${MIN_WIDE_F}`);
+      if (speakerAtStart || (framesInShot >= MIN_WIDE_F && profile)) {
+        if (segStart > shotStart) {
+          if (isEarlySeg) console.log(`[CameraDebug] Emitting wide shot at ${shotStart} to ${segStart}`);
+          shots.push(emitShot(segStart, currentSourceTime));
+        } else if (speakerAtStart && isEarlySeg) {
+          console.log(`[CameraDebug] At segment start - transitioning ${speaker} to closeup immediately`);
         }
-        framesInShot = 0;
+        shotStart = segStart;
+        shotType  = 'closeup';
+        if (shotSpeaker === speaker) { shotAngleIndex++; }
+        else { shotSpeaker = speaker; shotAngleIndex = 0; }
+        framesInShot  = 0;
         totalCloseupF = 0;
+        console.log(`[CameraDebug] -> closeup speaker=${shotSpeaker} shotStart=${shotStart}`);
       }
       framesInShot += segDur;
-
-    } else { // closeup
-      // Force wide on max duration; also go wide if the speaker is unknown.
-      // MIN_CLOSEUP_F only guards closeup→wide transitions, not speaker changes.
+    } else {
       const forceWide     = framesInShot >= MAX_CLOSEUP_F || totalCloseupF >= PERIODIC_F;
-      const speakerChange = !!profile && seg.speaker !== shotSpeaker;
+      const speakerChange = !!profile && speaker !== shotSpeaker;
 
       if (forceWide || !profile) {
-        // Return to wide shot (cycling angle if speaker continues)
         if (segStart > shotStart) shots.push(emitShot(segStart, currentSourceTime));
         const prevSpeaker = shotSpeaker;
         shotStart     = segStart;
         shotType      = 'wide';
-        // Keep speaker context if we're just cycling angles within same speaker
-        // Only clear speaker if profile is missing (unknown speaker)
         if (!profile) shotSpeaker = '';
-        // Increment angle index when we hit wide after closeup (completes a half-cycle)
-        if (profile && shotSpeaker === prevSpeaker) {
-          shotAngleIndex++;
-        } else if (shotSpeaker !== prevSpeaker) {
-          // New speaker - reset angle cycle
-          shotAngleIndex = 0;
-        }
-        framesInShot  = segDur;   // count this segment as wide time
+        if (profile && shotSpeaker === prevSpeaker) { shotAngleIndex++; }
+        else if (shotSpeaker !== prevSpeaker) { shotAngleIndex = 0; }
+        framesInShot  = segDur;
         totalCloseupF = 0;
-
       } else if (speakerChange) {
-        // Cut directly to new speaker's closeup (no minimum — follow the speaker)
-        // Only gate: don't cut if the previous closeup was extremely short (<1 s)
-        // to avoid flash-cuts on single-word segments.
-        if (framesInShot >= fps || shotStart === segStart) {
-          if (segStart > shotStart) shots.push(emitShot(segStart, currentSourceTime));
-          shotStart     = segStart;
-          shotSpeaker   = seg.speaker;
-          framesInShot  = segDur;
-          totalCloseupF += segDur;
-        } else {
-          // Previous closeup too short — extend it rather than flash-cutting
-          framesInShot  += segDur;
-          totalCloseupF += segDur;
+        if (isEarlySeg) console.log(`[CameraDebug] speakerChange seg=${segId} ${shotSpeaker}->${speaker} framesInShot=${framesInShot} fps=${fps} shotStart=${shotStart} segStart=${segStart}`);
+        // Always cut to the new speaker immediately at segment boundaries — delaying the cut
+        // causes subsequent segments to be incorrectly covered by the old speaker's closeup
+        // since shotSpeaker is never updated while the cut is "pending".
+        if (segStart > shotStart) {
+          if (isEarlySeg) console.log(`[CameraDebug] Emitting shot on speaker change`);
+          shots.push(emitShot(segStart, currentSourceTime));
         }
-
+        shotStart      = segStart;
+        shotSpeaker    = speaker;
+        shotAngleIndex = 0;
+        framesInShot   = segDur;
+        totalCloseupF += segDur;
       } else {
         framesInShot  += segDur;
         totalCloseupF += segDur;
@@ -395,11 +367,82 @@ export function buildCameraShots(
     }
   }
 
-  // Close the final shot at the end of the full output timeline
+  // ── Pass 1: Hook section shots (frames 0..hookTotalFrames) ────────────────────
+  // Process only hook segments, using cumulative hook-output frames.
+  for (const seg of hookSegs) {
+
+    const next = hookSegs.find((cand) => cand.start > seg.start);
+    const nextHookStart = next ? (next.hookFrom ?? next.start) : undefined;
+    const segDur   = Math.round(getOutputDuration(seg, nextHookStart) * fps);
+    const segStart = cumFrame;
+    cumFrame += segDur;
+
+    const segSpeakerAngles = seg.speaker ? getSpeakerAngles(seg.speaker) : [];
+    const profile = getSpeakerProfile(profiles, seg.speaker, segSpeakerAngles[0]?.angleName);
+    currentSourceTime = seg.hookFrom ?? seg.start;
+
+    applyPacing(segStart, segDur, profile, seg.speaker, seg.id);
+  }
+
+  // Close final hook shot, then reset state for the main video pass.
+  if (hookTotalFrames > shotStart) {
+    const lastHookSeg = hookSegs[hookSegs.length - 1];
+    shots.push(emitShot(hookTotalFrames, lastHookSeg ? (lastHookSeg.hookFrom ?? lastHookSeg.start) : 0));
+  }
+
+  // ── Pass 2: Main video shots (frames hookTotalFrames..end) ────────────────────
+  // Process ALL non-cut segments (hook and non-hook) in source-time order.
+  // Including hook segments here is critical: their source time ranges play in the
+  // main video too (they are not cut out), so speaker changes within hook segments
+  // (e.g. Victoria → Inch at segment 611) must drive the main-video camera.
+
+  shotType      = 'wide';
+  shotStart     = hookTotalFrames;
+  shotSpeaker   = '';
+  shotAngleIndex = 0;
+  framesInShot  = 0;
+  totalCloseupF = 0;
+
+  // Exclude hook segments whose source time is before the main video starts — they don't
+  // appear in the main content timeline and would all map to segStart=hookTotalFrames,
+  // pile-driving the initial camera state before the first real main segment is processed.
+  const mainVideoStartSec = mainSections.length > 0 ? mainSections[0].trimBefore / fps : 0;
+  const allActiveSegs = activeSegments.filter(s => !s.cut && (!s.hook || s.start >= mainVideoStartSec));
+
+  for (const seg of allActiveSegs) {
+    const sourceFrame = sourceToOutputFrame(seg.start, mainSections, fps);
+    const segStart = hookTotalFrames + sourceFrame;
+    console.log(`[CameraDebug] seg ${seg.id} source=${seg.start}s -> frame=${sourceFrame} output=${segStart}`);
+    const nextSeg  = allActiveSegs.find(s => s.start > seg.start);
+    const segOutputEnd = nextSeg
+      ? hookTotalFrames + sourceToOutputFrame(nextSeg.start, mainSections, fps)
+      : hookTotalFrames + mainTotalFrames;
+    const segDur = Math.max(1, segOutputEnd - segStart);
+
+    const segSpeakerAngles = seg.speaker ? getSpeakerAngles(seg.speaker) : [];
+    const profile = getSpeakerProfile(profiles, seg.speaker, segSpeakerAngles[0]?.angleName);
+    currentSourceTime = seg.hook ? (seg.hookFrom ?? seg.start) : seg.start;
+
+    applyPacing(segStart, segDur, profile, seg.speaker, seg.id);
+  }
+
+  // Close the final main-video shot.
   const totalOutputFrames = hookTotalFrames + mainTotalFrames;
-  const lastSeg = activeSegments.filter(s => !s.cut).pop();
-  const finalSourceTime = lastSeg ? (lastSeg.hook ? (lastSeg.hookFrom ?? lastSeg.start) : lastSeg.start) : 0;
-  if (totalOutputFrames > shotStart) shots.push(emitShot(totalOutputFrames, finalSourceTime));
+  if (totalOutputFrames > shotStart) {
+    const lastActiveSeg = allActiveSegs[allActiveSegs.length - 1];
+    const finalSourceTime = lastActiveSeg
+      ? (lastActiveSeg.hook ? (lastActiveSeg.hookFrom ?? lastActiveSeg.start) : lastActiveSeg.start)
+      : 0;
+    shots.push(emitShot(totalOutputFrames, finalSourceTime));
+  }
+
+  // Log final shot list for debugging
+  console.log('[CameraDebug] Final shots (first 10):');
+  shots.slice(0, 10).forEach((shot, i) => {
+    const startTime = (shot.startFrame / fps).toFixed(2);
+    const endTime = (shot.endFrame / fps).toFixed(2);
+    console.log(`  Shot ${i}: ${startTime}s-${endTime}s frame=${shot.startFrame}-${shot.endFrame}`);
+  });
 
   return shots;
 }
@@ -515,21 +558,18 @@ export const CameraPlayer: React.FC<Props> = ({ src, hookSections, mainSections,
   const outW = profiles.outputWidth;
   const outH = profiles.outputHeight;
 
-  // Total hook duration in output frames — shots for main content start here in
-  // buildCameraShots's timeline, but in the composition they start mainOffset
-  // frames later (the intro plays in between). We shift them after building.
+  // Total hook duration in output frames — must match SegmentPlayer's hookDuration exactly
+  // so the mainOffset shift boundary aligns with where main content actually starts playing.
   const hookOutputFrames = useMemo(
-    () => segments
-      .filter(s => s.hook && !s.cut)
-      .reduce((sum, s) => sum + Math.round(getOutputDuration(s) * fps), 0),
-    [segments, fps],
+    () => hookSections.reduce((sum, s) => sum + s.trimAfter - s.trimBefore, 0),
+    [hookSections],
   );
 
   // Build shot timeline once, then splice in any explicit > CAM overrides.
   // If mainOffset > 0, shift every main-content shot forward by mainOffset so
   // the composition-frame lookup stays in sync with the actual playback position.
   const shots = useMemo(() => {
-    const pacing    = buildCameraShots(segments, profiles, fps, mainSections);
+    const pacing    = buildCameraShots(segments, profiles, fps, mainSections, hookSections);
     const overrides = collectCameraOverrides(segments, profiles, fps, mainSections);
     const applied   = applyOverrides(pacing, overrides);
     if (mainOffset === 0) return applied;
@@ -552,7 +592,7 @@ export const CameraPlayer: React.FC<Props> = ({ src, hookSections, mainSections,
       }
     }
     return result;
-  }, [segments, profiles, fps, mainSections, hookOutputFrames, mainOffset]);
+  }, [segments, profiles, fps, hookSections, mainSections, hookOutputFrames, mainOffset]);
 
   // Find current shot
   const currentShot = useMemo(() => {

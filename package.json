@@ -45,6 +45,7 @@
     "@mantine/hooks": "^8.3.15",
     "@mantine/notifications": "^8.3.15",
     "@remotion/cli": "4.0.436",
+    "@remotion/gif": "^4.0.436",
     "@remotion/install-whisper-cpp": "4.0.436",
     "@remotion/media-parser": "4.0.436",
     "@remotion/media-utils": "4.0.436",

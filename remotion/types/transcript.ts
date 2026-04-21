@@ -20,7 +20,9 @@ export type GraphicType =
   | 'AwardsOverlay' | 'CodingOverlay' | 'EngineeringOverlay'
   | 'AIOverlay' | 'InfrastructureOverlay' | 'PracticeOverlay'
   | 'RoleOverlay' | 'LanguageOverlay' | 'FrameworkOverlay'
-  | 'EducationOverlay' | 'RagtechOverlay';
+  | 'EducationOverlay' | 'RagtechOverlay'
+  | 'ImageWindow'
+  | 'GifWindow';
 
 export type CameraCue = {
   /** 'closeup' on a named speaker, or 'wide' for the wide shot */

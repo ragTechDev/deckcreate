@@ -6,6 +6,8 @@ import type { Section } from './SegmentPlayer';
 
 // Core / general editing overlays
 import { ConceptExplainer, NameTitle, ChapterMarker } from './overlays/lower-thirds';
+import { ImageWindowOverlay } from './overlays/ImageWindowOverlay';
+import { GifWindowOverlay } from './overlays/GifWindowOverlay';
 
 // Keyword-triggered overlays
 import {
@@ -49,6 +51,9 @@ const COMPONENT_MAP: Record<string, React.FC<any>> = {
   ConceptExplainer,
   NameTitle,
   ChapterMarker,
+  // Image / GIF windows
+  ImageWindow: ImageWindowOverlay,
+  GifWindow: GifWindowOverlay,
 };
 
 /**
@@ -208,12 +213,19 @@ export const OverlayRenderer: React.FC<OverlayRendererProps> = ({
         const maxDuration = Math.min(Math.max(requestedDuration, availableDuration), nextMarkerStartFrame - cue.startFrame);
         cues[i] = { ...cue, durationInFrames: maxDuration, nextMarkerFrame: nextMarkerStartFrame };
       } else {
-        // Normal cues: cap at next cue's start
-        if (i < cues.length - 1) {
-          const maxDuration = cues[i + 1].startFrame - cue.startFrame;
-          if (cue.durationInFrames > maxDuration) {
-            cues[i] = { ...cue, durationInFrames: Math.max(1, maxDuration) };
+        // Normal cues: cap at the next *non-chapter* cue's start.
+        // ChapterMarker/End are decorative overlays that coexist with other cues,
+        // so they must not shorten the duration of ImageWindow, ConceptExplainer, etc.
+        let nextStart = Infinity;
+        for (let j = i + 1; j < cues.length; j++) {
+          const t = cues[j].cue.type;
+          if (t !== 'ChapterMarker' && t !== 'ChapterMarkerEnd') {
+            nextStart = cues[j].startFrame;
+            break;
           }
+        }
+        if (nextStart !== Infinity && cue.durationInFrames > nextStart - cue.startFrame) {
+          cues[i] = { ...cue, durationInFrames: Math.max(1, nextStart - cue.startFrame) };
         }
       }
     }
