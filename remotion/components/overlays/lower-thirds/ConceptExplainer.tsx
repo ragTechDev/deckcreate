@@ -84,9 +84,8 @@ export const ConceptExplainer: React.FC<ConceptExplainerProps> = ({
     <div
       style={{
         position: 'absolute',
-        top: '50%',
-        right: '10%',
-        transform: 'translateY(-50%)',
+        bottom: '5%',
+        right: '5%',
         pointerEvents: 'none',
       }}
     >

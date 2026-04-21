@@ -65,6 +65,22 @@ const ICON_R     = 490; // radius from logo center to icon center
 const LOGO_CX    = VW / 2;
 const LOGO_CY    = 560;
 
+// Episode frames — 4 × 3 grid background
+const EPISODES = [
+  'assets/episodes/ep_10x.webp',
+  'assets/episodes/ep_ai.jpg',
+  'assets/episodes/ep_career.jpg',
+  'assets/episodes/ep_career1.webp',
+  'assets/episodes/ep_imposter.jpg',
+  'assets/episodes/ep_introvert.webp',
+  'assets/episodes/ep_joy.jpg',
+  'assets/episodes/ep_leadership.webp',
+  'assets/episodes/ep_martin.jpg',
+  'assets/episodes/ep_martin1.webp',
+  'assets/episodes/ep_promotion.jpg',
+  'assets/episodes/ep_saloni.webp',
+];
+
 // ── Static data ───────────────────────────────────────────────────────────────
 // Horizontal row, group centered: 390+60+430+60+390 = 1330 px → left = (1920-1330)/2 = 295
 const COHOSTS = [
@@ -223,10 +239,29 @@ export const PodcastIntro: React.FC<Props> = ({ brand }) => {
 
   return (
     <AbsoluteFill style={{
-      background: bgColor,
+      background: '#000',
       fontFamily: typography.fontFamily,
       overflow: 'hidden',
     }}>
+
+      {/* ── Episode grid background ──────────────────────────────────────────── */}
+      <div style={{
+        position: 'absolute', inset: 0,
+        display: 'grid',
+        gridTemplateColumns: 'repeat(4, 1fr)',
+        gridTemplateRows: 'repeat(3, 1fr)',
+      }}>
+        {EPISODES.map((src, i) => (
+          <Img
+            key={i}
+            src={staticFile(src)}
+            style={{ width: '100%', height: '100%', objectFit: 'contain', filter: 'brightness(0.4) saturate(0.7)' }}
+          />
+        ))}
+      </div>
+
+      {/* Animated brand-colour overlay */}
+      <div style={{ position: 'absolute', inset: 0, background: bgColor, opacity: 0.55 }} />
 
       {/* Audio */}
       <Audio
