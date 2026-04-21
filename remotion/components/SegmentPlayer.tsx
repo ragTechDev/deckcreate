@@ -120,7 +120,10 @@ function getHookSubClips(segment: Segment, nextHookStart?: number): SubClip[] {
     .sort((a, b) => (b.t_end ?? 0) - (a.t_end ?? 0))[0];
 
   if (lastSpokenToken?.t_end) {
-    sourceEnd = Math.max(sourceEnd, lastSpokenToken.t_end);
+    const tEnd = nextHookStart !== undefined
+      ? Math.min(lastSpokenToken.t_end, nextHookStart)
+      : lastSpokenToken.t_end;
+    sourceEnd = Math.max(sourceEnd, tEnd);
   }
 
   // Bridge to the next hook when the gap is small and this hook ends at the
@@ -140,6 +143,12 @@ function getHookSubClips(segment: Segment, nextHookStart?: number): SubClip[] {
   sourceEnd += isBoundedHook
     ? HOOK_TAIL_PAD_BOUNDED_SECONDS
     : HOOK_TAIL_PAD_UNBOUNDED_SECONDS;
+
+  // Hard cap: never extend into the next hook's source window.
+  // Prevents overlapping source ranges which cause backward jumps in SectionGroupPlayer.
+  if (nextHookStart !== undefined) {
+    sourceEnd = Math.min(sourceEnd, nextHookStart);
+  }
 
   return [{ sourceStart, sourceEnd }];
 }
@@ -177,12 +186,22 @@ export function buildSections(
   videoEnd?: number,
 ): SplitSections {
   const hookSegments = segments.filter(s => s.hook && !s.cut);
-  const hookSections = hookSegments
+  const rawHookSections = hookSegments
     .flatMap((seg, idx) => {
       const next = hookSegments[idx + 1];
       const nextHookStart = next ? (next.hookFrom ?? next.start) : undefined;
       return toSections(getHookSubClips(seg, nextHookStart), fps);
     });
+  // De-overlap: if a section's trimBefore precedes the previous section's trimAfter
+  // (caused by t_end extension or bridging across overlapping source ranges), advance it.
+  const hookSections: Section[] = [];
+  for (const s of rawHookSections) {
+    const prev = hookSections[hookSections.length - 1];
+    const trimBefore = prev ? Math.max(s.trimBefore, prev.trimAfter) : s.trimBefore;
+    if (trimBefore < s.trimAfter) {
+      hookSections.push({ trimBefore, trimAfter: s.trimAfter });
+    }
+  }
   const allMainSegments = segments.filter(s => !s.hook);
   const mainSubClips = buildMainSubClips(allMainSegments, videoStart, videoEnd);
   const mainSections = toSections(mainSubClips, fps);

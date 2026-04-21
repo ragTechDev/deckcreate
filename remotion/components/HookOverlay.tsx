@@ -176,14 +176,18 @@ function buildHookTimings(segments: Segment[], fps: number): HookTiming[] {
       .filter(t => isSpokenToken(t) && t.t_dtw >= sourceStart && t.t_dtw <= baseEnd)
       .sort((a, b) => (b.t_end ?? 0) - (a.t_end ?? 0))[0];
 
+    const nextHookSeg = segments.slice(i + 1).find(s => s.hook && !s.cut);
+    const nextHookStart = nextHookSeg ? (nextHookSeg.hookFrom ?? nextHookSeg.start) : undefined;
+
     if (lastSpokenToken?.t_end) {
-      sourceEnd = Math.max(sourceEnd, lastSpokenToken.t_end);
+      const tEnd = nextHookStart !== undefined
+        ? Math.min(lastSpokenToken.t_end, nextHookStart)
+        : lastSpokenToken.t_end;
+      sourceEnd = Math.max(sourceEnd, tEnd);
     }
 
     // Bridge to the next hook when the gap is small and this hook ends at the
     // segment tail — must match SegmentPlayer.getHookSubClips / CameraPlayer.
-    const nextHookSeg = segments.slice(i + 1).find(s => s.hook && !s.cut);
-    const nextHookStart = nextHookSeg ? (nextHookSeg.hookFrom ?? nextHookSeg.start) : undefined;
     const hasSpokenTokenAfterEnd = seg.tokens.some(
       t => isSpokenToken(t) && t.t_dtw > sourceEnd + 0.02,
     );
@@ -199,6 +203,11 @@ function buildHookTimings(segments: Segment[], fps: number): HookTiming[] {
     sourceEnd += isBoundedHook
       ? HOOK_TAIL_PAD_BOUNDED_SECONDS
       : HOOK_TAIL_PAD_UNBOUNDED_SECONDS;
+
+    // Hard cap: never extend into the next hook's source window (must match getHookSubClips).
+    if (nextHookStart !== undefined) {
+      sourceEnd = Math.min(sourceEnd, nextHookStart);
+    }
 
     const captions = buildCaptions(seg.tokens, sourceStart, sourceEnd, isBoundedHook);
 
@@ -333,7 +342,7 @@ export const HookOverlay: React.FC<Props> = ({ hookSegments, segments, brand }) 
     { extrapolateRight: 'clamp' },
   );
 
-  const { colors, typography, logo } = brand;
+  const { colors, typography } = brand;
 
   // Per-frame derived values (computed unconditionally to keep hook count stable)
   const localFrame = active ? frame - active.outputStartFrame : 0;
@@ -475,19 +484,6 @@ export const HookOverlay: React.FC<Props> = ({ hookSegments, segments, brand }) 
               {activePage.text.trim()}
             </div>
           )}
-
-          {/* ── Logo ─ bottom-right ─────────────────────────────────────── */}
-          <Img
-            src={staticFile(logo.replace(/^\/+/, ''))}
-            style={{
-              position:  'absolute',
-              bottom:    48,
-              right:     60,
-              height:    110,
-              objectFit: 'contain',
-              opacity:   0.95,
-            }}
-          />
 
         </AbsoluteFill>
       )}

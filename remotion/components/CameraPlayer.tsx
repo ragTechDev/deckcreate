@@ -449,7 +449,10 @@ function collectCameraOverrides(
       let outputFrame: number;
       if (seg.hook) {
         // Hook segments: map cue offset within hook's output frames
-        const sourceOffset = Math.min(Math.max(0, cue.at - seg.start), seg.end - seg.start);
+        // Use hookFrom/hookTo bounds for bounded hooks, not seg.start/seg.end
+        const hookStart = seg.hookFrom ?? seg.start;
+        const hookEnd = seg.hookTo ?? seg.end;
+        const sourceOffset = Math.min(Math.max(0, cue.at - hookStart), hookEnd - hookStart);
         outputFrame = hookCumFrame + Math.round(sourceOffset * fps);
       } else {
         // Main segments: sourceToOutputFrame handles cuts and silence directly

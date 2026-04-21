@@ -96,7 +96,8 @@ function hookClipEnd(s: Segment, nextHookStart?: number): number {
   if (endsAtSegmentTail && canBridgeToNextHook) {
     sourceEnd = nextHookStart;
   }
-  return sourceEnd + (isBoundedHook ? HOOK_TAIL_PAD_BOUNDED_SECONDS : HOOK_TAIL_PAD_UNBOUNDED_SECONDS);
+  const withPad = sourceEnd + (isBoundedHook ? HOOK_TAIL_PAD_BOUNDED_SECONDS : HOOK_TAIL_PAD_UNBOUNDED_SECONDS);
+  return nextHookStart !== undefined ? Math.min(withPad, nextHookStart) : withPad;
 }
 
 function computeEffectiveDuration(transcript: Transcript): number {
