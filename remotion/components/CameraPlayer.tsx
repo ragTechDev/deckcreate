@@ -6,7 +6,7 @@ import type { CameraProfiles, CameraShot, CropViewport, AngleConfig, SpeakerProf
 
 function resolveVideoSrc(videoSrc: string): string {
   // Already resolved paths (from staticFile or URLs) don't need processing
-  if (videoSrc.startsWith('/static-') || videoSrc.startsWith('http')) {
+  if (videoSrc.startsWith('/static-') || videoSrc.startsWith('http') || videoSrc.startsWith('/public/')) {
     return videoSrc;
   }
   // Relative paths need staticFile() to resolve to the hashed static URL

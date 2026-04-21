@@ -283,10 +283,36 @@ function buildChapterMarkerSequences(
     });
   }
 
-  for (let i = 0; i < result.length - 1; i++) {
-    const nextStart = result[i + 1].startFrame;
-    result[i].nextMarkerFrame = nextStart;
-    result[i].durationInFrames = Math.min(result[i].durationInFrames, nextStart - result[i].startFrame);
+  // Collect hook-segment ChapterMarker output frames so we can cap non-hook sequences
+  // against them too — OverlayRenderer renders those separately and they arrive in the
+  // same hook timeline, so the previous marker must end before the incoming one starts.
+  const hookMarkerFrames: number[] = [];
+  for (const seg of allSegments) {
+    if (seg.cut || !seg.hook) continue;
+    if (!seg.graphics?.length) continue;
+    for (const g of seg.graphics) {
+      if (g.type !== 'ChapterMarker' && g.type !== 'ChapterMarkerEnd') continue;
+      const timing = hookTimings.find(t => g.at >= t.sourceStart && g.at <= t.sourceEnd);
+      if (!timing) continue;
+      const outputFrame = timing.outputStartFrame + Math.round((g.at - timing.sourceStart) * fps);
+      hookMarkerFrames.push(outputFrame);
+    }
+  }
+  hookMarkerFrames.sort((a, b) => a - b);
+
+  // Cap each non-hook sequence to the nearest upcoming boundary (non-hook OR hook marker)
+  for (let i = 0; i < result.length; i++) {
+    const cue = result[i];
+    const nextNonHookStart = i < result.length - 1 ? result[i + 1].startFrame : Infinity;
+    const nextHookFrame = hookMarkerFrames.find(f => f > cue.startFrame) ?? Infinity;
+    const nextStart = Math.min(nextNonHookStart, nextHookFrame);
+    if (nextStart < Infinity) {
+      result[i] = {
+        ...cue,
+        nextMarkerFrame: nextStart,
+        durationInFrames: Math.min(cue.durationInFrames, nextStart - cue.startFrame),
+      };
+    }
   }
 
   return result.filter(s => s.durationInFrames > 0);
