@@ -210,7 +210,7 @@ const TranscriptComposition: React.FC<TranscriptCompositionProps> = ({
       {/* Hook overlay: pill, captions, logo, Techybara character.
           Stays mounted for stable frame transitions; returns null outside hook frames. */}
       {hasHooks && (
-        <HookOverlay hookSegments={hookSegments} brand={brand} />
+        <HookOverlay hookSegments={hookSegments} segments={orderedSegments} brand={brand} />
       )}
 
       {/* Hook music — looped so it continues if total hook duration exceeds one track length */}

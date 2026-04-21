@@ -173,15 +173,21 @@ export const OverlayRenderer: React.FC<OverlayRendererProps> = ({
         // Skip extension for hook ChapterMarkers - they should end when hook ends
         const isHookCue = cue.key.includes('-hook-');
         if (isHookCue) {
-          // Just pass nextMarkerFrame for fade-out, don't extend duration
-          let nextMarkerStartFrame = Infinity;
+          // Cap duration to next hook ChapterMarker so they don't overlap
+          let nextHookMarkerStart = Infinity;
           for (let j = i + 1; j < cues.length; j++) {
-            if (cues[j].cue.type === 'ChapterMarker' || cues[j].cue.type === 'ChapterMarkerEnd') {
-              nextMarkerStartFrame = cues[j].startFrame;
+            const nextIsHook = cues[j].key.includes('-hook-');
+            if (nextIsHook && (cues[j].cue.type === 'ChapterMarker' || cues[j].cue.type === 'ChapterMarkerEnd')) {
+              nextHookMarkerStart = cues[j].startFrame;
               break;
             }
           }
-          cues[i] = { ...cue, nextMarkerFrame: nextMarkerStartFrame };
+          const cappedDuration = Math.max(1, Math.min(cue.durationInFrames, nextHookMarkerStart - cue.startFrame));
+          cues[i] = {
+            ...cue,
+            durationInFrames: cappedDuration,
+            nextMarkerFrame: nextHookMarkerStart !== Infinity ? nextHookMarkerStart : undefined,
+          };
           continue;
         }
 
