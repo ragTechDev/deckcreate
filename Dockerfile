@@ -48,13 +48,15 @@ COPY . .
 RUN pip install --upgrade pip setuptools wheel && \
     pip install -r scripts/diarize/requirements.txt && \
     pip install whisperx faster-whisper && \
-    pip install -r scripts/camera/requirements.txt
+    pip install -r scripts/camera/requirements.txt && \
+    pip install -r scripts/thumbnail/requirements.txt
 
 # Ensure public directories exist
 RUN mkdir -p public/input/video public/input/audio \
     public/sync/video public/sync/audio public/sync/output \
     public/transcribe/input public/transcribe/output/raw public/transcribe/output/edit \
-    public/transcribe/output/camera
+    public/transcribe/output/camera public/transcribe/output/thumbnail \
+    public/output
 
 # Set environment variables
 ENV PYTHON_PATH="/usr/local/bin/python"

@@ -391,7 +391,7 @@ export const PodcastOutro: React.FC<Props> = ({ brand }) => {
         position: 'absolute',
         left: VW / 2 - TB_HALF_W,
         bottom: 40,
-        zIndex: 15,
+        zIndex: 5,
         opacity: techOp,
         transform: `translate(${techX}px, ${techY}px)`,
       }}>

@@ -20,17 +20,28 @@ export interface ImageWindowOverlayProps {
   width?: number;
 }
 
+const CHAPTER_MARKER_PADDING = 120; // Space reserved for chapter marker at top
+const WINDOW_MARGIN = 60; // Margin on sides and bottom
+
 export const ImageWindowOverlay: React.FC<ImageWindowOverlayProps> = ({
   brand,
   durationInFrames,
   src,
   title,
   caption,
-  width = 720,
+  width: propWidth,
 }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, width: videoWidth, height: videoHeight } = useVideoConfig();
   const { colors, shape, typography } = brand;
+
+  // Calculate window size to fit viewport with padding for chapter marker
+  const availableHeight = videoHeight - CHAPTER_MARKER_PADDING - WINDOW_MARGIN;
+  const availableWidth = videoWidth - WINDOW_MARGIN * 2;
+
+  // Default to 720 or fit within available width, whichever is smaller
+  const width = Math.min(propWidth ?? 720, availableWidth);
+  const maxImageHeight = availableHeight - 42 - (caption ? 44 : 0); // Subtract title bar and optional caption
 
   // Open: spring from bottom, scale 0→1 + translateY 200→0
   const openSpring = spring({
@@ -135,14 +146,14 @@ export const ImageWindowOverlay: React.FC<ImageWindowOverlayProps> = ({
             alignItems: 'center',
             justifyContent: 'center',
             overflow: 'hidden',
-            maxHeight: 460,
+            maxHeight: maxImageHeight,
           }}
         >
           <Img
             src={src}
             style={{
               width: '100%',
-              maxHeight: 460,
+              maxHeight: maxImageHeight,
               objectFit: 'contain',
               display: 'block',
             }}

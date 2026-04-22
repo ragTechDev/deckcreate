@@ -126,5 +126,23 @@ services:
       - PYTHON_PATH=/usr/local/bin/python
     command: npm run hook-qa
 
+  # Thumbnail generation service — extracts speaker frames + renders Remotion still
+  thumbnail:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - .:/app:delegated
+      - node_modules:/app/node_modules
+      - ./public:/app/public
+      # Cache rembg U2Net model (~170 MB, downloaded on first run)
+      - rembg_models:/root/.u2net
+    environment:
+      - PYTHON_PATH=/usr/local/bin/python
+    stdin_open: true
+    tty: true
+    command: npm run thumbnail
+
 volumes:
   node_modules:
+  rembg_models:

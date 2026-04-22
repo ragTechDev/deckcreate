@@ -138,6 +138,7 @@ export const GifWindowOverlay: React.FC<GifWindowOverlayProps> = ({
         <div
           style={{
             background: '#0d1117',
+            height: gifHeight,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',

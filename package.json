@@ -29,6 +29,8 @@
     "color-match:docker": "docker compose run --rm color-match",
     "cut-preview": "node scripts/cut-preview.js",
     "hook-qa": "node scripts/hook-qa.js",
+    "thumbnail": "node scripts/thumbnail/generate-thumbnail.js",
+    "thumbnail:docker": "docker compose run --rm thumbnail",
     "hook-qa:docker": "docker compose run --rm hook-qa",
     "vtt-to-srt": "node scripts/shared/vtt-to-srt.js",
     "remotion": "npx remotion studio",

@@ -4,6 +4,7 @@ import {MyComposition, calculateMetadata} from './Composition';
 import { PodcastIntroComposition, INTRO_DURATION_FRAMES } from './components/PodcastIntro';
 import { PodcastOutroComposition, OUTRO_DURATION_FRAMES } from './components/PodcastOutro';
 import { OverlayGalleryComposition, GALLERY_TOTAL_FRAMES } from './components/OverlayGallery';
+import { PodcastThumbnailComposition } from './components/PodcastThumbnail';
 
 export const RemotionRoot: React.FC = () => {
   return (
@@ -38,6 +39,20 @@ export const RemotionRoot: React.FC = () => {
         fps={60}
         width={1920}
         height={1080}
+        />
+        <Composition
+        id="PodcastThumbnail"
+        component={PodcastThumbnailComposition}
+        durationInFrames={1}
+        fps={60}
+        width={1280}
+        height={720}
+        defaultProps={{
+            transcriptSrc: 'transcribe/output/edit/transcript.json',
+            brandSrc: 'brand.json',
+            manifestSrc: 'transcribe/output/thumbnail/manifest.json',
+            layoutVariant: 'left' as const,
+        }}
         />
     </>
   );
