@@ -224,8 +224,8 @@ async function findFileIn(dir, exts) {
 async function placeFiles(mode) {
   const videoExts = ['.mp4', '.mov', '.mkv'];
   const audioExts = ['.mp3', '.aac', '.wav', '.m4a'];
-  const inputVideo = path.join(cwd, 'public', 'input', 'video');
-  const inputAudio = path.join(cwd, 'public', 'input', 'audio');
+  const inputVideo = path.join(cwd, 'input', 'video');
+  const inputAudio = path.join(cwd, 'input', 'audio');
 
   const needsVideo = mode !== 4;
   const needsAudio = mode !== 3;
@@ -235,12 +235,12 @@ async function placeFiles(mode) {
 
   console.log('\n  ── Place your files ──────────────────────────────────');
   if (mode === 1 || mode === 2) {
-    console.log('  Video file → public/input/video/   (.mp4 .mov .mkv)');
-    console.log('  Audio file → public/input/audio/   (.mp3 .aac .wav .m4a)');
+    console.log('  Video file → input/video/   (.mp4 .mov .mkv)');
+    console.log('  Audio file → input/audio/   (.mp3 .aac .wav .m4a)');
   } else if (mode === 3) {
-    console.log('  Video file → public/input/video/   (.mp4 .mov .mkv)');
+    console.log('  Video file → input/video/   (.mp4 .mov .mkv)');
   } else {
-    console.log('  Audio file → public/input/audio/   (.mp3 .aac .wav .m4a)');
+    console.log('  Audio file → input/audio/   (.mp3 .aac .wav .m4a)');
   }
   await ask('  Press Enter when files are ready...');
 
@@ -319,9 +319,9 @@ async function detectExistingWork() {
     fs.pathExists(p('public', 'sync', 'output', 'synced-output-1.mp4')), // multi-angle primary
     fs.pathExists(p('public', 'transcribe', 'output', 'raw', 'transcript.raw.json')),
     fs.pathExists(p('public', 'transcribe', 'output', 'raw', 'diarization.json')),
-    fs.pathExists(p('public', 'transcribe', 'output', 'edit', 'transcript.doc.txt')),
-    fs.pathExists(p('public', 'transcribe', 'output', 'edit', 'transcript.json')),
-    fs.pathExists(p('public', 'transcribe', 'output', 'camera', 'camera-profiles.json')),
+    fs.pathExists(p('public', 'edit', 'transcript.doc.txt')),
+    fs.pathExists(p('public', 'edit', 'transcript.json')),
+    fs.pathExists(p('public', 'camera', 'camera-profiles.json')),
   ]);
   const syncedVideo = syncedVideoLegacy || syncedVideoMultiAngle;
 
@@ -524,9 +524,9 @@ async function main() {
       console.log('\n  ── Additional camera angle videos ────────────────────');
       const videoExts = ['.mp4', '.mov', '.mkv'];
       for (let angleIdx = 2; angleIdx <= numAngles; angleIdx++) {
-        const angleDir = path.join(cwd, 'public', 'input', 'video', `angle${angleIdx}`);
+        const angleDir = path.join(cwd, 'input', 'video', `angle${angleIdx}`);
         await fs.ensureDir(angleDir);
-        console.log(`  Angle ${angleIdx}: place video file in public/input/video/angle${angleIdx}/`);
+        console.log(`  Angle ${angleIdx}: place video file in input/video/angle${angleIdx}/`);
         await ask(`  Press Enter when angle ${angleIdx} video is ready...`);
         const angleFile = await findFileIn(angleDir, videoExts);
         if (!angleFile) {
@@ -1109,6 +1109,132 @@ async function main() {
         await runCameraSetup();
       } else {
         console.log('  Skipping camera setup. Run wizard again to set up camera cuts later.');
+      }
+    }
+  }
+
+  // ── STEP: Thumbnail frame selection (optional — skip for audio-only) ──────
+  const thumbnailOutputPath = path.join(cwd, 'public', 'output', 'thumbnail.png');
+
+  async function runThumbnailSelection() {
+    console.log('\n  ── Thumbnail frame selection ────────────────────────');
+    const thumbnailDir = path.join(cwd, 'public', 'transcribe', 'output', 'thumbnail');
+    const candidatesPath = path.join(thumbnailDir, 'candidates.json');
+    const selectionsPath = path.join(thumbnailDir, 'selections.json');
+
+    // 1. Extract candidate frames
+    console.log('\n  Step 1: Extracting 3 candidate frames per speaker...');
+    const videoPath = videoSrcsForRemotion?.[0] || videoSrcForRemotion;
+    const extractArgs = [
+      'scripts/thumbnail/extract-speaker-candidates.py',
+      '--transcript', path.join(cwd, 'public', 'transcribe', 'output', 'edit', 'transcript.json'),
+      '--camera-profiles', path.join(cwd, 'public', 'transcribe', 'output', 'camera', 'camera-profiles.json'),
+      '--video', path.join(cwd, 'public', videoPath || 'sync/output/synced-output-1.mp4'),
+      '--output-dir', thumbnailDir,
+      '--num-candidates', '3',
+    ];
+    await spawnStep('python3', extractArgs);
+
+    // Load candidates for display
+    const candidatesData = await fs.readJson(candidatesPath);
+    const speakers = candidatesData.speakers || [];
+
+    if (speakers.length === 0) {
+      console.log('  ⚠ No candidate frames found — skipping thumbnail generation');
+      return;
+    }
+
+    // 2. Show candidates and let user select
+    console.log('\n  Step 2: Select preferred frame for each speaker');
+    console.log('  Candidate previews will open in your image viewer.\n');
+
+    const selections = [];
+
+    for (const speakerData of speakers) {
+      const speaker = speakerData.speaker;
+      const candidates = speakerData.candidates;
+
+      console.log(`\n  === ${speaker} ===`);
+      console.log(`  Found ${candidates.length} valid candidate(s):\n`);
+
+      for (const c of candidates) {
+        console.log(`    [${c.index}] t=${c.timestamp}s`);
+        const previewFullPath = path.join(thumbnailDir, path.basename(c.previewPath));
+        if (await fs.pathExists(previewFullPath)) {
+          openFile(previewFullPath);
+        }
+      }
+
+      // Get user selection
+      let selectedIndex = null;
+      while (selectedIndex === null) {
+        const answer = (await ask(`\n  Select frame [0-${candidates.length - 1}]: `)).trim();
+        const idx = parseInt(answer, 10);
+        if (!isNaN(idx) && idx >= 0 && idx < candidates.length) {
+          selectedIndex = idx;
+        } else {
+          console.log('  Invalid selection. Please try again.');
+        }
+      }
+
+      const selectedCandidate = candidates.find(c => c.index === selectedIndex);
+      selections.push({
+        speaker,
+        selectedIndex,
+        timestamp: selectedCandidate.timestamp,
+        previewPath: selectedCandidate.previewPath,
+      });
+      console.log(`  ✓ Selected: frame [${selectedIndex}] at t=${selectedCandidate.timestamp}s`);
+    }
+
+    // Save selections
+    await fs.writeJson(selectionsPath, { selections }, { spaces: 2 });
+    console.log(`\n  ✓ Selections saved`);
+
+    // 3. Generate cutouts from selections
+    console.log('\n  Step 3: Generating final cutouts...');
+    await spawnStep('node', [
+      'scripts/thumbnail/generate-cutouts-from-selection.js',
+      '--selections', selectionsPath,
+      '--output-dir', thumbnailDir,
+    ]);
+
+    // 4. Generate thumbnail
+    console.log('\n  Step 4: Generating thumbnail...');
+    const transcript = await fs.readJson(path.join(cwd, 'public', 'transcribe', 'output', 'edit', 'transcript.json'));
+    const title = transcript.meta?.title || '';
+    const speakerNames = selections.map(s => s.speaker);
+
+    const thumbnailArgs = [
+      'scripts/thumbnail/generate-thumbnail.js',
+      '--transcript', 'public/edit/transcript.json',
+      '--camera-profiles', 'public/camera/camera-profiles.json',
+      '--video', videoPath || 'sync/output/synced-output-1.mp4',
+      '--output', 'public/thumbnail/thumbnail.png',
+      '--speakers', ...speakerNames,
+    ];
+    if (title) thumbnailArgs.push('--title', title);
+
+    await spawnStep('node', thumbnailArgs);
+  }
+
+  if (mode !== 4) {
+    if (redoStepId === 'thumbnail') {
+      await runThumbnailSelection();
+      if (singleStepMode) {
+        singleStepMode = false;
+        redoStepId = null;
+        if (!await confirm('  Continue with the next steps?', false)) {
+          console.log('\n  ✓ Done!\n');
+          rl.close();
+          return;
+        }
+      }
+    } else if (!redoStepId) {
+      console.log('');
+      const doThumbnail = await confirm('  Generate thumbnail with frame selection?', false);
+      if (doThumbnail) {
+        await runThumbnailSelection();
       }
     }
   }

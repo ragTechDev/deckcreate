@@ -57,7 +57,7 @@ export default function EditorPage() {
   });
 
   useEffect(() => {
-    fetch('/transcribe/output/edit/transcript.json')
+    fetch('/edit/transcript.json')
       .then(r => r.json())
       .then((data: Transcript) => {
         setTranscript(data);
@@ -72,7 +72,7 @@ export default function EditorPage() {
         setCameraCues(ccMap);
       });
     // Load camera profiles — non-fatal if absent
-    fetch('/transcribe/output/camera/camera-profiles.json')
+    fetch('/camera/camera-profiles.json')
       .then(r => r.ok ? r.json() : null)
       .then((data: CameraProfiles | null) => { if (data) setCameraProfiles(data); })
       .catch(() => {});

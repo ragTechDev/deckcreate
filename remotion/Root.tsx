@@ -18,8 +18,8 @@ export const RemotionRoot: React.FC = () => {
         height={1080}
         defaultProps={{
             src: 'sync/output/synced-output-1.mp4',
-            transcriptSrc: 'transcribe/output/edit/transcript.json',
-            cameraProfilesSrc: 'transcribe/output/camera/camera-profiles.json',
+            transcriptSrc: 'edit/transcript.json',
+            cameraProfilesSrc: 'camera/camera-profiles.json',
             hookMusicSrc: 'sounds/jazz-cafe-music.mp3',
         }}
         calculateMetadata={calculateMetadata}
@@ -48,9 +48,9 @@ export const RemotionRoot: React.FC = () => {
         width={1280}
         height={720}
         defaultProps={{
-            transcriptSrc: 'transcribe/output/edit/transcript.json',
+            transcriptSrc: 'edit/transcript.json',
             brandSrc: 'brand.json',
-            manifestSrc: 'transcribe/output/thumbnail/manifest.json',
+            manifestSrc: 'thumbnail/cutouts/manifest.json',
             layoutVariant: 'left' as const,
         }}
         />

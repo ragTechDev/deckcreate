@@ -201,7 +201,7 @@ export default function CameraPage() {
     (async () => {
       try {
         // ── Transcript (speakers) — same for both single and multi-angle ──────
-        const transcriptRes = await fetch('/transcribe/output/edit/transcript.json');
+        const transcriptRes = await fetch('/edit/transcript.json');
         if (transcriptRes.ok) {
           const transcript = await transcriptRes.json();
           const names = [
@@ -217,7 +217,7 @@ export default function CameraPage() {
         }
 
         // ── Try multi-angle (angles.json) first ───────────────────────────────
-        const anglesRes = await fetch('/transcribe/output/camera/angles.json');
+        const anglesRes = await fetch('/camera/angles.json');
         if (anglesRes.ok) {
           const anglesData: AngleInfo[] = await anglesRes.json();
           if (anglesData.length >= 1) {
@@ -225,13 +225,13 @@ export default function CameraPage() {
             const detMap: Record<string, Detection[]> = {};
             for (const angle of anglesData) {
               // Load detections for primary frame or all timeframes
-              const r = await fetch(`/transcribe/output/camera/${angle.detectFile}`);
+              const r = await fetch(`/camera/${angle.detectFile}`);
               detMap[angle.angleName] = r.ok ? await r.json() : [];
 
               // Also load detections for each timeframe if dynamic angles
               if (angle.timeframes) {
                 for (const tf of angle.timeframes) {
-                  const tfRes = await fetch(`/transcribe/output/camera/${tf.detectFile}`);
+                  const tfRes = await fetch(`/camera/${tf.detectFile}`);
                   if (tfRes.ok) {
                     detMap[`${angle.angleName}-${tf.timeLabel}`] = await tfRes.json();
                   }
@@ -244,7 +244,7 @@ export default function CameraPage() {
         }
 
         // ── Single-angle fallback ─────────────────────────────────────────────
-        const detectionsRes = await fetch('/transcribe/output/camera/detections.json');
+        const detectionsRes = await fetch('/camera/detections.json');
         const dets: Detection[] = detectionsRes.ok ? await detectionsRes.json() : [];
         setRawDetections(dets);
         if (!detectionsRes.ok) {
@@ -654,9 +654,9 @@ export default function CameraPage() {
   // Frame image path: per-angle/timeframe in multi-angle mode, legacy path otherwise
   const frameSrc = angles
     ? hasTimeframes
-      ? `/transcribe/output/camera/${currentTimeframes[currentTimeframeIdx]?.frameFile}`
-      : `/transcribe/output/camera/${angles[currentAngleIdx]?.frameFile}`
-    : '/transcribe/output/camera/frame.jpg';
+      ? `/camera/${currentTimeframes[currentTimeframeIdx]?.frameFile}`
+      : `/camera/${angles[currentAngleIdx]?.frameFile}`
+    : '/camera/frame.jpg';
 
   const assignedCount = boxes.filter(b => b.speaker).length;
 
@@ -919,7 +919,7 @@ export default function CameraPage() {
                   </Button>
                   {assignedCount > 0 && (
                     <Text size="xs" c="dimmed">
-                      Saves to public/transcribe/output/camera/camera-profiles.json
+                      Saves to public/camera/camera-profiles.json
                     </Text>
                   )}
                 </>

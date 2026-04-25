@@ -9,7 +9,7 @@
  * Usage:
  *   npx tsx scripts/camera/color-match.ts [--profiles <path>] [--ref <angleName>]
  *
- *   --profiles <path>   Path to camera-profiles.json (default: public/transcribe/output/camera/../camera-profiles.json)
+ *   --profiles <path>   Path to camera-profiles.json (default: public/camera/camera-profiles.json)
  *   --ref <angleName>   Reference angle all others are matched to (default: angle1)
  */
 
@@ -151,7 +151,7 @@ const IDENTITY_MATRIX = [1,0,0,0,0, 0,1,0,0,0, 0,0,1,0,0, 0,0,0,1,0];
 async function main() {
   const args = parseArgs();
 
-  const cameraDir    = path.join(cwd, 'public', 'transcribe', 'output', 'camera');
+  const cameraDir    = path.join(cwd, 'public', 'camera');
   const profilesPath = args.profiles ?? path.join(cameraDir, 'camera-profiles.json');
   const anglesPath   = path.join(cameraDir, 'angles.json');
   const refAngle     = args.ref ?? 'angle1';
@@ -180,7 +180,7 @@ async function main() {
   }
 
   // Read transcript for videoStart timestamp
-  const transcriptPath = path.join(cwd, 'public', 'transcribe', 'output', 'edit', 'transcript.json');
+  const transcriptPath = path.join(cwd, 'public', 'edit', 'transcript.json');
   let videoStart = 0;
   if (await fs.pathExists(transcriptPath)) {
     const transcript = await fs.readJson(transcriptPath);

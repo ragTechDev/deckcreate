@@ -589,6 +589,16 @@ function buildInstructionsBlock() {
     '                    > END',
     '                  Anything outside these markers is excluded.',
     '',
+    '  THUMBNAIL       Edit # THUMBNAIL section frontmatter to override thumbnail:',
+    '                    bg="public/assets/background.jpg"',
+    '                    middlespeaker="GuestName"',
+    '                    title="Custom **highlighted** title"',
+    '                    layout=left|right|center',
+    '                  bg= image path(s) — internal (relative to /public) or external URL (comma-separated)',
+    '                  middlespeaker= speaker name(s) to center (comma-separated)',
+    '                  title= custom thumbnail title; use **text** for accent highlight',
+    '                  layout= forces left/right/center variant (default: auto from title)',
+    '',
     '  SAVE EDITS       npm run merge-doc',
     '',
     '════════════════════════════════════════════════════════════════',
@@ -602,8 +612,24 @@ function buildSpeakersSection(transcript) {
   return '# SPEAKERS\n' + speakers.map(s => `${s}: ${s}`).join('\n') + '\n\n---\n\n';
 }
 
+function buildThumbnailSection(transcript) {
+  const thumb = transcript.meta?.thumbnail;
+  const lines = ['# THUMBNAIL'];
+  // Show placeholders with current values or defaults
+  const bgValue = thumb?.bg?.length ? thumb.bg.join(',') : 'public/assets/background.jpg';
+  const speakerValue = thumb?.middleSpeakers?.length ? thumb.middleSpeakers.join(',') : 'GuestName';
+  const titleValue = thumb?.title ?? 'Custom **highlighted** title';
+  const layoutValue = thumb?.layoutVariant ?? 'left|right|center';
+  lines.push(`bg="${bgValue}"`);
+  lines.push(`middlespeaker="${speakerValue}"`);
+  lines.push(`title="${titleValue}"`);
+  lines.push(`layout=${layoutValue}`);
+  return lines.join('\n') + '\n\n---\n\n';
+}
+
 function buildDoc(transcript) {
   const instructions = buildInstructionsBlock();
+  const thumbnailSection = buildThumbnailSection(transcript);
   const speakersSection = buildSpeakersSection(transcript);
 
   const lines = [];
@@ -651,7 +677,7 @@ function buildDoc(transcript) {
     if (videoEnd !== undefined && seg.end === videoEnd) lines.push('> END');
   }
 
-  return instructions + speakersSection + lines.join('\n') + '\n';
+  return instructions + thumbnailSection + speakersSection + lines.join('\n') + '\n';
 }
 
 // ─── Doc merge ────────────────────────────────────────────────────────────────
@@ -1017,6 +1043,31 @@ function parseSpeakerRenames(docContent) {
   return map;
 }
 
+function parseThumbnailFromDoc(docContent) {
+  // Parse # THUMBNAIL section (frontmatter format without > THUMB prefix)
+  const sectionMatch = docContent.match(/^#\s*THUMBNAIL\s*\n([\s\S]*?)\n---/m);
+  if (!sectionMatch) return null;
+
+  const thumb = {};
+  const lines = sectionMatch[1].split('\n');
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const kv = parseKv(trimmed);
+    if (kv.bg) {
+      const newBgs = kv.bg.split(',').map(s => s.trim()).filter(Boolean);
+      thumb.bg = thumb.bg ? [...thumb.bg, ...newBgs] : newBgs;
+    }
+    if (kv.middlespeaker) {
+      const newSpeakers = kv.middlespeaker.split(',').map(s => s.trim()).filter(Boolean);
+      thumb.middleSpeakers = thumb.middleSpeakers ? [...thumb.middleSpeakers, ...newSpeakers] : newSpeakers;
+    }
+    if (kv.title) thumb.title = kv.title;
+    if (kv.layout) thumb.layoutVariant = kv.layout;
+  }
+  return Object.keys(thumb).length ? thumb : null;
+}
+
 function stripSpeakersSection(docContent) {
   // Strip everything from the start through the --- separator
   // (covers both the instructions block and the SPEAKERS section)
@@ -1024,6 +1075,7 @@ function stripSpeakersSection(docContent) {
 }
 
 function mergeDocIntoTranscript(transcript, docContent) {
+  const thumbnail = parseThumbnailFromDoc(docContent);
   const renames = parseSpeakerRenames(docContent);
   const stripped = stripSpeakersSection(docContent);
 
@@ -1225,7 +1277,7 @@ function mergeDocIntoTranscript(transcript, docContent) {
   }
   return {
     ...transcript,
-    meta: { ...transcript.meta, videoStart, videoEnd },
+    meta: { ...transcript.meta, videoStart, videoEnd, ...(thumbnail !== null ? { thumbnail } : {}) },
     segments: outSegments,
   };
 }
@@ -1391,6 +1443,207 @@ function buildSentencesSrt(segments, meta = {}) {
   return convertVttToSrt(buildSentencesVtt(segments, meta));
 }
 
+// ─── YouTube subtitle generation (with intro/outro timing) ────────────────────
+
+// Must match remotion/components/PodcastIntro.tsx and PodcastOutro.tsx
+const INTRO_DURATION_SECS = 7;  // 420 frames @ 60fps
+const OUTRO_DURATION_SECS = 7;  // 420 frames @ 60fps
+const HOOK_TAIL_PAD_UNBOUNDED = 0.16;
+const HOOK_TAIL_PAD_BOUNDED = 0.02;
+const HOOK_BRIDGE_MAX_GAP = 1.0;
+
+/** Match SegmentPlayer.tsx hook logic */
+function getHookEffectiveEnd(seg, nextHookStart) {
+  const baseEnd = seg.hookTo ?? seg.end;
+  const isBounded = seg.hookTo !== undefined && seg.hookTo !== null;
+
+  // Extend for trailing spoken tokens (simplified - matches Composition.tsx)
+  const latestSpoken = seg.tokens
+    .filter(t => !/_[A-Z]+_/.test(t.text.trim()) && t.text.trim() !== '')
+    .reduce((max, t) => Math.max(max, t.t_dtw), -Infinity);
+
+  let sourceEnd = baseEnd;
+  if (!isBounded && latestSpoken > baseEnd) {
+    const drift = latestSpoken - baseEnd;
+    const extension = Math.min(1.5, drift + 0.4);
+    sourceEnd = baseEnd + extension;
+  }
+
+  // Bridge to next hook if gap is small
+  const hasTokenAfter = seg.tokens.some(
+    t => !/_[A-Z]+_/.test(t.text.trim()) && t.text.trim() !== '' && t.t_dtw > sourceEnd + 0.02
+  );
+  if (!hasTokenAfter && nextHookStart && nextHookStart > sourceEnd && nextHookStart - sourceEnd <= HOOK_BRIDGE_MAX_GAP) {
+    sourceEnd = nextHookStart;
+  }
+
+  const withPad = sourceEnd + (isBounded ? HOOK_TAIL_PAD_BOUNDED : HOOK_TAIL_PAD_UNBOUNDED);
+  return nextHookStart !== undefined ? Math.min(withPad, nextHookStart) : withPad;
+}
+
+/** Returns hook duration in seconds */
+function computeHookDuration(segments) {
+  const hooks = segments.filter(s => s.hook && !s.cut);
+  return hooks.reduce((sum, s, idx) => {
+    const start = s.hookFrom ?? s.start;
+    const next = hooks[idx + 1];
+    const nextStart = next ? (next.hookFrom ?? next.start) : undefined;
+    return sum + (getHookEffectiveEnd(s, nextStart) - start);
+  }, 0);
+}
+
+/** Build SRT for YouTube with timing that accounts for hook + intro + main + outro */
+function buildYouTubeSubtitles(transcript) {
+  const { segments, meta } = transcript;
+  const { videoStart, videoEnd } = meta;
+
+  // Calculate offsets
+  const hookDuration = computeHookDuration(segments);
+  const hasHook = hookDuration > 0;
+  const introOffset = hasHook ? INTRO_DURATION_SECS : 0;
+
+  const lines = [];
+  let cueIndex = 1;
+  let currentOffset = 0;
+
+  function secondsToSrtTs(s) {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = (s % 60).toFixed(3);
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec).padStart(6, '0').replace('.', ',')}`;
+  }
+
+  function emitCue(start, end, text) {
+    const clean = cleanCaptionText(text);
+    if (!clean) return;
+    lines.push(`${cueIndex}`);
+    lines.push(`${secondsToSrtTs(start)} --> ${secondsToSrtTs(end)}`);
+    lines.push(clean);
+    lines.push('');
+    cueIndex++;
+  }
+
+  // 1. HOOK captions (play at the very beginning)
+  const hooks = segments.filter(s => s.hook && !s.cut);
+  for (let i = 0; i < hooks.length; i++) {
+    const seg = hooks[i];
+    const clips = getHookClips(seg);
+    const next = hooks[i + 1];
+    const nextStart = next ? (next.hookFrom ?? next.start) : undefined;
+    const hookEndTime = currentOffset + (getHookEffectiveEnd(seg, nextStart) - (seg.hookFrom ?? seg.start));
+
+    for (const clip of clips) {
+      const clipDuration = clip.end - clip.start;
+      const clipStart = currentOffset;
+      const clipEnd = currentOffset + clipDuration;
+      emitCue(clipStart, clipEnd, seg.hookPhrase ?? seg.text);
+      currentOffset += clipDuration;
+    }
+
+    // Ensure we account for any bridging/extension time
+    if (nextStart) {
+      const actualEnd = getHookEffectiveEnd(seg, nextStart);
+      const baseStart = seg.hookFrom ?? seg.start;
+      currentOffset = Math.max(currentOffset, hookEndTime);
+    }
+  }
+
+  // 2. INTRO (no captions, just advance time)
+  currentOffset += introOffset;
+
+  // 3. MAIN CONTENT captions
+  for (const seg of segments) {
+    if (seg.hook) continue; // Already handled above
+    if (videoStart !== undefined && seg.end <= videoStart) continue;
+    if (videoEnd !== undefined && seg.start >= videoEnd) continue;
+    if (seg.cut) continue;
+
+    const clips = getSubClips(seg);
+    for (const clip of clips) {
+      const clipDuration = clip.end - clip.start;
+      emitCue(currentOffset, currentOffset + clipDuration, seg.text);
+      currentOffset += clipDuration;
+    }
+  }
+
+  // 4. OUTRO (no captions, don't need to advance since we're done)
+
+  return lines.join('\n');
+}
+
+// ─── YouTube chapter timestamps generation ────────────────────────────────────
+
+/** Format seconds as MM:SS or HH:MM:SS for YouTube chapters */
+function formatChapterTime(s) {
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = Math.floor(s % 60);
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  }
+  return `${m}:${String(sec).padStart(2, '0')}`;
+}
+
+/** Build YouTube chapter timestamps (hook, intro, ChapterMarker annotations, outro) */
+function buildYouTubeChapters(transcript) {
+  const { segments, meta } = transcript;
+  const { videoStart, videoEnd } = meta;
+
+  const hookDuration = computeHookDuration(segments);
+  const hasHook = hookDuration > 0;
+  const introOffset = hasHook ? INTRO_DURATION_SECS : 0;
+
+  const chapters = [];
+
+  // 1. Hook chapter (if exists)
+  if (hasHook) {
+    chapters.push({ time: 0, title: 'Hook' });
+  }
+
+  // 2. Intro chapter
+  chapters.push({ time: hookDuration, title: 'Intro' });
+
+  // 3. Walk main segments, emit a chapter for each ChapterMarker graphic
+  let currentTime = hookDuration + introOffset;
+
+  const mainSegments = segments.filter(s => {
+    if (s.hook) return false;
+    if (videoStart !== undefined && s.end <= videoStart) return false;
+    if (videoEnd !== undefined && s.start >= videoEnd) return false;
+    if (s.cut) return false;
+    return true;
+  });
+
+  for (const seg of mainSegments) {
+    const clips = getSubClips(seg);
+    if (clips.length === 0) continue;
+
+    for (const g of (seg.graphics || [])) {
+      if (g.type !== 'ChapterMarker') continue;
+      const title = g.props?.chapterTitle || 'Chapter';
+      // Map source time g.at → output time by summing clip durations up to that point
+      let accum = 0;
+      for (const clip of clips) {
+        if (g.at <= clip.start) break;
+        if (g.at < clip.end) { accum += g.at - clip.start; break; }
+        accum += clip.end - clip.start;
+      }
+      chapters.push({ time: currentTime + accum, title });
+    }
+
+    for (const clip of clips) {
+      currentTime += clip.end - clip.start;
+    }
+  }
+
+  // 4. Outro chapter
+  chapters.push({ time: currentTime, title: 'Outro' });
+
+  chapters.sort((a, b) => a.time - b.time);
+
+  return chapters.map(c => `${formatChapterTime(c.time)} ${c.title}`).join('\n');
+}
+
 function parseVtt(content) {
   const segments = [];
   const lines = content.split('\n');
@@ -1466,7 +1719,8 @@ async function main() {
 
   const rawPath = cli.rawPath || path.join(cwd, 'public', 'transcribe', 'output', 'raw', 'transcript.raw.json');
   const outputPath = cli.outputPath || path.join(cwd, 'public', 'transcribe', 'output', 'edit', 'transcript.json');
-  const docPath = outputPath.replace(/\.json$/, '.doc.txt');
+  // Use public/edit/transcript.doc.txt as the single editable source of truth
+  const docPath = cli.docPath || path.join(cwd, 'public', 'edit', 'transcript.doc.txt');
 
   if (!await fs.pathExists(rawPath)) {
     console.error(`❌ Raw transcript not found: ${rawPath}`);
@@ -1639,15 +1893,21 @@ async function main() {
   }
 
   const sentencesSrtPath = outputPath.replace(/\.json$/, '.sentences.srt');
+  const youtubeSrtPath = outputPath.replace(/\.json$/, '.youtube.srt');
+  const chaptersPath = outputPath.replace(/\.json$/, '.chapters.txt');
 
   await fs.ensureDir(path.dirname(outputPath));
   await fs.writeJson(outputPath, transcript, { spaces: 2 });
   await fs.writeFile(sentencesSrtPath, buildSentencesSrt(transcript.segments, transcript.meta), 'utf8');
   await fs.writeFile(docPath, buildDoc(transcript), 'utf8');
+  await fs.writeFile(youtubeSrtPath, buildYouTubeSubtitles(transcript), 'utf8');
+  await fs.writeFile(chaptersPath, buildYouTubeChapters(transcript), 'utf8');
 
   console.log(`✓ ${outputPath}`);
   console.log(`✓ ${docPath}  ← edit here`);
   console.log(`✓ ${sentencesSrtPath}`);
+  console.log(`✓ ${youtubeSrtPath}  ← YouTube subtitles (with intro/outro timing)`);
+  console.log(`✓ ${chaptersPath}  ← YouTube chapter timestamps (copy-paste to description)`);
 }
 
 const _argv1 = (process.argv[1] || '').replace(/\\/g, '/');
@@ -1656,4 +1916,4 @@ if (_argv1.endsWith('/edit-transcript.js') || _argv1.endsWith('/edit-transcript'
 }
 
 export default main;
-export { buildTextWithCuts, applyTextPartsToTokens, mergeDocIntoTranscript, buildDoc, deriveCuts, cleanCaptionText, buildSentencesVtt, buildSentencesSrt, getSubClips, getHookClips, resolvePhraseToTimeRange, resolvePhraseToFirstTokenIndex, autoCutPauses, autoCutDisfluencies, rebalanceBoundaryTokens, buildPrevTokensByTdtw, WORD_DURATION_ESTIMATE, CUT_START_BIAS, CUT_END_BIAS, isSpecialToken, isDisfluencyToken };
+export { buildTextWithCuts, applyTextPartsToTokens, mergeDocIntoTranscript, buildDoc, deriveCuts, cleanCaptionText, buildSentencesVtt, buildSentencesSrt, buildYouTubeSubtitles, getSubClips, getHookClips, resolvePhraseToTimeRange, resolvePhraseToFirstTokenIndex, autoCutPauses, autoCutDisfluencies, rebalanceBoundaryTokens, buildPrevTokensByTdtw, WORD_DURATION_ESTIMATE, CUT_START_BIAS, CUT_END_BIAS, isSpecialToken, isDisfluencyToken };

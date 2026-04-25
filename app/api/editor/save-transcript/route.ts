@@ -3,8 +3,8 @@ import { readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import type { Transcript, TimeCut } from '../../../../remotion/types/transcript';
 
-const TRANSCRIPT_PATH = join(process.cwd(), 'public', 'transcribe', 'output', 'edit', 'transcript.json');
-const DOC_PATH = join(process.cwd(), 'public', 'transcribe', 'output', 'edit', 'transcript.doc.txt');
+const TRANSCRIPT_PATH = join(process.cwd(), 'public', 'edit', 'transcript.json');
+const DOC_PATH = join(process.cwd(), 'public', 'edit', 'transcript.doc.txt');
 
 /**
  * Targeted update of transcript.doc.txt: replaces > CUT annotations per segment

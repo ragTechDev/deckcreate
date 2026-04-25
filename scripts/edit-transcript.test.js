@@ -7,6 +7,7 @@ import {
   cleanCaptionText,
   buildSentencesVtt,
   buildSentencesSrt,
+  buildYouTubeSubtitles,
   getSubClips,
   getHookClips,
   resolvePhraseToTimeRange,
@@ -833,6 +834,61 @@ describe('HOOK phrase in buildSentencesVtt', () => {
     ]);
     const doc = buildDoc(base);
     expect(doc).toContain('> HOOK "exciting moment" 3.000-5.000');
+  });
+});
+
+// ─── YouTube subtitles ────────────────────────────────────────────────────────
+
+describe('buildYouTubeSubtitles', () => {
+  function transcript(segs, meta = {}) {
+    return { meta: { fps: 60, ...meta }, segments: segs };
+  }
+
+  function seg(props) {
+    return {
+      id: 1, start: 0, end: 5, speaker: 'A', cut: false, cuts: [], text: 'hello world',
+      hook: false, hookPhrase: null, hookFrom: undefined, hookTo: undefined,
+      tokens: [],
+      ...props,
+    };
+  }
+
+  test('no hook: main content starts at 00:00:00', () => {
+    const tr = transcript([
+      seg({ id: 1, start: 0, end: 5, text: 'first segment' }),
+      seg({ id: 2, start: 5, end: 10, text: 'second segment' }),
+    ]);
+    const srt = buildYouTubeSubtitles(tr);
+    expect(srt).toContain('00:00:00,000 --> 00:00:05,000');
+    expect(srt).toContain('first segment');
+    expect(srt).toContain('00:00:05,000 --> 00:00:10,000');
+    expect(srt).toContain('second segment');
+  });
+
+  test('with hook: hook plays first, then intro delay, then main', () => {
+    const tr = transcript([
+      seg({ id: 1, start: 0, end: 10, text: 'hook content here', hook: true, hookPhrase: 'hook content', hookFrom: 2.0, hookTo: 4.0 }),
+      seg({ id: 2, start: 10, end: 15, text: 'main content' }),
+    ]);
+    const srt = buildYouTubeSubtitles(tr);
+    // Hook: 2.0s (4.0 - 2.0), appears at video start
+    expect(srt).toContain('00:00:00,000 --> 00:00:02,000');
+    expect(srt).toContain('hook content');
+    // Main content: starts after hook + 7s intro = 9s offset (2.0 + 7.0 = 9.0)
+    expect(srt).toContain('00:00:09,000 --> 00:00:14,000');
+    expect(srt).toContain('main content');
+  });
+
+  test('cut segments are skipped', () => {
+    const tr = transcript([
+      seg({ id: 1, start: 0, end: 5, text: 'keep this' }),
+      seg({ id: 2, start: 5, end: 10, text: 'cut this', cut: true }),
+      seg({ id: 3, start: 10, end: 15, text: 'and this' }),
+    ]);
+    const srt = buildYouTubeSubtitles(tr);
+    expect(srt).toContain('keep this');
+    expect(srt).toContain('and this');
+    expect(srt).not.toContain('cut this');
   });
 });
 

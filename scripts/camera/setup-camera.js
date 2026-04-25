@@ -264,9 +264,9 @@ async function main() {
   const pythonBin = args.pythonBin || 'python';
 
   const transcriptPath = args.transcriptPath
-    || path.join(cwd, 'public', 'transcribe', 'output', 'edit', 'transcript.json');
+    || path.join(cwd, 'public', 'edit', 'transcript.json');
 
-  const outputDir = path.join(cwd, 'public', 'transcribe', 'output', 'camera');
+  const outputDir = path.join(cwd, 'public', 'camera');
 
   console.log('\nCamera Setup');
   console.log('============\n');

@@ -13,10 +13,10 @@ Also writes {output_dir}/manifest.json with per-speaker metadata.
 
 Usage:
   python3 scripts/thumbnail/extract-speaker-frames.py \\
-    --transcript public/transcribe/output/edit/transcript.json \\
-    --camera-profiles public/transcribe/output/camera/camera-profiles.json \\
+    --transcript public/edit/transcript.json \\
+    --camera-profiles public/camera/camera-profiles.json \\
     --video public/sync/output/synced-output-1.mp4 \\
-    --output-dir public/transcribe/output/thumbnail \\
+    --output-dir public/thumbnail/cutouts \\
     [--num-frames 8] \\
     [--speakers Natasha Saloni Victoria]
 
@@ -302,7 +302,7 @@ def process_speaker(
     print(f'  Saved: {out_path}')
 
     return {
-        'cutout': f'transcribe/output/thumbnail/{out_filename}',
+        'cutout': f'thumbnail/cutouts/{out_filename}',
         'score': round(best_score, 4),
         'frameTimestamp': round(best_frame_ts, 3),
         'sourceAngle': angle_name,

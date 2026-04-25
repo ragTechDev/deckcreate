@@ -59,7 +59,7 @@ function buildCaptions(tokens, sourceStart, sourceEnd) {
 let transcript;
 
 beforeAll(async () => {
-  const jsonPath = path.join(process.cwd(), 'public/transcribe/output/edit/transcript.json');
+  const jsonPath = path.join(process.cwd(), 'public/edit/transcript.json');
   transcript = await fs.readJson(jsonPath);
 });
 

@@ -6,7 +6,7 @@ export async function POST(req: NextRequest) {
   try {
     const profiles = await req.json();
     const outputPath = path.join(
-      process.cwd(), 'public', 'transcribe', 'output', 'camera', 'camera-profiles.json'
+      process.cwd(), 'public', 'camera', 'camera-profiles.json'
     );
     await fs.ensureDir(path.dirname(outputPath));
     await fs.writeJson(outputPath, profiles, { spaces: 2 });
