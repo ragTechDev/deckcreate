@@ -49,7 +49,7 @@ public/sync/              # synced video/audio working files
 public/transcribe/input/  # audio extracted for Whisper
 public/transcribe/output/ # raw Whisper JSON + VTT
 public/thumbnail/         # candidate frames, cutouts, manifest
-public/renders/*           # final rendered .mp4 files
+public/renders/           # final rendered .mp4 files
 public/output/            # carousel exports
 
 # ── Editable pipeline outputs (text/JSON) ─────────────────────────────────────
@@ -62,8 +62,8 @@ public/camera/ → camera-profiles.json, frame snapshots, detections
 # the transcript doc without needing filesystem access.
 #
 # Uncomment to exclude (e.g. for a private or unreleased episode):
-/public/edit/*
-/public/camera/*
+public/edit/*
+public/camera/*
 
 # Whisper.cpp binary and models (downloaded on first run)
 /whisper.cpp/

@@ -1718,7 +1718,7 @@ async function main() {
   const cli = parseArgs();
 
   const rawPath = cli.rawPath || path.join(cwd, 'public', 'transcribe', 'output', 'raw', 'transcript.raw.json');
-  const outputPath = cli.outputPath || path.join(cwd, 'public', 'transcribe', 'output', 'edit', 'transcript.json');
+  const outputPath = cli.outputPath || path.join(cwd, 'public', 'edit', 'transcript.json');
   // Use public/edit/transcript.doc.txt as the single editable source of truth
   const docPath = cli.docPath || path.join(cwd, 'public', 'edit', 'transcript.doc.txt');
 
