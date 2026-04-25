@@ -96,7 +96,8 @@ function hookClipEnd(s: Segment, nextHookStart?: number): number {
   if (endsAtSegmentTail && canBridgeToNextHook) {
     sourceEnd = nextHookStart;
   }
-  return sourceEnd + (isBoundedHook ? HOOK_TAIL_PAD_BOUNDED_SECONDS : HOOK_TAIL_PAD_UNBOUNDED_SECONDS);
+  const withPad = sourceEnd + (isBoundedHook ? HOOK_TAIL_PAD_BOUNDED_SECONDS : HOOK_TAIL_PAD_UNBOUNDED_SECONDS);
+  return nextHookStart !== undefined ? Math.min(withPad, nextHookStart) : withPad;
 }
 
 function computeEffectiveDuration(transcript: Transcript): number {
@@ -210,7 +211,7 @@ const TranscriptComposition: React.FC<TranscriptCompositionProps> = ({
       {/* Hook overlay: pill, captions, logo, Techybara character.
           Stays mounted for stable frame transitions; returns null outside hook frames. */}
       {hasHooks && (
-        <HookOverlay hookSegments={hookSegments} brand={brand} />
+        <HookOverlay hookSegments={hookSegments} segments={orderedSegments} brand={brand} />
       )}
 
       {/* Hook music — looped so it continues if total hook duration exceeds one track length */}

@@ -11,7 +11,8 @@ export type SplitSections = { hookSections: Section[]; mainSections: Section[] }
 
 /** Splits a segment's time range into playable sub-clips, skipping cuts[] ranges. */
 export function getSubClips(segment: Segment): SubClip[] {
-  if (!segment.cuts || segment.cuts.length === 0) {
+  const allCuts = [...(segment.cuts ?? []), ...(segment.visualCuts ?? [])];
+  if (allCuts.length === 0) {
     return [{ sourceStart: segment.start, sourceEnd: segment.end }];
   }
 
@@ -21,7 +22,7 @@ export function getSubClips(segment: Segment): SubClip[] {
   // Clamp cuts to [segment.start, segment.end] and discard invalid ones.
   // Whisper t_dtw values can drift outside the segment window, producing
   // inverted (from > to) or zero-duration cuts that would corrupt playback.
-  const sorted = [...segment.cuts]
+  const sorted = [...allCuts]
     .map(c => ({ from: Math.max(c.from, segment.start), to: Math.min(c.to, segment.end) }))
     .filter(c => c.to > c.from)
     .sort((a: TimeCut, b: TimeCut) => a.from - b.from);
@@ -68,7 +69,7 @@ export function buildMainSubClips(
     if (seg.cut) cutRanges.push({ from: seg.start, to: seg.end });
   }
   for (const seg of activeMain) {
-    for (const c of seg.cuts ?? []) {
+    for (const c of [...(seg.cuts ?? []), ...(seg.visualCuts ?? [])]) {
       const from = Math.max(c.from, seg.start);
       const to   = Math.min(c.to,   seg.end);
       if (to > from) cutRanges.push({ from, to });
@@ -119,7 +120,10 @@ function getHookSubClips(segment: Segment, nextHookStart?: number): SubClip[] {
     .sort((a, b) => (b.t_end ?? 0) - (a.t_end ?? 0))[0];
 
   if (lastSpokenToken?.t_end) {
-    sourceEnd = Math.max(sourceEnd, lastSpokenToken.t_end);
+    const tEnd = nextHookStart !== undefined
+      ? Math.min(lastSpokenToken.t_end, nextHookStart)
+      : lastSpokenToken.t_end;
+    sourceEnd = Math.max(sourceEnd, tEnd);
   }
 
   // Bridge to the next hook when the gap is small and this hook ends at the
@@ -139,6 +143,12 @@ function getHookSubClips(segment: Segment, nextHookStart?: number): SubClip[] {
   sourceEnd += isBoundedHook
     ? HOOK_TAIL_PAD_BOUNDED_SECONDS
     : HOOK_TAIL_PAD_UNBOUNDED_SECONDS;
+
+  // Hard cap: never extend into the next hook's source window.
+  // Prevents overlapping source ranges which cause backward jumps in SectionGroupPlayer.
+  if (nextHookStart !== undefined) {
+    sourceEnd = Math.min(sourceEnd, nextHookStart);
+  }
 
   return [{ sourceStart, sourceEnd }];
 }
@@ -176,12 +186,22 @@ export function buildSections(
   videoEnd?: number,
 ): SplitSections {
   const hookSegments = segments.filter(s => s.hook && !s.cut);
-  const hookSections = hookSegments
+  const rawHookSections = hookSegments
     .flatMap((seg, idx) => {
       const next = hookSegments[idx + 1];
       const nextHookStart = next ? (next.hookFrom ?? next.start) : undefined;
       return toSections(getHookSubClips(seg, nextHookStart), fps);
     });
+  // De-overlap: if a section's trimBefore precedes the previous section's trimAfter
+  // (caused by t_end extension or bridging across overlapping source ranges), advance it.
+  const hookSections: Section[] = [];
+  for (const s of rawHookSections) {
+    const prev = hookSections[hookSections.length - 1];
+    const trimBefore = prev ? Math.max(s.trimBefore, prev.trimAfter) : s.trimBefore;
+    if (trimBefore < s.trimAfter) {
+      hookSections.push({ trimBefore, trimAfter: s.trimAfter });
+    }
+  }
   const allMainSegments = segments.filter(s => !s.hook);
   const mainSubClips = buildMainSubClips(allMainSegments, videoStart, videoEnd);
   const mainSections = toSections(mainSubClips, fps);
@@ -214,11 +234,13 @@ const SectionGroupPlayer: React.FC<{
   sections: Section[];
   declickFrames?: number;
   groupFadeOutFrames?: number;
+  muted?: boolean;
 }> = ({
   src,
   sections,
   declickFrames = DECLICK_FRAMES,
   groupFadeOutFrames = 0,
+  muted = false,
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -289,8 +311,24 @@ const SectionGroupPlayer: React.FC<{
         acceptableTimeShiftInSeconds={isStudio ? 0.35 : 0}
         // Give the compositor extra time for large seeks deep into a long video file.
         delayRenderTimeoutInMilliseconds={120000}
-        volume={effectiveVolume}
+        volume={muted ? 0 : effectiveVolume}
         style={{ opacity: groupFade }}
+        onError={(err) => {
+          // eslint-disable-next-line no-console
+          console.error('[OffthreadVideo] Playback error:', err);
+          // Remotion error objects have errorCode for media errors
+          const errorCode = (err as { errorCode?: number }).errorCode;
+          if (errorCode === 4) {
+            // eslint-disable-next-line no-console
+            console.error(
+              `[OffthreadVideo] MEDIA_ERR_SRC_NOT_SUPPORTED for "${src}". ` +
+              'This may be due:\n' +
+              '1. Video file >2GB (Chrome limit) - try re-encoding with lower bitrate\n' +
+              '2. Unsupported codec (ensure H.264, not H.265/HEVC)\n' +
+              '3. Corrupted file - check source video integrity'
+            );
+          }
+        }}
       />
       {debugTiming && (
         <div
@@ -328,6 +366,11 @@ type Props = {
    * main episode without offsetting trimBefore calculations.
    */
   mainOffset?: number;
+  /**
+   * When true, audio is suppressed (volume set to 0).
+   * Used by CameraPlayer to silence non-active angle layers in multi-angle shoots.
+   */
+  muted?: boolean;
 };
 
 function isTimingDebugEnabled(): boolean {
@@ -341,7 +384,7 @@ function isTimingDebugEnabled(): boolean {
  * one for hook clips, one for main content. Each lives in its own <Sequence>
  * so trimBefore is computed against a local frame counter, keeping it non-negative.
  */
-export const SegmentPlayer: React.FC<Props> = ({ src, hookSections, mainSections, mainOffset = 0 }) => {
+export const SegmentPlayer: React.FC<Props> = ({ src, hookSections, mainSections, mainOffset = 0, muted = false }) => {
   const hookDuration = hookSections.reduce((sum, s) => sum + s.trimAfter - s.trimBefore, 0);
 
   return (
@@ -353,11 +396,12 @@ export const SegmentPlayer: React.FC<Props> = ({ src, hookSections, mainSections
             sections={hookSections}
             declickFrames={0}
             groupFadeOutFrames={HOOK_END_FADE_FRAMES}
+            muted={muted}
           />
         </Sequence>
       )}
       <Sequence from={hookDuration + mainOffset}>
-        <SectionGroupPlayer src={src} sections={mainSections} />
+        <SectionGroupPlayer src={src} sections={mainSections} muted={muted} />
       </Sequence>
     </>
   );

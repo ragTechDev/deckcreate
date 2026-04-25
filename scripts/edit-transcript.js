@@ -15,6 +15,7 @@ function parseArgs() {
     else if (args[i] === '--auto-cut-pauses' && args[i + 1]) result.autoCutPauses = parseFloat(args[++i]);
     else if (args[i] === '--timestamp-offset' && args[i + 1]) result.timestampOffset = parseFloat(args[++i]);
     else if (args[i] === '--video-src' && args[i + 1]) result.videoSrc = args[++i];
+    else if (args[i] === '--video-srcs' && args[i + 1]) result.videoSrcs = args[++i].split(',').filter(Boolean);
   }
   return result;
 }
@@ -341,15 +342,31 @@ function buildTextWithCuts(seg) {
   return fixContractions([seg.text, ...cutMarkers].filter(Boolean).join(' ') || parts.join(' '));
 }
 
-function findNearestToken(atSeconds, tokens) {
-  if (!tokens.length) return null;
-  let best = tokens[0];
-  let bestDelta = Math.abs(tokens[0].t_dtw - atSeconds);
-  for (const token of tokens) {
-    const delta = Math.abs(token.t_dtw - atSeconds);
-    if (delta < bestDelta) { bestDelta = delta; best = token; }
+/**
+ * Returns the raw token index of the first token of a phrase match, or -1.
+ * Uses the same BPE word-group logic as resolvePhraseToTimeRange.
+ */
+function resolvePhraseToFirstTokenIndex(phrase, tokens) {
+  const words = phrase.trim().split(/\s+/).map(normalize).filter(Boolean);
+  if (!words.length) return -1;
+
+  const wordGroups = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (isSpecialToken(t) || normalize(t.text) === '') continue;
+    if (wordGroups.length === 0 || t.text.startsWith(' ')) {
+      wordGroups.push({ text: t.text, firstRawIdx: i });
+    } else {
+      wordGroups[wordGroups.length - 1].text += t.text;
+    }
   }
-  return best;
+
+  for (let i = 0; i <= wordGroups.length - words.length; i++) {
+    if (words.every((w, j) => normalize(wordGroups[i + j].text) === w)) {
+      return wordGroups[i].firstRawIdx;
+    }
+  }
+  return -1;
 }
 
 /**
@@ -430,17 +447,37 @@ function resolvePhraseToTimeRange(phrase, tokens, segEnd) {
   return null;
 }
 
+function buildWordGroups(tokens) {
+  const groups = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (isSpecialToken(t) || normalize(t.text) === '') continue;
+    if (groups.length === 0 || t.text.startsWith(' ')) {
+      groups.push({ text: t.text, t_dtw: t.t_dtw });
+    } else {
+      groups[groups.length - 1].text += t.text;
+    }
+  }
+  return groups;
+}
+
 function buildGraphicLine(graphic, tokens) {
-  const nearest = findNearestToken(graphic.at, tokens);
+  const wordGroups = buildWordGroups(tokens);
   let atValue;
 
-  if (nearest) {
-    const word = stripPunctuation(nearest.text);
-    const tokenIdx = tokens.indexOf(nearest);
+  if (wordGroups.length) {
+    let best = wordGroups[0];
+    let bestDelta = Math.abs(best.t_dtw - graphic.at);
+    for (const g of wordGroups) {
+      const d = Math.abs(g.t_dtw - graphic.at);
+      if (d < bestDelta) { bestDelta = d; best = g; }
+    }
+    const word = stripPunctuation(best.text).trim();
     const normalizedWord = word.toLowerCase();
-    const occurrencesBefore = tokens
-      .slice(0, tokenIdx)
-      .filter(t => normalize(t.text) === normalizedWord).length;
+    const groupIdx = wordGroups.indexOf(best);
+    const occurrencesBefore = wordGroups
+      .slice(0, groupIdx)
+      .filter(g => normalize(g.text) === normalizedWord).length;
     atValue = occurrencesBefore > 0 ? `"${word}:${occurrencesBefore + 1}"` : `"${word}"`;
   } else {
     atValue = String(graphic.at);
@@ -490,6 +527,18 @@ function buildInstructionsBlock() {
     '',
     '  OVERRIDE SPEAKER Override the speaker for one segment:',
     '                    [10] SPEAKER: Alice  text...',
+    '                  Or use an annotation (no inline text change needed):',
+    '                    [10] text...',
+    '                    > SPEAKER Alice',
+    '',
+    '  SPLIT SPEAKER   Change speaker mid-segment with > SPEAKER Name at="word".',
+    '                  Splits the segment at that word — everything from the word',
+    '                  onward becomes a new segment owned by the new speaker:',
+    '                    [11] software engineer. I\'m Victoria, solutions engineer.',
+    '                    > SPEAKER Victoria  at="I\'m"',
+    '                  The split is permanent: on the next doc rebuild the two',
+    '                  halves appear as separate numbered blocks.',
+    '                  Speaker names must match the SPEAKERS section exactly.',
     '',
     '  CAMERA          Add a > CAM line after a segment to force a specific shot.',
     '                  Applies at the start of the segment, or at a specific word:',
@@ -503,8 +552,34 @@ function buildInstructionsBlock() {
     '',
     '  GRAPHICS        Add a line starting with > after the segment:',
     '                    > LowerThird  at="word"  duration=5  name="Name"  title="Role"',
+    '                    > NameTitle  at="word"  duration=5  name="Name"  title="Role"',
     '                    > Callout  at="word"  duration=5  text="Quote"',
     '                    > ChapterMarker  at="word"  duration=5',
+    '                    > ChapterMarkerEnd  at="word"  duration=1',
+    '                    > ConceptExplainer  at="word"  duration=8  keyPhrase="Term"  description="Explanation of the concept"',
+    '                    > ImageWindow  at="word"  duration=8  src="https://example.com/image.png"  title="Window Title"  caption="Optional caption"',
+    '                  ImageWindow opens like a macOS window from below (spring), shows the image',
+    '                  centered on screen for duration seconds, then minimizes on exit.',
+    '                  src= required — direct image URL (must allow CORS) or public-relative path.',
+    '                  title= shown in the title bar (defaults to URL). caption= adds a text bar below.',
+    '                  width= overrides window width in px (default 720).',
+    '                    > GifWindow  at="word"  duration=8  src="https://example.com/anim.gif"  title="Window Title"  caption="Optional caption"',
+    '                  GifWindow is identical to ImageWindow but renders an animated GIF via @remotion/gif.',
+    '                  src= required (CORS-enabled GIF URL). gifHeight= sets display height in px (default 405).',
+    '                  playbackRate= controls speed (default 1). loopBehavior= controls looping (default "loop").',
+    '',
+    '  KEYWORD OVERLAYS  Trigger visual overlays when keywords are spoken:',
+    '                    > AIOverlay  at="AI"  duration=5  concept="ai"',
+    '                    > CodingOverlay  at="coding"  duration=5  concept="coding"',
+    '                    > EngineeringOverlay  at="engineer"  duration=5  concept="software-engineer"',
+    '                    > LanguageOverlay  at="Python"  duration=5  concept="python"',
+    '                    > FrameworkOverlay  at="React"  duration=5  concept="react"',
+    '                    > InfrastructureOverlay  at="Docker"  duration=5  concept="docker"',
+    '                    > PracticeOverlay  at="testing"  duration=5  concept="testing"',
+    '                    > RoleOverlay  at="manager"  duration=5  concept="product-manager"',
+    '                    > EducationOverlay  at="bootcamp"  duration=5  concept="bootcamp"',
+    '                    > AwardsOverlay  at="award"  duration=5',
+    '                    > RagtechOverlay  at="ragtech"  duration=8',
     '',
     '  TRIM VIDEO       Place > START before the first segment to keep,',
     '                  and > END after the last segment to keep:',
@@ -513,6 +588,16 @@ function buildInstructionsBlock() {
     '                    [12] last segment you want...',
     '                    > END',
     '                  Anything outside these markers is excluded.',
+    '',
+    '  THUMBNAIL       Edit # THUMBNAIL section frontmatter to override thumbnail:',
+    '                    bg="public/assets/background.jpg"',
+    '                    middlespeaker="GuestName"',
+    '                    title="Custom **highlighted** title"',
+    '                    layout=left|right|center',
+    '                  bg= image path(s) — internal (relative to /public) or external URL (comma-separated)',
+    '                  middlespeaker= speaker name(s) to center (comma-separated)',
+    '                  title= custom thumbnail title; use **text** for accent highlight',
+    '                  layout= forces left/right/center variant (default: auto from title)',
     '',
     '  SAVE EDITS       npm run merge-doc',
     '',
@@ -527,8 +612,24 @@ function buildSpeakersSection(transcript) {
   return '# SPEAKERS\n' + speakers.map(s => `${s}: ${s}`).join('\n') + '\n\n---\n\n';
 }
 
+function buildThumbnailSection(transcript) {
+  const thumb = transcript.meta?.thumbnail;
+  const lines = ['# THUMBNAIL'];
+  // Show placeholders with current values or defaults
+  const bgValue = thumb?.bg?.length ? thumb.bg.join(',') : 'public/assets/background.jpg';
+  const speakerValue = thumb?.middleSpeakers?.length ? thumb.middleSpeakers.join(',') : 'GuestName';
+  const titleValue = thumb?.title ?? 'Custom **highlighted** title';
+  const layoutValue = thumb?.layoutVariant ?? 'left|right|center';
+  lines.push(`bg="${bgValue}"`);
+  lines.push(`middlespeaker="${speakerValue}"`);
+  lines.push(`title="${titleValue}"`);
+  lines.push(`layout=${layoutValue}`);
+  return lines.join('\n') + '\n\n---\n\n';
+}
+
 function buildDoc(transcript) {
   const instructions = buildInstructionsBlock();
+  const thumbnailSection = buildThumbnailSection(transcript);
   const speakersSection = buildSpeakersSection(transcript);
 
   const lines = [];
@@ -569,11 +670,14 @@ function buildDoc(transcript) {
     for (const g of (seg.graphics || [])) {
       lines.push('    ' + buildGraphicLine(g, seg.tokens));
     }
+    for (const vc of (seg.visualCuts || [])) {
+      lines.push(`    > CUT ${vc.from.toFixed(3)}-${vc.to.toFixed(3)}`);
+    }
 
     if (videoEnd !== undefined && seg.end === videoEnd) lines.push('> END');
   }
 
-  return instructions + speakersSection + lines.join('\n') + '\n';
+  return instructions + thumbnailSection + speakersSection + lines.join('\n') + '\n';
 }
 
 // ─── Doc merge ────────────────────────────────────────────────────────────────
@@ -603,17 +707,22 @@ function parseCameraLine(line, tokens, segStart) {
   if (kv.at !== undefined) {
     const raw = kv.at;
     const colonIdx = raw.lastIndexOf(':');
-    let word, occurrence;
+    let phrase, occurrence;
     if (colonIdx > 0 && !isNaN(raw.slice(colonIdx + 1))) {
-      word = raw.slice(0, colonIdx).toLowerCase();
+      phrase = raw.slice(0, colonIdx);
       occurrence = parseInt(raw.slice(colonIdx + 1)) - 1;
     } else {
-      word = raw.toLowerCase();
+      phrase = raw;
       occurrence = 0;
     }
-    const matches = tokens.filter(t => normalize(t.text) === word);
-    const token = matches[occurrence] ?? null;
-    at = token ? token.t_dtw : parseFloat(raw) || segStart;
+    if (occurrence === 0) {
+      const tokenIdx = resolvePhraseToFirstTokenIndex(phrase, tokens);
+      at = tokenIdx !== -1 ? tokens[tokenIdx].t_dtw : (parseFloat(raw) || segStart);
+    } else {
+      const matches = tokens.filter(t => normalize(t.text) === phrase.toLowerCase());
+      const token = matches[occurrence] ?? null;
+      at = token ? token.t_dtw : (parseFloat(raw) || segStart);
+    }
   }
 
   const shot = target.toLowerCase() === 'wide' ? 'wide' : 'closeup';
@@ -629,15 +738,21 @@ function buildCameraLine(cue, tokens, segStart) {
   if (!tokens.length || Math.abs(cue.at - segStart) < 0.05) {
     return `> CAM ${target}`;
   }
-  const nearest = findNearestToken(cue.at, tokens);
+  const wordGroups = buildWordGroups(tokens);
   let atValue;
-  if (nearest) {
-    const word = stripPunctuation(nearest.text);
-    const tokenIdx = tokens.indexOf(nearest);
+  if (wordGroups.length) {
+    let best = wordGroups[0];
+    let bestDelta = Math.abs(best.t_dtw - cue.at);
+    for (const g of wordGroups) {
+      const d = Math.abs(g.t_dtw - cue.at);
+      if (d < bestDelta) { bestDelta = d; best = g; }
+    }
+    const word = stripPunctuation(best.text).trim();
     const normalizedWord = word.toLowerCase();
-    const occurrencesBefore = tokens
-      .slice(0, tokenIdx)
-      .filter(t => normalize(t.text) === normalizedWord).length;
+    const groupIdx = wordGroups.indexOf(best);
+    const occurrencesBefore = wordGroups
+      .slice(0, groupIdx)
+      .filter(g => normalize(g.text) === normalizedWord).length;
     atValue = occurrencesBefore > 0 ? `"${word}:${occurrencesBefore + 1}"` : `"${word}"`;
   } else {
     atValue = String(cue.at);
@@ -645,30 +760,36 @@ function buildCameraLine(cue, tokens, segStart) {
   return `> CAM ${target}  at=${atValue}`;
 }
 
-function parseGraphicLine(line, tokens) {
+function parseGraphicLine(line, tokens, segStart = 0) {
   const spaceIdx = line.search(/\s/);
   const type = spaceIdx === -1 ? line : line.slice(0, spaceIdx);
   const kvStr = spaceIdx === -1 ? '' : line.slice(spaceIdx);
   const kv = parseKv(kvStr);
 
-  // Resolve at="word" or at="word:2" to absolute seconds via token t_dtw
-  let at = 0;
+  // Resolve at="word" or at="word:2" to absolute seconds via token t_dtw.
+  // Uses word-group matching so contractions (e.g. "I'm" → [" I", "'m"]) resolve correctly.
+  let at = segStart;
   if (kv.at !== undefined) {
     const raw = kv.at;
     const colonIdx = raw.lastIndexOf(':');
-    let word, occurrence;
+    let phrase, occurrence;
 
     if (colonIdx > 0 && !isNaN(raw.slice(colonIdx + 1))) {
-      word = raw.slice(0, colonIdx).toLowerCase();
+      phrase = raw.slice(0, colonIdx);
       occurrence = parseInt(raw.slice(colonIdx + 1)) - 1;
     } else {
-      word = raw.toLowerCase();
+      phrase = raw;
       occurrence = 0;
     }
 
-    const matches = tokens.filter(t => normalize(t.text) === word);
-    const token = matches[occurrence] ?? null;
-    at = token ? token.t_dtw : parseFloat(raw) || 0;
+    if (occurrence === 0) {
+      const tokenIdx = resolvePhraseToFirstTokenIndex(phrase, tokens);
+      at = tokenIdx !== -1 ? tokens[tokenIdx].t_dtw : (parseFloat(raw) || segStart);
+    } else {
+      const matches = tokens.filter(t => normalize(t.text) === phrase.toLowerCase());
+      const token = matches[occurrence] ?? null;
+      at = token ? token.t_dtw : (parseFloat(raw) || segStart);
+    }
   }
 
   const duration = parseFloat(kv.duration) || 5;
@@ -922,6 +1043,31 @@ function parseSpeakerRenames(docContent) {
   return map;
 }
 
+function parseThumbnailFromDoc(docContent) {
+  // Parse # THUMBNAIL section (frontmatter format without > THUMB prefix)
+  const sectionMatch = docContent.match(/^#\s*THUMBNAIL\s*\n([\s\S]*?)\n---/m);
+  if (!sectionMatch) return null;
+
+  const thumb = {};
+  const lines = sectionMatch[1].split('\n');
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const kv = parseKv(trimmed);
+    if (kv.bg) {
+      const newBgs = kv.bg.split(',').map(s => s.trim()).filter(Boolean);
+      thumb.bg = thumb.bg ? [...thumb.bg, ...newBgs] : newBgs;
+    }
+    if (kv.middlespeaker) {
+      const newSpeakers = kv.middlespeaker.split(',').map(s => s.trim()).filter(Boolean);
+      thumb.middleSpeakers = thumb.middleSpeakers ? [...thumb.middleSpeakers, ...newSpeakers] : newSpeakers;
+    }
+    if (kv.title) thumb.title = kv.title;
+    if (kv.layout) thumb.layoutVariant = kv.layout;
+  }
+  return Object.keys(thumb).length ? thumb : null;
+}
+
 function stripSpeakersSection(docContent) {
   // Strip everything from the start through the --- separator
   // (covers both the instructions block and the SPEAKERS section)
@@ -929,23 +1075,28 @@ function stripSpeakersSection(docContent) {
 }
 
 function mergeDocIntoTranscript(transcript, docContent) {
+  const thumbnail = parseThumbnailFromDoc(docContent);
   const renames = parseSpeakerRenames(docContent);
   const stripped = stripSpeakersSection(docContent);
 
   const byId = Object.fromEntries(transcript.segments.map(s => [s.id, s]));
+  const syntheticSegsAfter = {};
+  let nextSyntheticId = Math.max(0, ...transcript.segments.map(s => s.id)) + 1;
   let applied = 0;
   let currentSpeaker = null;
   let pendingSeg = null;
   let pendingGraphicLines = [];
   let pendingCamLines = [];
   let pendingHookLine = null;
+  let pendingVisualCuts = [];
+  let pendingSpeakerSplits = [];
   let videoStart = transcript.meta.videoStart;
   let videoEnd = transcript.meta.videoEnd;
   let nextSegIsVideoStart = false;
 
   function flushPending() {
     if (!pendingSeg) return;
-    const graphics   = pendingGraphicLines.map(l => parseGraphicLine(l, pendingSeg.tokens));
+    const graphics   = pendingGraphicLines.map(l => parseGraphicLine(l, pendingSeg.tokens, pendingSeg.start));
     const cameraCues = pendingCamLines.map(l => parseCameraLine(l, pendingSeg.tokens, pendingSeg.start));
     let hook = false, hookPhrase = null, hookFrom, hookTo, hookChar = null, hookGraphic = null;
     if (pendingHookLine !== null) {
@@ -969,11 +1120,57 @@ function mergeDocIntoTranscript(transcript, docContent) {
         else console.warn(`  ⚠ HOOK phrase not found in segment [${pendingSeg.id}]: "${hookPhrase}" — hooking full segment`);
       }
     }
-    byId[pendingSeg.id] = { ...pendingSeg, hook, hookPhrase, hookFrom, hookTo, hookChar, hookGraphic, graphics, cameraCues };
+    byId[pendingSeg.id] = { ...pendingSeg, hook, hookPhrase, hookFrom, hookTo, hookChar, hookGraphic, graphics, cameraCues, visualCuts: pendingVisualCuts.length ? [...pendingVisualCuts] : (pendingSeg.visualCuts ?? []) };
+
+    for (const splitStr of pendingSpeakerSplits) {
+      const nameMatch = splitStr.match(/^(\S+)/);
+      if (!nameMatch) continue;
+      const newSpeaker = renames[nameMatch[1]] ?? nameMatch[1];
+      const kv = parseKv(splitStr.slice(nameMatch[1].length));
+
+      if (!kv.at) {
+        byId[pendingSeg.id] = { ...byId[pendingSeg.id], speaker: newSpeaker };
+        continue;
+      }
+
+      const parentSeg = byId[pendingSeg.id];
+      const splitIdx = resolvePhraseToFirstTokenIndex(kv.at, parentSeg.tokens);
+      if (splitIdx === -1) {
+        console.warn(`  ⚠ SPEAKER split word "${kv.at}" not found in segment [${parentSeg.id}]`);
+        continue;
+      }
+
+      const tokensA = parentSeg.tokens.slice(0, splitIdx);
+      const tokensB = parentSeg.tokens.slice(splitIdx);
+      const splitTime = tokensB[0]?.t_dtw ?? parentSeg.end;
+      const textA = fixContractions(joinTokenTexts(tokensA.filter(t => !isSpecialToken(t)))).trim();
+      const textB = fixContractions(joinTokenTexts(tokensB.filter(t => !isSpecialToken(t)))).trim();
+
+      byId[parentSeg.id] = { ...parentSeg, tokens: tokensA, end: splitTime, text: textA };
+
+      const synthId = nextSyntheticId++;
+      const synthSeg = {
+        ...parentSeg,
+        id: synthId,
+        speaker: newSpeaker,
+        tokens: tokensB,
+        start: splitTime,
+        text: textB,
+        cut: false,
+        hook: false, hookPhrase: null, hookFrom: undefined, hookTo: undefined,
+        hookChar: null, hookGraphic: null,
+        graphics: [], cameraCues: [], visualCuts: [], cuts: [],
+      };
+      if (!syntheticSegsAfter[parentSeg.id]) syntheticSegsAfter[parentSeg.id] = [];
+      syntheticSegsAfter[parentSeg.id].push(synthSeg);
+    }
+
     pendingSeg = null;
     pendingGraphicLines = [];
     pendingCamLines = [];
     pendingHookLine = null;
+    pendingVisualCuts = [];
+    pendingSpeakerSplits = [];
   }
 
   for (const line of stripped.split('\n')) {
@@ -1005,6 +1202,13 @@ function mergeDocIntoTranscript(transcript, docContent) {
         if (pendingSeg) pendingCamLines.push(annotation.slice(3).trim());
       } else if (annotation.startsWith('HOOK')) {
         if (pendingSeg) pendingHookLine = annotation.slice(4).trim();
+      } else if (annotation.startsWith('SPEAKER')) {
+        if (pendingSeg) pendingSpeakerSplits.push(annotation.slice(7).trim());
+      } else if (annotation.startsWith('CUT')) {
+        if (pendingSeg) {
+          const timeMatch = annotation.slice(3).trim().match(/^([\d.]+)-([\d.]+)$/);
+          if (timeMatch) pendingVisualCuts.push({ from: parseFloat(timeMatch[1]), to: parseFloat(timeMatch[2]) });
+        }
       } else {
         if (pendingSeg) pendingGraphicLines.push(annotation);
       }
@@ -1066,10 +1270,15 @@ function mergeDocIntoTranscript(transcript, docContent) {
   if (videoStart !== transcript.meta.videoStart) console.log(`  Video start: ${videoStart}s`);
   if (videoEnd !== transcript.meta.videoEnd) console.log(`  Video end: ${videoEnd}s`);
   console.log(`  ${applied} segments merged.`);
+  const outSegments = [];
+  for (const s of transcript.segments) {
+    outSegments.push(byId[s.id] ?? s);
+    for (const syn of (syntheticSegsAfter[s.id] ?? [])) outSegments.push(syn);
+  }
   return {
     ...transcript,
-    meta: { ...transcript.meta, videoStart, videoEnd },
-    segments: transcript.segments.map(s => byId[s.id] ?? s),
+    meta: { ...transcript.meta, videoStart, videoEnd, ...(thumbnail !== null ? { thumbnail } : {}) },
+    segments: outSegments,
   };
 }
 
@@ -1234,6 +1443,207 @@ function buildSentencesSrt(segments, meta = {}) {
   return convertVttToSrt(buildSentencesVtt(segments, meta));
 }
 
+// ─── YouTube subtitle generation (with intro/outro timing) ────────────────────
+
+// Must match remotion/components/PodcastIntro.tsx and PodcastOutro.tsx
+const INTRO_DURATION_SECS = 7;  // 420 frames @ 60fps
+const OUTRO_DURATION_SECS = 7;  // 420 frames @ 60fps
+const HOOK_TAIL_PAD_UNBOUNDED = 0.16;
+const HOOK_TAIL_PAD_BOUNDED = 0.02;
+const HOOK_BRIDGE_MAX_GAP = 1.0;
+
+/** Match SegmentPlayer.tsx hook logic */
+function getHookEffectiveEnd(seg, nextHookStart) {
+  const baseEnd = seg.hookTo ?? seg.end;
+  const isBounded = seg.hookTo !== undefined && seg.hookTo !== null;
+
+  // Extend for trailing spoken tokens (simplified - matches Composition.tsx)
+  const latestSpoken = seg.tokens
+    .filter(t => !/_[A-Z]+_/.test(t.text.trim()) && t.text.trim() !== '')
+    .reduce((max, t) => Math.max(max, t.t_dtw), -Infinity);
+
+  let sourceEnd = baseEnd;
+  if (!isBounded && latestSpoken > baseEnd) {
+    const drift = latestSpoken - baseEnd;
+    const extension = Math.min(1.5, drift + 0.4);
+    sourceEnd = baseEnd + extension;
+  }
+
+  // Bridge to next hook if gap is small
+  const hasTokenAfter = seg.tokens.some(
+    t => !/_[A-Z]+_/.test(t.text.trim()) && t.text.trim() !== '' && t.t_dtw > sourceEnd + 0.02
+  );
+  if (!hasTokenAfter && nextHookStart && nextHookStart > sourceEnd && nextHookStart - sourceEnd <= HOOK_BRIDGE_MAX_GAP) {
+    sourceEnd = nextHookStart;
+  }
+
+  const withPad = sourceEnd + (isBounded ? HOOK_TAIL_PAD_BOUNDED : HOOK_TAIL_PAD_UNBOUNDED);
+  return nextHookStart !== undefined ? Math.min(withPad, nextHookStart) : withPad;
+}
+
+/** Returns hook duration in seconds */
+function computeHookDuration(segments) {
+  const hooks = segments.filter(s => s.hook && !s.cut);
+  return hooks.reduce((sum, s, idx) => {
+    const start = s.hookFrom ?? s.start;
+    const next = hooks[idx + 1];
+    const nextStart = next ? (next.hookFrom ?? next.start) : undefined;
+    return sum + (getHookEffectiveEnd(s, nextStart) - start);
+  }, 0);
+}
+
+/** Build SRT for YouTube with timing that accounts for hook + intro + main + outro */
+function buildYouTubeSubtitles(transcript) {
+  const { segments, meta } = transcript;
+  const { videoStart, videoEnd } = meta;
+
+  // Calculate offsets
+  const hookDuration = computeHookDuration(segments);
+  const hasHook = hookDuration > 0;
+  const introOffset = hasHook ? INTRO_DURATION_SECS : 0;
+
+  const lines = [];
+  let cueIndex = 1;
+  let currentOffset = 0;
+
+  function secondsToSrtTs(s) {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = (s % 60).toFixed(3);
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec).padStart(6, '0').replace('.', ',')}`;
+  }
+
+  function emitCue(start, end, text) {
+    const clean = cleanCaptionText(text);
+    if (!clean) return;
+    lines.push(`${cueIndex}`);
+    lines.push(`${secondsToSrtTs(start)} --> ${secondsToSrtTs(end)}`);
+    lines.push(clean);
+    lines.push('');
+    cueIndex++;
+  }
+
+  // 1. HOOK captions (play at the very beginning)
+  const hooks = segments.filter(s => s.hook && !s.cut);
+  for (let i = 0; i < hooks.length; i++) {
+    const seg = hooks[i];
+    const clips = getHookClips(seg);
+    const next = hooks[i + 1];
+    const nextStart = next ? (next.hookFrom ?? next.start) : undefined;
+    const hookEndTime = currentOffset + (getHookEffectiveEnd(seg, nextStart) - (seg.hookFrom ?? seg.start));
+
+    for (const clip of clips) {
+      const clipDuration = clip.end - clip.start;
+      const clipStart = currentOffset;
+      const clipEnd = currentOffset + clipDuration;
+      emitCue(clipStart, clipEnd, seg.hookPhrase ?? seg.text);
+      currentOffset += clipDuration;
+    }
+
+    // Ensure we account for any bridging/extension time
+    if (nextStart) {
+      const actualEnd = getHookEffectiveEnd(seg, nextStart);
+      const baseStart = seg.hookFrom ?? seg.start;
+      currentOffset = Math.max(currentOffset, hookEndTime);
+    }
+  }
+
+  // 2. INTRO (no captions, just advance time)
+  currentOffset += introOffset;
+
+  // 3. MAIN CONTENT captions
+  for (const seg of segments) {
+    if (seg.hook) continue; // Already handled above
+    if (videoStart !== undefined && seg.end <= videoStart) continue;
+    if (videoEnd !== undefined && seg.start >= videoEnd) continue;
+    if (seg.cut) continue;
+
+    const clips = getSubClips(seg);
+    for (const clip of clips) {
+      const clipDuration = clip.end - clip.start;
+      emitCue(currentOffset, currentOffset + clipDuration, seg.text);
+      currentOffset += clipDuration;
+    }
+  }
+
+  // 4. OUTRO (no captions, don't need to advance since we're done)
+
+  return lines.join('\n');
+}
+
+// ─── YouTube chapter timestamps generation ────────────────────────────────────
+
+/** Format seconds as MM:SS or HH:MM:SS for YouTube chapters */
+function formatChapterTime(s) {
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = Math.floor(s % 60);
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  }
+  return `${m}:${String(sec).padStart(2, '0')}`;
+}
+
+/** Build YouTube chapter timestamps (hook, intro, ChapterMarker annotations, outro) */
+function buildYouTubeChapters(transcript) {
+  const { segments, meta } = transcript;
+  const { videoStart, videoEnd } = meta;
+
+  const hookDuration = computeHookDuration(segments);
+  const hasHook = hookDuration > 0;
+  const introOffset = hasHook ? INTRO_DURATION_SECS : 0;
+
+  const chapters = [];
+
+  // 1. Hook chapter (if exists)
+  if (hasHook) {
+    chapters.push({ time: 0, title: 'Hook' });
+  }
+
+  // 2. Intro chapter
+  chapters.push({ time: hookDuration, title: 'Intro' });
+
+  // 3. Walk main segments, emit a chapter for each ChapterMarker graphic
+  let currentTime = hookDuration + introOffset;
+
+  const mainSegments = segments.filter(s => {
+    if (s.hook) return false;
+    if (videoStart !== undefined && s.end <= videoStart) return false;
+    if (videoEnd !== undefined && s.start >= videoEnd) return false;
+    if (s.cut) return false;
+    return true;
+  });
+
+  for (const seg of mainSegments) {
+    const clips = getSubClips(seg);
+    if (clips.length === 0) continue;
+
+    for (const g of (seg.graphics || [])) {
+      if (g.type !== 'ChapterMarker') continue;
+      const title = g.props?.chapterTitle || 'Chapter';
+      // Map source time g.at → output time by summing clip durations up to that point
+      let accum = 0;
+      for (const clip of clips) {
+        if (g.at <= clip.start) break;
+        if (g.at < clip.end) { accum += g.at - clip.start; break; }
+        accum += clip.end - clip.start;
+      }
+      chapters.push({ time: currentTime + accum, title });
+    }
+
+    for (const clip of clips) {
+      currentTime += clip.end - clip.start;
+    }
+  }
+
+  // 4. Outro chapter
+  chapters.push({ time: currentTime, title: 'Outro' });
+
+  chapters.sort((a, b) => a.time - b.time);
+
+  return chapters.map(c => `${formatChapterTime(c.time)} ${c.title}`).join('\n');
+}
+
 function parseVtt(content) {
   const segments = [];
   const lines = content.split('\n');
@@ -1308,8 +1718,9 @@ async function main() {
   const cli = parseArgs();
 
   const rawPath = cli.rawPath || path.join(cwd, 'public', 'transcribe', 'output', 'raw', 'transcript.raw.json');
-  const outputPath = cli.outputPath || path.join(cwd, 'public', 'transcribe', 'output', 'edit', 'transcript.json');
-  const docPath = outputPath.replace(/\.json$/, '.doc.txt');
+  const outputPath = cli.outputPath || path.join(cwd, 'public', 'edit', 'transcript.json');
+  // Use public/edit/transcript.doc.txt as the single editable source of truth
+  const docPath = cli.docPath || path.join(cwd, 'public', 'edit', 'transcript.doc.txt');
 
   if (!await fs.pathExists(rawPath)) {
     console.error(`❌ Raw transcript not found: ${rawPath}`);
@@ -1346,12 +1757,15 @@ async function main() {
       return best;
     }
 
+    const matchedExistingIds = new Set();
+
     transcript = {
       ...transcript,
       meta: { ...transcript.meta, ...existing.meta },
       segments: transcript.segments.map(seg => {
         const prev = findPrev(seg);
         if (!prev) return seg;
+        matchedExistingIds.add(prev.id);
 
         const prevTokensByTdtw = buildPrevTokensByTdtw(prev.tokens || []);
         const rawCountByBase = {};
@@ -1395,6 +1809,30 @@ async function main() {
         return { ...seg, speaker, cut: prev.cut, text, graphics: prev.graphics, tokens };
       }),
     };
+
+    // Re-inject synthetic segments (created by > SPEAKER splits) that were never
+    // matched by findPrev — these have no corresponding raw sentence.
+    const syntheticSegs = existing.segments.filter(s => !matchedExistingIds.has(s.id));
+    if (syntheticSegs.length > 0) {
+      const syntheticStarts = new Set(syntheticSegs.map(s => s.start));
+      const merged = [...transcript.segments, ...syntheticSegs].sort((a, b) => a.start - b.start);
+
+      // Re-trim any parent segment that overlaps its following synthetic — the raw
+      // re-segmentation restores the original end time, undoing the split trim.
+      const trimmed = merged.map((seg, i) => {
+        const next = merged[i + 1];
+        if (next && syntheticStarts.has(next.start) && seg.end > next.start + 0.01) {
+          const trimEnd = next.start;
+          const trimTokens = seg.tokens.filter(t => t.t_dtw < trimEnd);
+          const trimText = fixContractions(joinTokenTexts(trimTokens.filter(t => !isSpecialToken(t)))).trim() || seg.text;
+          return { ...seg, end: trimEnd, tokens: trimTokens, text: trimText };
+        }
+        return seg;
+      });
+
+      transcript = { ...transcript, segments: trimmed };
+    }
+
     console.log(`Merged into existing ${path.basename(outputPath)} — manual edits preserved.`);
   }
 
@@ -1419,9 +1857,12 @@ async function main() {
     console.log(`Applied doc edits.`);
   }
 
-  // Store video source path in meta so Remotion can resolve the correct video file
+  // Store video source path(s) in meta so Remotion and camera setup can resolve video files
   if (cli.videoSrc) {
     transcript = { ...transcript, meta: { ...transcript.meta, videoSrc: cli.videoSrc } };
+  }
+  if (cli.videoSrcs && cli.videoSrcs.length > 0) {
+    transcript = { ...transcript, meta: { ...transcript.meta, videoSrcs: cli.videoSrcs } };
   }
 
   // Apply timestamp offset to all t_dtw values and segment boundaries
@@ -1452,15 +1893,21 @@ async function main() {
   }
 
   const sentencesSrtPath = outputPath.replace(/\.json$/, '.sentences.srt');
+  const youtubeSrtPath = outputPath.replace(/\.json$/, '.youtube.srt');
+  const chaptersPath = outputPath.replace(/\.json$/, '.chapters.txt');
 
   await fs.ensureDir(path.dirname(outputPath));
   await fs.writeJson(outputPath, transcript, { spaces: 2 });
   await fs.writeFile(sentencesSrtPath, buildSentencesSrt(transcript.segments, transcript.meta), 'utf8');
   await fs.writeFile(docPath, buildDoc(transcript), 'utf8');
+  await fs.writeFile(youtubeSrtPath, buildYouTubeSubtitles(transcript), 'utf8');
+  await fs.writeFile(chaptersPath, buildYouTubeChapters(transcript), 'utf8');
 
   console.log(`✓ ${outputPath}`);
   console.log(`✓ ${docPath}  ← edit here`);
   console.log(`✓ ${sentencesSrtPath}`);
+  console.log(`✓ ${youtubeSrtPath}  ← YouTube subtitles (with intro/outro timing)`);
+  console.log(`✓ ${chaptersPath}  ← YouTube chapter timestamps (copy-paste to description)`);
 }
 
 const _argv1 = (process.argv[1] || '').replace(/\\/g, '/');
@@ -1469,4 +1916,4 @@ if (_argv1.endsWith('/edit-transcript.js') || _argv1.endsWith('/edit-transcript'
 }
 
 export default main;
-export { buildTextWithCuts, applyTextPartsToTokens, mergeDocIntoTranscript, buildDoc, deriveCuts, cleanCaptionText, buildSentencesVtt, buildSentencesSrt, getSubClips, getHookClips, resolvePhraseToTimeRange, autoCutPauses, autoCutDisfluencies, rebalanceBoundaryTokens, buildPrevTokensByTdtw, WORD_DURATION_ESTIMATE, CUT_START_BIAS, CUT_END_BIAS, isSpecialToken, isDisfluencyToken };
+export { buildTextWithCuts, applyTextPartsToTokens, mergeDocIntoTranscript, buildDoc, deriveCuts, cleanCaptionText, buildSentencesVtt, buildSentencesSrt, buildYouTubeSubtitles, getSubClips, getHookClips, resolvePhraseToTimeRange, resolvePhraseToFirstTokenIndex, autoCutPauses, autoCutDisfluencies, rebalanceBoundaryTokens, buildPrevTokensByTdtw, WORD_DURATION_ESTIMATE, CUT_START_BIAS, CUT_END_BIAS, isSpecialToken, isDisfluencyToken };

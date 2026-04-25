@@ -7,9 +7,11 @@ import {
   cleanCaptionText,
   buildSentencesVtt,
   buildSentencesSrt,
+  buildYouTubeSubtitles,
   getSubClips,
   getHookClips,
   resolvePhraseToTimeRange,
+  resolvePhraseToFirstTokenIndex,
   autoCutPauses,
   autoCutDisfluencies,
   rebalanceBoundaryTokens,
@@ -835,6 +837,61 @@ describe('HOOK phrase in buildSentencesVtt', () => {
   });
 });
 
+// ─── YouTube subtitles ────────────────────────────────────────────────────────
+
+describe('buildYouTubeSubtitles', () => {
+  function transcript(segs, meta = {}) {
+    return { meta: { fps: 60, ...meta }, segments: segs };
+  }
+
+  function seg(props) {
+    return {
+      id: 1, start: 0, end: 5, speaker: 'A', cut: false, cuts: [], text: 'hello world',
+      hook: false, hookPhrase: null, hookFrom: undefined, hookTo: undefined,
+      tokens: [],
+      ...props,
+    };
+  }
+
+  test('no hook: main content starts at 00:00:00', () => {
+    const tr = transcript([
+      seg({ id: 1, start: 0, end: 5, text: 'first segment' }),
+      seg({ id: 2, start: 5, end: 10, text: 'second segment' }),
+    ]);
+    const srt = buildYouTubeSubtitles(tr);
+    expect(srt).toContain('00:00:00,000 --> 00:00:05,000');
+    expect(srt).toContain('first segment');
+    expect(srt).toContain('00:00:05,000 --> 00:00:10,000');
+    expect(srt).toContain('second segment');
+  });
+
+  test('with hook: hook plays first, then intro delay, then main', () => {
+    const tr = transcript([
+      seg({ id: 1, start: 0, end: 10, text: 'hook content here', hook: true, hookPhrase: 'hook content', hookFrom: 2.0, hookTo: 4.0 }),
+      seg({ id: 2, start: 10, end: 15, text: 'main content' }),
+    ]);
+    const srt = buildYouTubeSubtitles(tr);
+    // Hook: 2.0s (4.0 - 2.0), appears at video start
+    expect(srt).toContain('00:00:00,000 --> 00:00:02,000');
+    expect(srt).toContain('hook content');
+    // Main content: starts after hook + 7s intro = 9s offset (2.0 + 7.0 = 9.0)
+    expect(srt).toContain('00:00:09,000 --> 00:00:14,000');
+    expect(srt).toContain('main content');
+  });
+
+  test('cut segments are skipped', () => {
+    const tr = transcript([
+      seg({ id: 1, start: 0, end: 5, text: 'keep this' }),
+      seg({ id: 2, start: 5, end: 10, text: 'cut this', cut: true }),
+      seg({ id: 3, start: 10, end: 15, text: 'and this' }),
+    ]);
+    const srt = buildYouTubeSubtitles(tr);
+    expect(srt).toContain('keep this');
+    expect(srt).toContain('and this');
+    expect(srt).not.toContain('cut this');
+  });
+});
+
 // ─── autoCutPauses ────────────────────────────────────────────────────────────
 
 describe('autoCutPauses', () => {
@@ -1169,5 +1226,100 @@ describe('applyTextPartsToTokens — t_dtw collision corruption cascade', () => 
     // With correct input D=G=12, simple path runs — no token synthesis occurs.
     // Token count should equal the input token count (no spliced-in synthetics).
     expect(result.length).toBe(corruptedTokens.length);
+  });
+});
+
+// ─── > SPEAKER split ──────────────────────────────────────────────────────────
+
+describe('> SPEAKER split', () => {
+  function makeSplitTranscript() {
+    return {
+      meta: { title: '', duration: 100, fps: 60 },
+      segments: [
+        {
+          id: 1, start: 10, end: 20, speaker: 'Inch', cut: false, cuts: [], graphics: [], cameraCues: [], visualCuts: [],
+          text: 'creative endeavor to me. Right so in the essence',
+          tokens: [
+            { text: ' creative', t_dtw: 10.1, cut: false },
+            { text: ' endeavor', t_dtw: 11.0, cut: false },
+            { text: ' to',       t_dtw: 11.8, cut: false },
+            { text: ' me',       t_dtw: 12.2, cut: false },
+            { text: '.',         t_dtw: 12.5, cut: false },
+            { text: ' Right',    t_dtw: 13.0, cut: false },
+            { text: ' so',       t_dtw: 13.8, cut: false },
+            { text: ' in',       t_dtw: 14.2, cut: false },
+            { text: ' the',      t_dtw: 14.9, cut: false },
+            { text: ' essence',  t_dtw: 15.4, cut: false },
+          ],
+        },
+        {
+          id: 2, start: 20.1, end: 25, speaker: 'Natasha', cut: false, cuts: [], graphics: [], cameraCues: [], visualCuts: [],
+          text: 'how do you describe',
+          tokens: [
+            { text: ' how', t_dtw: 20.2, cut: false },
+            { text: ' do',  t_dtw: 21.0, cut: false },
+            { text: ' you', t_dtw: 21.8, cut: false },
+          ],
+        },
+      ],
+    };
+  }
+
+  const doc = `# SPEAKERS\nInch: Inch\nNatasha: Natasha\n\n---\n\n=== Inch ===\n\n[1]  creative endeavor to me. Right so in the essence\n    > SPEAKER Natasha  at="Right"\n\n=== Natasha ===\n\n[2]  how do you describe\n`;
+
+  test('splits segment at the specified word', () => {
+    const result = mergeDocIntoTranscript(makeSplitTranscript(), doc);
+    const seg1 = result.segments.find(s => s.id === 1);
+    const synth = result.segments.find(s => s.id !== 1 && s.id !== 2 && s.speaker === 'Natasha' && s.start < 20);
+    expect(seg1).toBeDefined();
+    expect(synth).toBeDefined();
+    expect(seg1.speaker).toBe('Inch');
+    expect(synth.speaker).toBe('Natasha');
+  });
+
+  test('parent segment ends at split point, synthetic starts there — no overlap', () => {
+    const result = mergeDocIntoTranscript(makeSplitTranscript(), doc);
+    const seg1 = result.segments.find(s => s.id === 1);
+    const synth = result.segments.find(s => s.id !== 1 && s.id !== 2 && s.speaker === 'Natasha' && s.start < 20);
+    expect(seg1.end).toBeCloseTo(synth.start, 3);
+    expect(seg1.end).toBeLessThan(synth.start + 0.01);
+  });
+
+  test('parent text does not contain split-off words', () => {
+    const result = mergeDocIntoTranscript(makeSplitTranscript(), doc);
+    const seg1 = result.segments.find(s => s.id === 1);
+    expect(seg1.text).not.toMatch(/Right/i);
+    expect(seg1.text).toMatch(/me/i);
+  });
+
+  test('synthetic text starts at the split word', () => {
+    const result = mergeDocIntoTranscript(makeSplitTranscript(), doc);
+    const synth = result.segments.find(s => s.id !== 1 && s.id !== 2 && s.speaker === 'Natasha' && s.start < 20);
+    expect(synth.text).toMatch(/^Right/i);
+  });
+
+  test('no segment overlaps in output', () => {
+    const result = mergeDocIntoTranscript(makeSplitTranscript(), doc);
+    const active = result.segments.filter(s => !s.cut).sort((a, b) => a.start - b.start);
+    for (let i = 0; i < active.length - 1; i++) {
+      expect(active[i].end).toBeLessThanOrEqual(active[i + 1].start + 0.01);
+    }
+  });
+
+  test('synthetic segment is preserved on a second merge-doc pass (no re-overlap)', () => {
+    // Simulate the second merge-doc run: the split result becomes the new transcript.json
+    // and mergeDocIntoTranscript is called again with the rebuilt doc (no > SPEAKER annotation).
+    const firstPass = mergeDocIntoTranscript(makeSplitTranscript(), doc);
+    const rebuiltDoc = buildDoc(firstPass);
+    // Second pass: transcript is the result of the first pass (as if loaded from transcript.json).
+    // Simulate main()'s re-injection by passing firstPass directly (synthetic already in segments).
+    const secondPass = mergeDocIntoTranscript(firstPass, rebuiltDoc);
+    const active = secondPass.segments.filter(s => !s.cut).sort((a, b) => a.start - b.start);
+    for (let i = 0; i < active.length - 1; i++) {
+      expect(active[i].end).toBeLessThanOrEqual(active[i + 1].start + 0.01);
+    }
+    // Synthetic speaker attribution preserved
+    const synth = active.find(s => s.speaker === 'Natasha' && s.start < 20);
+    expect(synth).toBeDefined();
   });
 });

@@ -109,7 +109,7 @@ async function main() {
 
   execSync(cmd, { stdio: 'inherit' });
   console.log(`✓ ${outputPath}`);
-  console.log(`  Set src to 'transcribe/output/edit/preview-cut.mp4' in Root.tsx to preview smoothly.`);
+  console.log(`  Set src to 'edit/preview-cut.mp4' in Root.tsx to preview smoothly.`);
 }
 
 import { fileURLToPath } from 'url';

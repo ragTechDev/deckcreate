@@ -1,6 +1,10 @@
 import React from 'react';
+import { staticFile } from 'remotion';
 import { BaseOverlay, type OverlayProps } from './BaseOverlay';
 import type { Brand } from '../../../types/brand';
+
+const MONO = "'SF Mono', 'Monaco', 'Cascadia Code', 'Consolas', monospace";
+const TECHYBARA = staticFile('assets/techybara/techybara-holding-laptop.png');
 
 export type CodeBlockProps = OverlayProps & {
   brand: Brand;
@@ -14,67 +18,102 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
   brand,
   code,
   language,
-  fontSize = 24,
+  fontSize = 22,
   highlightLines = [],
   ...baseProps
 }) => {
-  const { colors, typography, shape } = brand;
+  const { colors, shape } = brand;
   const lines = code.split('\n');
 
   return (
-    <BaseOverlay {...baseProps} position="center">
-      <div
-        style={{
-          background: '#ffffff',
-          borderRadius: shape.borderRadius,
-          padding: '20px 24px',
-          maxWidth: 900,
-          boxShadow: '0 4px 16px rgba(0,0,0,0.12), 0 0 0 1px rgba(0,0,0,0.07)',
-          fontFamily: `${typography.fontFamily}, SF Mono, Monaco, Consolas, monospace`,
-          fontSize,
-          lineHeight: 1.6,
-        }}
-      >
-        {language && (
+    <BaseOverlay {...baseProps} position={baseProps.position ?? 'bottom-left'}>
+      <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+
+        {/* Techybara — overlaps the terminal's left edge */}
+        <img
+          src={TECHYBARA}
+          style={{
+            height: 164,
+            objectFit: 'contain',
+            position: 'relative',
+            zIndex: 2,
+            marginRight: -28,
+            flexShrink: 0,
+          }}
+        />
+
+        {/* Terminal window */}
+        <div style={{ position: 'relative', zIndex: 1 }}>
+
+          {/* Chrome */}
           <div
             style={{
-              fontSize: 12,
-              color: '#57606a',
-              textTransform: 'uppercase',
-              letterSpacing: '0.1em',
-              marginBottom: 12,
-              fontWeight: 600,
+              background: '#21262d',
+              borderRadius: `${shape.borderRadius}px ${shape.borderRadius}px 0 0`,
+              padding: '10px 18px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 7,
+              borderBottom: '1px solid rgba(255,255,255,0.06)',
             }}
           >
-            {language}
+            <div style={{ width: 11, height: 11, borderRadius: '50%', background: '#ff5f57' }} />
+            <div style={{ width: 11, height: 11, borderRadius: '50%', background: '#febc2e' }} />
+            <div style={{ width: 11, height: 11, borderRadius: '50%', background: '#28c840' }} />
+            <span style={{ fontFamily: MONO, fontSize: 13, color: '#8b949e', marginLeft: 10 }}>
+              {language ? `${language} — zsh` : '~/ragtech — zsh'}
+            </span>
           </div>
-        )}
-        <div>
-          {lines.map((line, i) => (
-            <div
-              key={i}
-              style={{
-                display: 'flex',
-                background: highlightLines.includes(i + 1) ? 'rgba(187, 128, 9, 0.15)' : 'transparent',
-                margin: '0 -24px',
-                padding: '2px 24px',
-                borderLeft: highlightLines.includes(i + 1) ? '3px solid #d29922' : '3px solid transparent',
-              }}
-            >
-              <span
+
+          {/* Body */}
+          <div
+            style={{
+              background: '#0d1117',
+              borderRadius: `0 0 ${shape.borderRadius}px ${shape.borderRadius}px`,
+              padding: '16px 0 20px',
+              fontFamily: MONO,
+              fontSize,
+              lineHeight: 1.7,
+              color: '#e6edf3',
+              minWidth: 520,
+              boxShadow: '0 10px 40px rgba(0,0,0,0.5)',
+            }}
+          >
+            {/* Dim prompt header */}
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8, opacity: 0.45, padding: '0 28px' }}>
+              <span style={{ color: colors.secondary, marginRight: 8 }}>❯</span>
+              <span style={{ color: '#8b949e' }}>~/ragtech — zsh</span>
+            </div>
+
+            {/* Code lines with line numbers */}
+            {lines.map((line, i) => (
+              <div
+                key={i}
                 style={{
-                  color: '#8f9196',
-                  minWidth: 30,
-                  textAlign: 'right',
-                  marginRight: 16,
-                  userSelect: 'none',
+                  display: 'flex',
+                  background: highlightLines.includes(i + 1) ? 'rgba(255,255,255,0.05)' : 'transparent',
+                  padding: '1px 28px',
+                  borderLeft: highlightLines.includes(i + 1)
+                    ? `3px solid ${colors.primary}`
+                    : '3px solid transparent',
                 }}
               >
-                {i + 1}
-              </span>
-              <span style={{ color: '#24292e', whiteSpace: 'pre' }}>{line || ' '}</span>
-            </div>
-          ))}
+                <span
+                  style={{
+                    color: '#484f58',
+                    minWidth: 28,
+                    textAlign: 'right',
+                    marginRight: 20,
+                    userSelect: 'none',
+                    flexShrink: 0,
+                  }}
+                >
+                  {i + 1}
+                </span>
+                <span style={{ color: '#e6edf3', whiteSpace: 'pre' }}>{line || ' '}</span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </BaseOverlay>

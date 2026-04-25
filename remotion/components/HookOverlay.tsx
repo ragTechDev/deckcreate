@@ -10,6 +10,7 @@ import { whip } from '@remotion/sfx';
 import type { Segment, Token } from '../types/transcript';
 import { isSpokenToken } from '../lib/tokens';
 import type { Brand } from '../types/brand';
+import { ChapterMarker } from './overlays/lower-thirds';
 
 // ── Token helpers ──────────────────────────────────────────────────────────────
 
@@ -154,6 +155,7 @@ type HookTiming = {
   outputStartFrame: number;
   outputEndFrame: number;
   sourceStart: number;
+  sourceEnd: number;
   pages: Page[];
 };
 
@@ -174,14 +176,18 @@ function buildHookTimings(segments: Segment[], fps: number): HookTiming[] {
       .filter(t => isSpokenToken(t) && t.t_dtw >= sourceStart && t.t_dtw <= baseEnd)
       .sort((a, b) => (b.t_end ?? 0) - (a.t_end ?? 0))[0];
 
+    const nextHookSeg = segments.slice(i + 1).find(s => s.hook && !s.cut);
+    const nextHookStart = nextHookSeg ? (nextHookSeg.hookFrom ?? nextHookSeg.start) : undefined;
+
     if (lastSpokenToken?.t_end) {
-      sourceEnd = Math.max(sourceEnd, lastSpokenToken.t_end);
+      const tEnd = nextHookStart !== undefined
+        ? Math.min(lastSpokenToken.t_end, nextHookStart)
+        : lastSpokenToken.t_end;
+      sourceEnd = Math.max(sourceEnd, tEnd);
     }
 
     // Bridge to the next hook when the gap is small and this hook ends at the
     // segment tail — must match SegmentPlayer.getHookSubClips / CameraPlayer.
-    const nextHookSeg = segments.slice(i + 1).find(s => s.hook && !s.cut);
-    const nextHookStart = nextHookSeg ? (nextHookSeg.hookFrom ?? nextHookSeg.start) : undefined;
     const hasSpokenTokenAfterEnd = seg.tokens.some(
       t => isSpokenToken(t) && t.t_dtw > sourceEnd + 0.02,
     );
@@ -198,6 +204,11 @@ function buildHookTimings(segments: Segment[], fps: number): HookTiming[] {
       ? HOOK_TAIL_PAD_BOUNDED_SECONDS
       : HOOK_TAIL_PAD_UNBOUNDED_SECONDS;
 
+    // Hard cap: never extend into the next hook's source window (must match getHookSubClips).
+    if (nextHookStart !== undefined) {
+      sourceEnd = Math.min(sourceEnd, nextHookStart);
+    }
+
     const captions = buildCaptions(seg.tokens, sourceStart, sourceEnd, isBoundedHook);
 
     const startFrame = Math.floor(sourceStart * fps);
@@ -209,10 +220,102 @@ function buildHookTimings(segments: Segment[], fps: number): HookTiming[] {
       combineTokensWithinMilliseconds: 1200,
     });
 
-    timings.push({ seg, outputStartFrame: cum, outputEndFrame: cum + dur, sourceStart, pages });
+    timings.push({ seg, outputStartFrame: cum, outputEndFrame: cum + dur, sourceStart, sourceEnd, pages });
     cum += dur;
   }
   return timings;
+}
+
+// ── Chapter marker sequences for hook timeline ───────────────────────────────
+
+type ChapterMarkerSeq = {
+  startFrame: number;
+  durationInFrames: number;
+  chapterTitle: string;
+  nextMarkerFrame?: number;
+};
+
+function buildChapterMarkerSequences(
+  allSegments: Segment[],
+  hookTimings: HookTiming[],
+  fps: number,
+): ChapterMarkerSeq[] {
+  if (hookTimings.length === 0) return [];
+
+  const rawCues: { at: number; duration: number; chapterTitle: string }[] = [];
+  for (const seg of allSegments) {
+    if (seg.cut || seg.hook) continue; // OverlayRenderer handles hook-segment graphics in the hook timeline
+    if (!seg.graphics?.length) continue;
+    for (const g of seg.graphics) {
+      if (g.type === 'ChapterMarker') {
+        rawCues.push({
+          at: g.at,
+          duration: g.duration,
+          chapterTitle: (g.props?.chapterTitle as string) ?? 'Chapter',
+        });
+      }
+    }
+  }
+  if (rawCues.length === 0) return [];
+  rawCues.sort((a, b) => a.at - b.at);
+
+  const result: ChapterMarkerSeq[] = [];
+
+  for (const cue of rawCues) {
+    const cueEnd = cue.at + cue.duration;
+    const overlapping = hookTimings.filter(t => cue.at < t.sourceEnd && cueEnd > t.sourceStart);
+    if (overlapping.length === 0) continue;
+
+    const first = overlapping[0];
+    const outputStart = cue.at > first.sourceStart
+      ? first.outputStartFrame + Math.round((cue.at - first.sourceStart) * fps)
+      : first.outputStartFrame;
+
+    const last = overlapping[overlapping.length - 1];
+    const outputEnd = cueEnd >= last.sourceEnd
+      ? last.outputEndFrame
+      : last.outputStartFrame + Math.round((cueEnd - last.sourceStart) * fps);
+
+    result.push({
+      startFrame: outputStart,
+      durationInFrames: Math.max(1, outputEnd - outputStart),
+      chapterTitle: cue.chapterTitle,
+    });
+  }
+
+  // Collect hook-segment ChapterMarker output frames so we can cap non-hook sequences
+  // against them too — OverlayRenderer renders those separately and they arrive in the
+  // same hook timeline, so the previous marker must end before the incoming one starts.
+  const hookMarkerFrames: number[] = [];
+  for (const seg of allSegments) {
+    if (seg.cut || !seg.hook) continue;
+    if (!seg.graphics?.length) continue;
+    for (const g of seg.graphics) {
+      if (g.type !== 'ChapterMarker' && g.type !== 'ChapterMarkerEnd') continue;
+      const timing = hookTimings.find(t => g.at >= t.sourceStart && g.at <= t.sourceEnd);
+      if (!timing) continue;
+      const outputFrame = timing.outputStartFrame + Math.round((g.at - timing.sourceStart) * fps);
+      hookMarkerFrames.push(outputFrame);
+    }
+  }
+  hookMarkerFrames.sort((a, b) => a - b);
+
+  // Cap each non-hook sequence to the nearest upcoming boundary (non-hook OR hook marker)
+  for (let i = 0; i < result.length; i++) {
+    const cue = result[i];
+    const nextNonHookStart = i < result.length - 1 ? result[i + 1].startFrame : Infinity;
+    const nextHookFrame = hookMarkerFrames.find(f => f > cue.startFrame) ?? Infinity;
+    const nextStart = Math.min(nextNonHookStart, nextHookFrame);
+    if (nextStart < Infinity) {
+      result[i] = {
+        ...cue,
+        nextMarkerFrame: nextStart,
+        durationInFrames: Math.min(cue.durationInFrames, nextStart - cue.startFrame),
+      };
+    }
+  }
+
+  return result.filter(s => s.durationInFrames > 0);
 }
 
 // ── Layout constants (1920 × 1080) ────────────────────────────────────────────
@@ -225,14 +328,20 @@ const CAPTION_TOP    = 720;
 
 type Props = {
   hookSegments: Segment[];
+  segments?: Segment[];
   brand: Brand;
 };
 
-export const HookOverlay: React.FC<Props> = ({ hookSegments, brand }) => {
+export const HookOverlay: React.FC<Props> = ({ hookSegments, segments, brand }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
   const timings = useMemo(() => buildHookTimings(hookSegments, fps), [hookSegments, fps]);
+
+  const chapterMarkerSeqs = useMemo(
+    () => buildChapterMarkerSequences(segments ?? hookSegments, timings, fps),
+    [segments, hookSegments, timings, fps],
+  );
 
   const whipFrames = useMemo(
     () => timings.filter(t => t.seg.hookGraphic).map(t => t.outputStartFrame),
@@ -259,7 +368,7 @@ export const HookOverlay: React.FC<Props> = ({ hookSegments, brand }) => {
     { extrapolateRight: 'clamp' },
   );
 
-  const { colors, typography, logo } = brand;
+  const { colors, typography } = brand;
 
   // Per-frame derived values (computed unconditionally to keep hook count stable)
   const localFrame = active ? frame - active.outputStartFrame : 0;
@@ -295,9 +404,21 @@ export const HookOverlay: React.FC<Props> = ({ hookSegments, brand }) => {
         </Sequence>
       ))}
 
+      {/* ── Chapter markers — mirroring main-video state at hook source times ── */}
+      {chapterMarkerSeqs.map(seq => (
+        <Sequence key={seq.startFrame} from={seq.startFrame} durationInFrames={seq.durationInFrames} layout="none">
+          <ChapterMarker
+            brand={brand}
+            chapterTitle={seq.chapterTitle}
+            durationInFrames={seq.durationInFrames}
+            nextMarkerFrame={seq.nextMarkerFrame}
+          />
+        </Sequence>
+      ))}
+
       {/* ── Visual overlay — only rendered during active hook frames ─────── */}
       {active && (
-        <AbsoluteFill style={{ pointerEvents: 'none' }}>
+        <AbsoluteFill style={{ pointerEvents: 'none', zIndex: 101 }}>
 
           {/* ── "Today's Ep" pill with blinking rec dot ─ top-left ──────── */}
           <div style={{
@@ -310,7 +431,7 @@ export const HookOverlay: React.FC<Props> = ({ hookSegments, brand }) => {
             display:         'flex',
             alignItems:      'center',
             gap:             14,
-            background:      colors.primary,
+            background:      '#ffffff',
             color:           colors.text.onPrimary,
             fontFamily:      typography.fontFamily,
             fontWeight:      typography.weights.extraBold,
@@ -389,19 +510,6 @@ export const HookOverlay: React.FC<Props> = ({ hookSegments, brand }) => {
               {activePage.text.trim()}
             </div>
           )}
-
-          {/* ── Logo ─ bottom-right ─────────────────────────────────────── */}
-          <Img
-            src={staticFile(logo.replace(/^\/+/, ''))}
-            style={{
-              position:  'absolute',
-              bottom:    48,
-              right:     60,
-              height:    110,
-              objectFit: 'contain',
-              opacity:   0.95,
-            }}
-          />
 
         </AbsoluteFill>
       )}

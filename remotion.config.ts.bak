@@ -1,0 +1,13 @@
+import { Config } from '@remotion/cli/config';
+import path from 'path';
+
+// Increase the global render timeout to accommodate slow seeks deep into large
+// video files (e.g. synced-output.mp4 with sparse keyframes at t > 40 s).
+// The permanent fix is to re-encode the video with -g 60 -movflags +faststart;
+// this is a safety net so previews don't abort in the meantime.
+Config.setTimeoutInMilliseconds(120_000);
+
+// Use a minimal public directory that excludes large raw input videos.
+// The raw videos in public/input/ (10GB+) aren't needed for rendering -
+// only the synced outputs in public/sync/ are used by the composition.
+Config.setPublicDir(path.join(process.cwd(), 'public-render'));

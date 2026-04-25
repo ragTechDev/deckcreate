@@ -65,6 +65,22 @@ const ICON_R     = 490; // radius from logo center to icon center
 const LOGO_CX    = VW / 2;
 const LOGO_CY    = 560;
 
+// Episode frames — 4 × 3 grid background
+const EPISODES = [
+  'assets/episodes/ep_10x.webp',
+  'assets/episodes/ep_ai.jpg',
+  'assets/episodes/ep_career.jpg',
+  'assets/episodes/ep_career1.webp',
+  'assets/episodes/ep_imposter.jpg',
+  'assets/episodes/ep_introvert.webp',
+  'assets/episodes/ep_joy.jpg',
+  'assets/episodes/ep_leadership.webp',
+  'assets/episodes/ep_martin.jpg',
+  'assets/episodes/ep_martin1.webp',
+  'assets/episodes/ep_promotion.jpg',
+  'assets/episodes/ep_saloni.webp',
+];
+
 // ── Static data ───────────────────────────────────────────────────────────────
 // Horizontal row, group centered: 390+60+430+60+390 = 1330 px → left = (1920-1330)/2 = 295
 const COHOSTS = [
@@ -223,10 +239,29 @@ export const PodcastIntro: React.FC<Props> = ({ brand }) => {
 
   return (
     <AbsoluteFill style={{
-      background: bgColor,
+      background: '#000',
       fontFamily: typography.fontFamily,
       overflow: 'hidden',
     }}>
+
+      {/* ── Episode grid background ──────────────────────────────────────────── */}
+      <div style={{
+        position: 'absolute', inset: 0,
+        display: 'grid',
+        gridTemplateColumns: 'repeat(4, 1fr)',
+        gridTemplateRows: 'repeat(3, 1fr)',
+      }}>
+        {EPISODES.map((src, i) => (
+          <Img
+            key={i}
+            src={staticFile(src)}
+            style={{ width: '100%', height: '100%', objectFit: 'contain', filter: 'brightness(0.4) saturate(0.7)' }}
+          />
+        ))}
+      </div>
+
+      {/* Animated brand-colour overlay */}
+      <div style={{ position: 'absolute', inset: 0, background: bgColor, opacity: 0.55 }} />
 
       {/* Audio */}
       <Audio
@@ -288,7 +323,7 @@ export const PodcastIntro: React.FC<Props> = ({ brand }) => {
       }}>
         <div style={{ position: 'relative' }}>
           <div style={{
-            background: 'rgba(255,255,255,0.96)',
+            background: '#1e1e1e',
             borderRadius: interpolate(collapseProg, [0, 1], [shape.borderRadius, 0]),
             border: `1.5px solid ${colors.secondary}40`,
             boxShadow: '0 -4px 40px rgba(0,0,0,0.12), 0 20px 56px rgba(0,0,0,0.18)',
@@ -298,8 +333,8 @@ export const PodcastIntro: React.FC<Props> = ({ brand }) => {
             <div style={{
               display: 'flex', alignItems: 'center', gap: 7,
               padding: `10px ${termPad}px`,
-              background: 'rgba(243,244,246,0.96)',
-              borderBottom: `1px solid ${colors.secondary}30`,
+              background: '#252526',
+              borderBottom: '1px solid #333',
             }}>
               <span style={{ width: 12, height: 12, borderRadius: '50%', background: '#FF5F57', display: 'inline-block', flexShrink: 0 }} />
               <span style={{ width: 12, height: 12, borderRadius: '50%', background: '#FEBC2E', display: 'inline-block', flexShrink: 0 }} />
@@ -326,10 +361,10 @@ export const PodcastIntro: React.FC<Props> = ({ brand }) => {
 
                   {/* Line 0: prompt + command */}
                   <div style={{ height: lineH, display: 'flex', alignItems: 'center', gap: 10, overflow: 'hidden' }}>
-                    <span style={{ fontSize: cmdFontSz, fontWeight: tw.bold, color: colors.secondary, whiteSpace: 'nowrap', flexShrink: 0 }}>
+                    <span style={{ fontSize: cmdFontSz, fontWeight: tw.bold, color: '#9cd2d0', whiteSpace: 'nowrap', flexShrink: 0 }}>
                       ~ ❯
                     </span>
-                    <span style={{ fontSize: cmdFontSz, fontWeight: tw.semiBold, color: colors.primary, whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: cmdFontSz, fontWeight: tw.semiBold, color: '#eebf89', whiteSpace: 'nowrap' }}>
                       {cmdText}
                     </span>
                     {cursorOn && (
@@ -337,23 +372,23 @@ export const PodcastIntro: React.FC<Props> = ({ brand }) => {
                         display: 'inline-block',
                         width: interpolate(collapseProg, [0, 1], [14, 10]),
                         height: interpolate(collapseProg, [0, 1], [32, 72]),
-                        background: colors.primary, borderRadius: 2, flexShrink: 0,
+                        background: '#eebf89', borderRadius: 2, flexShrink: 0,
                       }} />
                     )}
                   </div>
 
                   {/* Line 1: Starting... */}
                   <div style={{ height: lineH, display: 'flex', alignItems: 'center', gap: 10, opacity: line1Op }}>
-                    <span style={{ fontSize: outFontSz, color: colors.secondary, flexShrink: 0 }}>❯</span>
-                    <span style={{ fontSize: outFontSz, color: colors.text.onPrimary, whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: outFontSz, color: '#9cd2d0', flexShrink: 0 }}>❯</span>
+                    <span style={{ fontSize: outFontSz, color: '#e0e0e0', whiteSpace: 'nowrap' }}>
                       Starting ragTech podcast...
                     </span>
                   </div>
 
                   {/* Line 2: Loading cohosts... */}
                   <div style={{ height: lineH, display: 'flex', alignItems: 'center', gap: 10, opacity: line2Op }}>
-                    <span style={{ fontSize: outFontSz, color: colors.secondary, flexShrink: 0 }}>❯</span>
-                    <span style={{ fontSize: outFontSz, color: colors.text.onPrimary, whiteSpace: 'nowrap' }}>
+                    <span style={{ fontSize: outFontSz, color: '#9cd2d0', flexShrink: 0 }}>❯</span>
+                    <span style={{ fontSize: outFontSz, color: '#e0e0e0', whiteSpace: 'nowrap' }}>
                       Loading cohosts...
                     </span>
                   </div>
@@ -361,11 +396,11 @@ export const PodcastIntro: React.FC<Props> = ({ brand }) => {
                   {/* Lines 3–5: ✓ per cohost */}
                   {cohostData.map(({ name, checkOp }) => (
                     <div key={name} style={{ height: lineH, display: 'flex', alignItems: 'center', gap: 12, opacity: checkOp }}>
-                      <span style={{ fontSize: outFontSz, color: colors.accent, fontWeight: tw.bold, flexShrink: 0 }}>✓</span>
-                      <span style={{ fontSize: outFontSz, color: colors.text.onPrimary, fontWeight: tw.semiBold, whiteSpace: 'nowrap' }}>
+                      <span style={{ fontSize: outFontSz, color: '#28C840', fontWeight: tw.bold, flexShrink: 0 }}>✓</span>
+                      <span style={{ fontSize: outFontSz, color: '#e0e0e0', fontWeight: tw.semiBold, whiteSpace: 'nowrap' }}>
                         {name}
                       </span>
-                      <span style={{ fontSize: barFontSz, color: `${colors.text.onPrimary}44`, whiteSpace: 'nowrap' }}>
+                      <span style={{ fontSize: barFontSz, color: '#888', whiteSpace: 'nowrap' }}>
                         loaded
                       </span>
                     </div>

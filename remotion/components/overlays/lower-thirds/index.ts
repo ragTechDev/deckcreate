@@ -1,2 +1,3 @@
 export { ConceptExplainer } from './ConceptExplainer';
-export { SpeakerIntro } from './SpeakerIntro';
+export { NameTitle, type NameTitleProps } from './NameTitle';
+export { ChapterMarker, type ChapterMarkerProps } from './ChapterMarker';

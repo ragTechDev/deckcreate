@@ -57,7 +57,7 @@ Usage:
 
 Options:
   --transcript <path>          Input transcript.json
-                               Default: public/transcribe/output/edit/transcript.json
+                               Default: public/edit/transcript.json
   --out-dir <path>             Output directory for QA artifacts
                                Default: public/transcribe/output/hook-qa
   --entry <path>               Remotion entry file (for render)

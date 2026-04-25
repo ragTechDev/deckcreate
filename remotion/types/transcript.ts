@@ -11,12 +11,18 @@ export type Token = {
 /** Maps 1:1 to a component in remotion/components/graphics/ or remotion/components/overlays/ */
 export type GraphicType =
   // Legacy graphics
-  | 'LowerThird' | 'Callout' | 'ChapterMarker'
-  // Overlay components
+  | 'LowerThird' | 'Callout'
+  // Chapter markers (persistent overlays)
+  | 'ChapterMarker' | 'ChapterMarkerEnd'
+  // Lower-third overlays
+  | 'ConceptExplainer' | 'NameTitle'
+  // Keyword overlay components
   | 'AwardsOverlay' | 'CodingOverlay' | 'EngineeringOverlay'
   | 'AIOverlay' | 'InfrastructureOverlay' | 'PracticeOverlay'
   | 'RoleOverlay' | 'LanguageOverlay' | 'FrameworkOverlay'
-  | 'EducationOverlay';
+  | 'EducationOverlay' | 'RagtechOverlay'
+  | 'ImageWindow'
+  | 'GifWindow';
 
 export type CameraCue = {
   /** 'closeup' on a named speaker, or 'wide' for the wide shot */
@@ -55,6 +61,8 @@ export type Segment = {
   tokens: Token[];
   /** Derived from token cut flags by edit-transcript. Used by Remotion for time remapping. */
   cuts: TimeCut[];
+  /** Time-range cuts created by the visual editor. Written as > CUT from-to in the doc. */
+  visualCuts?: TimeCut[];
   graphics: GraphicsCue[];
   /** Explicit camera cut overrides — take priority over the pacing algorithm */
   cameraCues?: CameraCue[];
@@ -83,6 +91,12 @@ export type TranscriptMeta = {
   videoEnd?: number;
   /** Path to the source video relative to /public — overrides the composition's src prop */
   videoSrc?: string;
+  /**
+   * Paths to all synced video angle files relative to /public (multi-angle shoots).
+   * The first entry is the primary angle (matches videoSrc). Used by setup-camera
+   * to know which angles to run face detection on.
+   */
+  videoSrcs?: string[];
 };
 
 export type Transcript = {

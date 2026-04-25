@@ -15,7 +15,6 @@
 
 # next.js
 /.next/
-/out/
 
 # production
 /build
@@ -41,22 +40,38 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# Media content
-/public/sync/audio/*
-/public/sync/output/*
-/public/sync/video/*
-/public/transcribe/input/*
-/public/input/*
-/public/sync/*
+# ── Raw inputs (drop video/audio here before running the wizard) ───────────────
+# Never committed — files are 1–10 GB
+/input/
 
-# comment this out if using agent to edit transcript
-/public/transcribe/output/* 
+# ── Pipeline intermediates (large/generated media) ────────────────────────────
+public/sync/              # synced video/audio working files
+public/transcribe/input/  # audio extracted for Whisper
+public/transcribe/output/ # raw Whisper JSON + VTT
+public/thumbnail/         # candidate frames, cutouts, manifest
+public/renders/           # final rendered .mp4 files
+public/output/            # carousel exports
+
+# ── Editable pipeline outputs (text/JSON) ─────────────────────────────────────
+public/edit/   → transcript.doc.txt, transcript.json, SRT exports
+public/camera/ → camera-profiles.json, frame snapshots, detections
+#
+# These are committed by default so collaborators (and coding agents) can read
+# and edit the transcript. Coding agents like Claude access project context via
+# git — committing these files lets the agent see, diff, and propose edits to
+# the transcript doc without needing filesystem access.
+#
+# Uncomment to exclude (e.g. for a private or unreleased episode):
+public/edit/*
+public/camera/*
 
 # Whisper.cpp binary and models (downloaded on first run)
 /whisper.cpp/
+
+# Claude Code
 .claude/settings.local.json
 
-# Python Environments
+# Python environments
 .envrc
 .venv
 env/
@@ -65,8 +80,10 @@ ENV/
 env.bak/
 venv.bak/
 
-# Python Byte-compiled / optimized / DLL files
+# Python bytecode
 scripts/diarize/__pycache__/
 *.py[codz]
 *$py.class
+
+# Editor
 .vscode/settings.json
