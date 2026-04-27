@@ -70,30 +70,31 @@ class CaptionExtractor {
     const captionTracks =
       playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
 
-    if (!captionTracks || captionTracks.length === 0) {
-      throw new Error('No caption tracks found for this video');
-    }
-
-    // Prefer auto-generated English
-    const rankedTracks = [...captionTracks].sort((a, b) => {
-      const score = (t) => {
-        let s = 0;
-        if (t.languageCode === 'en') s += 10;
-        if (t.kind === 'asr') s += 5;
-        return s;
-      };
-      return score(b) - score(a);
-    });
-
     let captionData = null;
-    for (const track of rankedTracks) {
-      console.log(`  Trying track: ${track.languageCode} (${track.kind || 'manual'})`);
-      captionData = await this.fetchCaptionData(track.baseUrl, cookieStr, videoId, track);
-      if (captionData) break;
+
+    if (captionTracks && captionTracks.length > 0) {
+      // Prefer auto-generated English
+      const rankedTracks = [...captionTracks].sort((a, b) => {
+        const score = (t) => {
+          let s = 0;
+          if (t.languageCode === 'en') s += 10;
+          if (t.kind === 'asr') s += 5;
+          return s;
+        };
+        return score(b) - score(a);
+      });
+
+      for (const track of rankedTracks) {
+        console.log(`  Trying track: ${track.languageCode} (${track.kind || 'manual'})`);
+        captionData = await this.fetchCaptionData(track.baseUrl, cookieStr, videoId, track);
+        if (captionData) break;
+      }
+    } else {
+      console.log('  No caption tracks in page response (likely bot-detection) — trying InnerTube...');
     }
 
     if (!captionData) {
-      console.log('  Page cookies failed, trying InnerTube ANDROID fallback...');
+      console.log('  Trying InnerTube ANDROID/IOS fallback...');
       captionData = await this.fetchViaInnertube(videoId);
     }
 
