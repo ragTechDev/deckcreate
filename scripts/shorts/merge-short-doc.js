@@ -68,12 +68,18 @@ async function main() {
     transcript = autoCutPauses(transcript, 0.5);
   }
 
+  // Compute output filename: <original-filename-without-extension>_<short-id>.mp4
+  const videoSrc = transcript.meta.videoSrc || baseTranscript.meta.videoSrc || '';
+  const originalFilename = path.basename(videoSrc, path.extname(videoSrc)) || 'output';
+  const outName = `${originalFilename}_${args.id}.mp4`;
+
   // Inject short-form meta
   transcript = {
     ...transcript,
     meta: {
       ...transcript.meta,
       outputAspect: '9:16',
+      outName,
       ...(args.parentTranscript ? { parentTranscript: args.parentTranscript } : {}),
     },
   };
@@ -85,6 +91,7 @@ async function main() {
 
   console.log(`✓ Written: ${outPath}`);
   console.log(`  outputAspect: ${transcript.meta.outputAspect}`);
+  console.log(`  outName:      ${transcript.meta.outName}`);
   console.log(`  videoStart:   ${transcript.meta.videoStart}`);
   console.log(`  videoEnd:     ${transcript.meta.videoEnd}`);
 }
