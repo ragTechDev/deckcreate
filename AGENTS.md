@@ -4,6 +4,26 @@ End-to-end guide for AI agents and contributors. See `CLAUDE.md` for project/bra
 
 ---
 
+## Agent implementation convention
+
+Any multi-step feature must be broken into isolated, independently-testable commits.
+Implementation docs live in `docs/`. Each commit message slug must match the heading
+in the corresponding doc exactly so that a resuming agent can locate its starting point.
+
+**Resuming interrupted work:**
+1. Run `git log --oneline` to see completed commits.
+2. Open the relevant doc in `docs/`.
+3. Match the last commit message against the slugs in the checklist.
+4. Continue from the next unstarted step. Do not re-do completed commits.
+
+**When writing an implementation doc:**
+- Each step must include a "Status check" — a single command or file-existence test
+  that confirms the step is already done.
+- Steps must be ordered by dependency. Note cross-step dependencies explicitly.
+- Commits must not be combined. Isolation allows partial recovery.
+
+---
+
 ## Pipeline
 
 ```
@@ -248,3 +268,73 @@ Without: estimate = `next.t_dtw − curr.t_dtw − WORD_DURATION_ESTIMATE (0.4 s
 | `MIN_WIDE_S` | 1.5 s | `CameraPlayer.tsx` |
 | `MAX_CLOSEUP_S` | 20 s | `CameraPlayer.tsx` |
 | `PERIODIC_WIDE_S` | 45 s | `CameraPlayer.tsx` |
+
+---
+
+## Short-form pipeline
+
+Implementation plan: `docs/SHORT_FORM_WIZARD.md`. Entry point: `npm run shorts:wizard`.
+
+### Two paths
+
+**Path A — clip from longform:** `public/edit/transcript.json` must exist. User selects a
+time range; wizard creates one or more clips without re-running sync or transcription.
+
+**Path B — dedicated portrait recording:** Own sync/transcribe/align pipeline rooted at
+`public/shorts/`, then user defines clips from the result.
+
+### Output structure
+
+```
+public/shorts/
+  camera-profiles.json     ← shared portrait profiles for ALL clips (created once)
+  short-{id}/
+    transcript.doc.txt     ← full longform doc copy, > START / > END mark clip bounds
+    transcript.json        ← merged short transcript
+    preview-cut.mp4
+  # Path B only: input/ sync/ transcribe/
+```
+
+### Short transcript.json extra meta fields
+
+```
+meta.outputAspect:      "9:16"
+meta.videoStart:        float  — clip start in source video seconds
+meta.videoEnd:          float  — clip end in source video seconds
+meta.parentTranscript:  string — path to longform transcript.json (Path A only)
+```
+
+Segments keep absolute timestamps from the source video. `videoStart` / `videoEnd`
+are derived from the `> START` / `> END` markers in the doc.
+
+### Short-form transcript doc
+
+`extract-short-doc.js` copies the full longform `transcript.doc.txt` and inserts
+`> START` / `> END` around the clip range. It strips `> CAM` and `> HOOK` lines.
+`> GRAPHIC` lines are optionally carried over (user-prompted at clip creation).
+
+The same `> START` / `> END` mechanism used in the longform editor applies here —
+everything outside those markers is excluded by the merge step.
+
+### ShortFormClip composition
+
+- ID: `ShortFormClip` — registered in `remotion/Root.tsx`
+- Dimensions: 1080 × 1920 @ 60 fps
+- Reuses `SegmentPlayer` (jump-cuts) and `CameraPlayer` (portrait profiles)
+- `CaptionOverlay` covers the full video duration (not only hook segments)
+- No `PodcastIntro`
+
+### Portrait camera profiles
+
+`public/shorts/camera-profiles.json` — same schema as the longform `camera-profiles.json`
+with `outputWidth: 1080, outputHeight: 1920`. Created by `portrait-camera-setup.js` once
+and shared by all clips. Longform `camera-profiles.json` is the starting point for Path A.
+
+### Key scripts
+
+| Script | File |
+|--------|------|
+| `shorts:wizard` | `scripts/shorts-wizard.js` |
+| `shorts:extract-doc` | `scripts/shorts/extract-short-doc.js` |
+| `shorts:merge-doc` | `scripts/shorts/merge-short-doc.js` |
+| `shorts:camera-setup` | `scripts/shorts/portrait-camera-setup.js` |

@@ -1,6 +1,7 @@
 import React from 'react';
 import {Composition} from 'remotion';
 import {MyComposition, calculateMetadata} from './Composition';
+import { ShortFormClip, calculateShortMetadata } from './ShortFormClip';
 import { PodcastIntroComposition, INTRO_DURATION_FRAMES } from './components/PodcastIntro';
 import { PodcastOutroComposition, OUTRO_DURATION_FRAMES } from './components/PodcastOutro';
 import { OverlayGalleryComposition, GALLERY_TOTAL_FRAMES } from './components/OverlayGallery';
@@ -53,6 +54,22 @@ export const RemotionRoot: React.FC = () => {
             manifestSrc: 'thumbnail/cutouts/manifest.json',
             layoutVariant: 'left' as const,
         }}
+        />
+        <Composition
+        id="ShortFormClip"
+        component={ShortFormClip}
+        durationInFrames={300}
+        fps={60}
+        width={1080}
+        height={1920}
+        defaultProps={{
+            src: 'sync/output/synced-output-1.mp4',
+            transcriptSrc: 'shorts/short-1/transcript.json',
+            cameraProfilesSrc: 'shorts/camera-profiles.json',
+            brandSrc: 'brand.json',
+            hookMusicSrc: 'sounds/hook-music.mp3',
+        }}
+        calculateMetadata={calculateShortMetadata}
         />
     </>
   );

@@ -94,3 +94,15 @@ segments[]
 ```
 
 **Multi-angle rendering**: `CameraPlayer` stacks one `SegmentPlayer` per unique angle video, switches visibility via `opacity` at shot boundaries. Non-active layers are `muted`. All angles share the same jump-cut sections (cuts are audio-driven). See `AGENTS.md` for full architecture.
+
+## Agent implementation convention
+
+For any multi-step implementation task:
+- Break work into isolated commits. Each commit covers one coherent unit and must be
+  independently testable before the next begins.
+- Write an implementation doc in `docs/` before starting. Each step in the doc must have
+  a "Status check" so a resuming agent can verify it is already done.
+- Commit message slugs must match the doc headings exactly.
+- To resume interrupted work: run `git log --oneline`, open the relevant `docs/` file,
+  find the last matching slug, continue from the next step.
+- Never combine steps into one commit. Isolation is intentional — it enables partial recovery.
