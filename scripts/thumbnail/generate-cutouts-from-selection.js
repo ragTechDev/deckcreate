@@ -84,7 +84,7 @@ async function main() {
   if (!fs.existsSync(fullSelectionsPath)) {
     console.error(`Selections file not found: ${fullSelectionsPath}`);
     console.error('Run the selection script first:');
-    console.error('  docker compose run --rm thumbnail npm run select-frames');
+    console.error('  docker compose run --rm thumbnail npm run thumbnail:frames:select');
     process.exit(1);
   }
 

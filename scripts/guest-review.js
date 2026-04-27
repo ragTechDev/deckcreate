@@ -90,7 +90,7 @@ async function main() {
 
   if (!await fs.pathExists(editPath)) {
     console.error(`❌ Edited transcript not found: ${editPath}`);
-    console.error('   Run "npm run edit-transcript" first.');
+    console.error('   Run "npm run transcript:init" first.');
     process.exit(1);
   }
 

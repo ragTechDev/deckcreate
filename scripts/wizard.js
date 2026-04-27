@@ -798,7 +798,7 @@ async function main() {
 
     if (!alignOk) {
       console.log('  Continuing without forced alignment. You can run it later with:');
-      console.log('    npm run align -- --python .venv\\Scripts\\python.exe');
+      console.log('    npm run transcript:align -- --python .venv\\Scripts\\python.exe');
     }
   } else if (resumeStep >= 2 && existing.alignedTranscript) {
     console.log('\n  ── Forced alignment ───────────────────────────────────');
@@ -877,7 +877,7 @@ async function main() {
       const offsetArgs = extraFlags.length > 0 ? ['--', ...extraFlags] : [];
       try {
         await spawnStep('npm', ['run', 'assign-speakers']);
-        await spawnStep('npm', ['run', 'edit-transcript', ...offsetArgs]);
+        await spawnStep('npm', ['run', 'transcript:init', ...offsetArgs]);
       } catch (err) {
         console.error(`  ✗ ${err.message}`);
         const retry = await confirm('  Retry?');
@@ -893,9 +893,9 @@ async function main() {
 
       console.log('  Applying speaker names...');
       try {
-        await spawnStep('npm', ['run', 'merge-doc', ...offsetArgs]);
+        await spawnStep('npm', ['run', 'transcript:merge', ...offsetArgs]);
         // Regenerate doc with real speaker names in segment lines
-        await spawnStep('npm', ['run', 'edit-transcript', ...offsetArgs]);
+        await spawnStep('npm', ['run', 'transcript:init', ...offsetArgs]);
         console.log('  ✓ Speaker names applied');
       } catch (err) {
         console.error(`  ✗ ${err.message}`);
@@ -912,7 +912,7 @@ async function main() {
     ];
     const offsetArgs = singleExtraFlags.length > 0 ? ['--', ...singleExtraFlags] : [];
     console.log('\n  ── Build editable transcript ─────────────────────────');
-    await runStep('npm run edit-transcript', 'npm', ['run', 'edit-transcript', ...offsetArgs], docPath);
+    await runStep('npm run transcript:init', 'npm', ['run', 'transcript:init', ...offsetArgs], docPath);
   }
 
   if (singleStepMode && redoStepId === 'buildDoc') {
@@ -942,14 +942,14 @@ async function main() {
     const cutPauses = await confirm('  Auto-cut silences longer than 0.5 s?', false);
     if (cutPauses) {
       await runStep(
-        'npm run merge-doc:cut-pauses',
-        'npm', ['run', 'merge-doc:cut-pauses', ...mergeOffsetArgs],
+        'npm run transcript:merge:cut-pauses',
+        'npm', ['run', 'transcript:merge:cut-pauses', ...mergeOffsetArgs],
         transcriptPath,
       );
     } else {
       await runStep(
-        'npm run merge-doc',
-        'npm', ['run', 'merge-doc', ...mergeOffsetArgs],
+        'npm run transcript:merge',
+        'npm', ['run', 'transcript:merge', ...mergeOffsetArgs],
         transcriptPath,
       );
     }
@@ -1244,7 +1244,7 @@ async function main() {
     const previewPath = path.join(cwd, 'public', 'transcribe', 'output', 'edit', 'preview-cut.mp4');
     if (redoStepId === 'preview') {
       // Direct redo: run cut preview immediately
-      await runStep('npm run cut-preview', 'npm', ['run', 'cut-preview'], previewPath);
+      await runStep('npm run cut:preview', 'npm', ['run', 'cut:preview'], previewPath);
       if (singleStepMode) {
         singleStepMode = false;
         redoStepId = null;
@@ -1258,7 +1258,7 @@ async function main() {
       console.log('');
       const doPreview = await confirm('  Generate flat MP4 preview?', false);
       if (doPreview) {
-        await runStep('npm run cut-preview', 'npm', ['run', 'cut-preview'], previewPath);
+        await runStep('npm run cut:preview', 'npm', ['run', 'cut:preview'], previewPath);
       }
     }
   }

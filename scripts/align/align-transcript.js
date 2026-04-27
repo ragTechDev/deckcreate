@@ -277,8 +277,8 @@ async function main() {
     console.log(`\n  ✓ Alignment applied to ${appliedSegments} segment(s).`);
     console.log(`  ✓ Updated transcript: ${rawPath}`);
     console.log('\nNext steps:');
-    console.log('  - Run "npm run assign-speakers" (if multi-speaker)');
-    console.log('  - Run "npm run edit-transcript" to regenerate transcript.doc.txt');
+    console.log('  - Run "npm run speakers:assign" (if multi-speaker)');
+    console.log('  - Run "npm run transcript:init" to regenerate transcript.doc.txt');
   } catch (error) {
     console.error(`❌ Error: ${error.message}`);
     console.error('\nHint: install Python deps for WhisperX in your active Python env:');

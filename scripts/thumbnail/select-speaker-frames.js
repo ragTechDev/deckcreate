@@ -88,7 +88,7 @@ async function main() {
   if (!fs.existsSync(fullCandidatesPath)) {
     console.error(`Candidates file not found: ${fullCandidatesPath}`);
     console.error('Run the extraction first:');
-    console.error('  docker compose run --rm thumbnail npm run extract-candidates');
+    console.error('  docker compose run --rm thumbnail npm run thumbnail:candidates:extract');
     process.exit(1);
   }
 
@@ -125,7 +125,7 @@ async function main() {
   console.log(`\n✓ Selections saved: ${fullOutputPath}`);
 
   console.log('\nNext: Generate final cutouts from selections:');
-  console.log('  docker compose run --rm thumbnail npm run generate-cutouts');
+  console.log('  docker compose run --rm thumbnail npm run thumbnail:cutouts:generate');
 
   rl.close();
 }

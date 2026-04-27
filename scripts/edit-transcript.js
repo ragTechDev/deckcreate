@@ -600,7 +600,7 @@ function buildInstructionsBlock() {
     '                  title= custom thumbnail title; use **text** for accent highlight',
     '                  extendedTitle= longer title shown above thumbnail in portrait mode',
     '                  episodeNumber= episode number for portrait thumbnail (renders as white pill)',
-    '  SAVE EDITS       npm run merge-doc',
+    '  SAVE EDITS       npm run transcript:merge',
     '',
     '════════════════════════════════════════════════════════════════',
     '',

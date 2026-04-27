@@ -40,7 +40,7 @@ async function main() {
     await diarizer.initForAssign();
     await diarizer.runAssignment();
     console.log('\nNext steps:');
-    console.log('  Run "npm run edit-transcript" to regenerate transcript.doc.txt with speaker labels.');
+    console.log('  Run "npm run transcript:init" to regenerate transcript.doc.txt with speaker labels.');
     console.log('  Rename SPEAKER_00, SPEAKER_01, etc. to real names in the doc, then re-run edit-transcript.');
   } catch (error) {
     console.error('❌ Error:', error.message);

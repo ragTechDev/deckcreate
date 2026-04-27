@@ -48,7 +48,7 @@ Renders the hook clips followed by the 7-second podcast intro from the
 longform video. Segments in the transcript must be annotated with > HOOK.
 
 Usage:
-  npm run render-hook-intro -- [options]
+  npm run render:hook-intro -- [options]
 
 Options:
   --transcript <path>        transcript.json path (default: public/edit/transcript.json)

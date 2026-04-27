@@ -401,7 +401,7 @@ def main():
 
     print(f'\n✓ Candidates manifest written: {manifest_path}')
     print('Run the selection script to choose preferred frames:')
-    print(f'  npm run select-frames')
+    print(f'  npm run thumbnail:frames:select')
 
 
 if __name__ == '__main__':

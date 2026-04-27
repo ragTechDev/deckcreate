@@ -53,7 +53,7 @@ Renders hooks-only output, retranscribes + force-aligns that render,
 and compares observed tokens/timing against expected hook tokens.
 
 Usage:
-  npm run hook-qa -- [options]
+  npm run review:hooks -- [options]
 
 Options:
   --transcript <path>          Input transcript.json

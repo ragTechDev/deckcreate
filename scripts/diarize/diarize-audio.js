@@ -65,7 +65,7 @@ async function main() {
   try {
     await diarizer.initForDiarize();
     await diarizer.runDiarization();
-    console.log('\nNext step: npm run assign-speakers');
+    console.log('\nNext step: npm run speakers:assign');
   } catch (error) {
     console.error('❌ Error:', error.message);
     process.exit(1);

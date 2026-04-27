@@ -55,8 +55,8 @@ async function main() {
     await transcriber.transcribe();
     console.log('\nNext steps:');
     console.log('  1. Optionally edit public/transcribe/output/raw/transcript.raw.vtt to correct word errors');
-    console.log('  2. Run "npm run edit-transcript" to produce transcript.json in public/edit/');
-    console.log('     Or with corrected VTT: npm run edit-transcript -- --merge-vtt public/transcribe/output/raw/transcript.raw.vtt');
+    console.log('  2. Run "npm run transcript:init" to produce transcript.json in public/edit/');
+    console.log('     Or with corrected VTT: npm run transcript:init -- --merge-vtt public/transcribe/output/raw/transcript.raw.vtt');
   } catch (error) {
     console.error('❌ Error:', error.message);
     process.exit(1);
