@@ -267,7 +267,17 @@ async function runCameraSetup() {
   }
 
   try {
-    await spawnStep('npm', ['run', 'shorts:camera-setup', '--', '--source', sourceProfiles]);
+    // Use spawn directly with stdio: 'inherit' so the interactive prompt works
+    const { spawn } = await import('child_process');
+    await new Promise((resolve, reject) => {
+      const proc = spawn('npm', ['run', 'shorts:camera-setup', '--', '--source', sourceProfiles], {
+        stdio: 'inherit',
+        cwd,
+        shell: process.platform === 'win32',
+      });
+      proc.on('close', code => code === 0 ? resolve() : reject(new Error(`Camera setup exited ${code}`)));
+      proc.on('error', e => reject(e));
+    });
     console.log('  ✓ Portrait camera profiles created');
   } catch (err) {
     console.error(`  ✗ Camera setup failed: ${err.message}`);
