@@ -124,12 +124,13 @@ async function runPathA(fromLongform = false) {
   let docContent = await fs.readFile(docPath, 'utf-8');
 
   // Strip lines that shouldn't carry over or would conflict
+  // Match with optional leading whitespace (indented cues) and word boundaries
   docContent = docContent
     .split('\n')
-    .filter(line => !/^>\s*CAM\b/i.test(line))
-    .filter(line => !/^>\s*HOOK\b/i.test(line))
-    .filter(line => !/^>\s*START\b/i.test(line))  // Remove any existing START
-    .filter(line => !/^>\s*END\b/i.test(line))     // Remove any existing END
+    .filter(line => !/^\s*>\s*CAM\b/i.test(line))
+    .filter(line => !/^\s*>\s*HOOK\b/i.test(line))  // Remove all HOOK cues (with or without phrases/timing)
+    .filter(line => !/^\s*>\s*START\b/i.test(line))  // Remove any existing START
+    .filter(line => !/^\s*>\s*END\b/i.test(line))    // Remove any existing END
     .join('\n');
 
   await fs.writeFile(clipDocPath, docContent);
