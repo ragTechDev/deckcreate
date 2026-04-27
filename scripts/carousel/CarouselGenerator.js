@@ -18,8 +18,14 @@ class CarouselGenerator {
       await fs.ensureDir(this.outputDir);
     }
 
-    {
-      const { launch } = await import('puppeteer');
+    const { connect, launch } = await import('puppeteer');
+    const browserlessToken = process.env.BROWSERLESS_TOKEN;
+
+    if (browserlessToken) {
+      const wsEndpoint = `wss://production-sfo.browserless.io?token=${browserlessToken}`;
+      console.log('Connecting to Browserless.io...');
+      this.browser = await connect({ browserWSEndpoint: wsEndpoint });
+    } else {
       this.browser = await launch({
         headless: true,
         args: [
