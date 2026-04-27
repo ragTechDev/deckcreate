@@ -115,23 +115,25 @@ async function runPathA(fromLongform = false) {
   const idInput = (await askQuestion(`  Clip ID [${defaultId}]: `)).trim();
   const clipId = idInput || defaultId;
 
-  // 3. Copy full doc for editing
+  // 3. Copy full doc for editing (cleaned for short-form)
   console.log('\n  ── Prepare clip doc ──────────────────────────────────');
   const clipDocPath = path.join(cwd, 'public', 'shorts', clipId, 'transcript.doc.txt');
   await fs.ensureDir(path.dirname(clipDocPath));
 
-  // Read longform doc and strip CAM/HOOK/graphics cues
+  // Read longform doc and clean it for short-form editing
   let docContent = await fs.readFile(docPath, 'utf-8');
 
-  // Strip lines that shouldn't carry over
+  // Strip lines that shouldn't carry over or would conflict
   docContent = docContent
     .split('\n')
     .filter(line => !/^>\s*CAM\b/i.test(line))
     .filter(line => !/^>\s*HOOK\b/i.test(line))
+    .filter(line => !/^>\s*START\b/i.test(line))  // Remove any existing START
+    .filter(line => !/^>\s*END\b/i.test(line))     // Remove any existing END
     .join('\n');
 
   await fs.writeFile(clipDocPath, docContent);
-  console.log(`  ✓ Copied full doc to public/shorts/${clipId}/transcript.doc.txt`);
+  console.log(`  ✓ Copied cleaned doc to public/shorts/${clipId}/transcript.doc.txt`);
 
   // 4. Show instructions for defining clip range
   console.log('\n  ── Define clip range ────────────────────────────────');
@@ -145,10 +147,30 @@ async function runPathA(fromLongform = false) {
   // 5. Edit doc
   console.log('\n  ── Edit clip doc ─────────────────────────────────────');
   console.log('  Open the doc and:');
+  console.log('    - Add "> START" and "> END" to define the clip range');
   console.log('    - Mark a > HOOK segment for the hook/teaser');
   console.log('    - Adjust cuts with {curly braces}');
   console.log('    - Correct any text as needed');
-  await ask('  Press Enter when done editing...');
+
+  // Validate START/END markers are present before proceeding
+  let hasStartEnd = false;
+  while (!hasStartEnd) {
+    await ask('  Press Enter when done editing...');
+
+    const editedContent = await fs.readFile(clipDocPath, 'utf-8');
+    const hasStart = /^>\s*START\b/im.test(editedContent);
+    const hasEnd = /^>\s*END\b/im.test(editedContent);
+
+    if (hasStart && hasEnd) {
+      hasStartEnd = true;
+    } else {
+      console.log('\n  ⚠ Missing required markers:');
+      if (!hasStart) console.log('    - "> START" not found — add it before the first segment to include');
+      if (!hasEnd) console.log('    - "> END" not found — add it after the last segment to include');
+      console.log('  Please edit the doc and add the missing markers.\n');
+      openFile(clipDocPath);
+    }
+  }
 
   // 6. Merge doc
   console.log('\n  ── Merge clip doc ────────────────────────────────────');
