@@ -1,0 +1,508 @@
+#!/usr/bin/env node
+/**
+ * DeckCreate — Short-form clip wizard.
+ * Usage: npm run shorts:wizard
+ */
+
+import readline from 'readline';
+import fs from 'fs-extra';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { createHelpers } from './shared/wizard-helpers.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const cwd = path.join(__dirname, '..');
+
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+
+const {
+  ask, confirm, askYesNo, askQuestion,
+  spawnStep, runStep,
+  openFile,
+} = createHelpers(rl, cwd);
+
+// ── Detection logic ─────────────────────────────────────────────────────────
+
+async function detectExistingWork() {
+  const p = (...parts) => path.join(cwd, ...parts);
+
+  // Check for existing short clips
+  const shortsDir = p('public', 'shorts');
+  let shortClips = [];
+  if (await fs.pathExists(shortsDir)) {
+    const entries = await fs.readdir(shortsDir, { withFileTypes: true });
+    const shortDirs = entries.filter(e => e.isDirectory() && /^short-/.test(e.name));
+    shortClips = await Promise.all(shortDirs.map(async (dir) => {
+      const id = dir.name;
+      return {
+        id,
+        hasDoc: await fs.pathExists(p('public', 'shorts', id, 'transcript.doc.txt')),
+        hasMerged: await fs.pathExists(p('public', 'shorts', id, 'transcript.json')),
+        hasPreview: await fs.pathExists(p('public', 'shorts', id, 'preview-cut.mp4')),
+      };
+    }));
+  }
+
+  const hasCameraProfiles = await fs.pathExists(p('public', 'shorts', 'camera-profiles.json'));
+
+  // Check for Path B (dedicated portrait recording) progress
+  const hasShortTranscribe = await fs.pathExists(
+    p('public', 'shorts', 'transcribe', 'output', 'raw', 'transcript.raw.json')
+  );
+
+  // Check for Path A source (longform transcript)
+  const hasLongformTranscript = await fs.pathExists(p('public', 'edit', 'transcript.json'));
+
+  return {
+    shortClips,
+    hasCameraProfiles,
+    hasShortTranscribe,
+    hasLongformTranscript,
+  };
+}
+
+function getClipStatus(id) {
+  return {
+    hasDoc: fs.pathExistsSync(path.join(cwd, 'public', 'shorts', id, 'transcript.doc.txt')),
+    hasMerged: fs.pathExistsSync(path.join(cwd, 'public', 'shorts', id, 'transcript.json')),
+    hasPreview: fs.pathExistsSync(path.join(cwd, 'public', 'shorts', id, 'preview-cut.mp4')),
+    hasCamera: fs.pathExistsSync(path.join(cwd, 'public', 'shorts', 'camera-profiles.json')),
+  };
+}
+
+function formatDuration(seconds) {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+function parseTimeInput(input) {
+  const trimmed = input.trim();
+  // HH:MM:SS or MM:SS format
+  const timeMatch = trimmed.match(/^(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)$/);
+  if (timeMatch) {
+    const hours = parseInt(timeMatch[1] || '0');
+    const mins = parseInt(timeMatch[2]);
+    const secs = parseFloat(timeMatch[3]);
+    return hours * 3600 + mins * 60 + secs;
+  }
+  // Plain seconds
+  const num = parseFloat(trimmed);
+  if (!isNaN(num)) return num;
+  return null;
+}
+
+// ── Path A: Clip from longform ──────────────────────────────────────────────
+
+async function runPathA(fromLongform = false) {
+  // 1. Load longform transcript
+  const transcriptPath = path.join(cwd, 'public', 'edit', 'transcript.json');
+  const docPath = path.join(cwd, 'public', 'edit', 'transcript.doc.txt');
+
+  let transcript;
+  try {
+    transcript = await fs.readJson(transcriptPath);
+  } catch (err) {
+    console.error(`\n  ✗ Could not load transcript: ${err.message}`);
+    console.log('  Make sure the longform pipeline has run and produced public/edit/transcript.json');
+    process.exit(1);
+  }
+
+  const { meta, segments } = transcript;
+  const duration = meta.duration || (segments.length > 0 ? segments[segments.length - 1].end : 0);
+  const speakers = [...new Set(segments.map(s => s.speaker))];
+
+  console.log('\n  ── Longform recording ────────────────────────────────');
+  console.log(`  Title:    ${meta.title || '(untitled)'}`);
+  console.log(`  Duration: ${formatDuration(duration)}`);
+  console.log(`  Speakers: ${speakers.join(', ')}`);
+  console.log(`  Segments: ${segments.length}`);
+
+  // 2. Define clip range
+  console.log('\n  ── Define clip range ─────────────────────────────────');
+
+  let fromTime, toTime;
+  while (true) {
+    const fromInput = await askQuestion('  Clip start time (HH:MM:SS or seconds): ');
+    fromTime = parseTimeInput(fromInput);
+    if (fromTime === null || fromTime < 0 || fromTime >= duration) {
+      console.log('  Invalid time. Please try again.');
+      continue;
+    }
+
+    const toInput = await askQuestion('  Clip end time (HH:MM:SS or seconds): ');
+    toTime = parseTimeInput(toInput);
+    if (toTime === null || toTime <= fromTime || toTime > duration) {
+      console.log('  Invalid time (must be after start and within duration). Please try again.');
+      continue;
+    }
+
+    // Show context around boundaries
+    const fromIdx = segments.findIndex(s => s.start >= fromTime);
+    const toIdx = segments.findIndex(s => s.end >= toTime);
+
+    console.log('\n  Context around start:');
+    const startContext = segments.slice(Math.max(0, fromIdx - 2), fromIdx + 3);
+    startContext.forEach((s, i) => {
+      const relIdx = Math.max(0, fromIdx - 2) + i;
+      const marker = relIdx === fromIdx ? '>' : ' ';
+      console.log(`  ${marker} [${s.id}] ${formatDuration(s.start)} ${s.speaker}: ${s.text.slice(0, 50)}${s.text.length > 50 ? '...' : ''}`);
+    });
+
+    console.log('\n  Context around end:');
+    const endContext = segments.slice(Math.max(0, toIdx - 2), toIdx + 3);
+    endContext.forEach((s, i) => {
+      const relIdx = Math.max(0, toIdx - 2) + i;
+      const marker = relIdx === toIdx ? '>' : ' ';
+      console.log(`  ${marker} [${s.id}] ${formatDuration(s.end)} ${s.speaker}: ${s.text.slice(0, 50)}${s.text.length > 50 ? '...' : ''}`);
+    });
+
+    const happy = await askYesNo('\n  Happy with this range?', true);
+    if (happy) break;
+  }
+
+  // 3. Assign clip ID
+  const shortsDir = path.join(cwd, 'public', 'shorts');
+  await fs.ensureDir(shortsDir);
+
+  const existingIds = (await fs.readdir(shortsDir))
+    .filter(d => /^short-\d+$/.test(d))
+    .map(d => parseInt(d.replace('short-', '')));
+  const nextId = existingIds.length > 0 ? Math.max(...existingIds) + 1 : 1;
+  const defaultId = `short-${nextId}`;
+
+  const idInput = (await askQuestion(`  Clip ID [${defaultId}]: `)).trim();
+  const clipId = idInput || defaultId;
+
+  // 4. Carry-over graphics
+  const carryGraphics = await askYesNo('  Carry over graphic overlay cues from the longform doc?', false);
+
+  // 5. Extract doc
+  console.log('\n  ── Extract clip doc ─────────────────────────────────');
+  const extractArgs = [
+    'run', 'shorts:extract-doc', '--',
+    '--transcript', 'public/edit/transcript.json',
+    '--from', String(fromTime),
+    '--to', String(toTime),
+    '--id', clipId,
+    ...(carryGraphics ? ['--carry-graphics'] : []),
+  ];
+
+  try {
+    await spawnStep('npm', extractArgs);
+    console.log(`  ✓ Extracted to public/shorts/${clipId}/transcript.doc.txt`);
+  } catch (err) {
+    console.error(`  ✗ Extraction failed: ${err.message}`);
+    process.exit(1);
+  }
+
+  // Open for editing
+  const clipDocPath = path.join(cwd, 'public', 'shorts', clipId, 'transcript.doc.txt');
+  openFile(clipDocPath);
+
+  // 6. Edit doc
+  console.log('\n  ── Edit clip doc ─────────────────────────────────────');
+  console.log('  Open the doc and:');
+  console.log('    - Mark a > HOOK segment for the hook/teaser');
+  console.log('    - Adjust cuts with {curly braces}');
+  console.log('    - Correct any text as needed');
+  await ask('  Press Enter when done editing...');
+
+  // 7. Merge doc
+  console.log('\n  ── Merge clip doc ────────────────────────────────────');
+  const cutPauses = await askYesNo('  Auto-cut silences longer than 0.5 s?', false);
+
+  const mergeArgs = [
+    'run', 'shorts:merge-doc', '--',
+    '--doc', `public/shorts/${clipId}/transcript.doc.txt`,
+    '--parent-transcript', 'public/edit/transcript.json',
+    '--id', clipId,
+    ...(cutPauses ? ['--cut-pauses'] : []),
+  ];
+
+  try {
+    await spawnStep('npm', mergeArgs);
+    console.log(`  ✓ Merged to public/shorts/${clipId}/transcript.json`);
+  } catch (err) {
+    console.error(`  ✗ Merge failed: ${err.message}`);
+    process.exit(1);
+  }
+
+  // 8. Portrait camera setup
+  await runCameraSetup();
+
+  // 9. Cut preview (optional)
+  const doPreview = await askYesNo('\n  Generate portrait cut preview?', false);
+  if (doPreview) {
+    await runCutPreview(clipId);
+  }
+
+  // 10. Launch Remotion (optional)
+  const doRemotion = await askYesNo('\n  Launch Remotion studio with this short?', false);
+  if (doRemotion) {
+    console.log('\n  → Launching Remotion studio...');
+    console.log('  Select the "ShortFormClip" composition from the dropdown.');
+    await spawnStep('npm', ['run', 'remotion:studio']);
+  }
+
+  console.log('\n  ✓ Clip workflow complete!\n');
+}
+
+// ── Shared per-clip steps ───────────────────────────────────────────────────
+
+async function runCameraSetup() {
+  const cameraProfilesPath = path.join(cwd, 'public', 'shorts', 'camera-profiles.json');
+  const hasExisting = await fs.pathExists(cameraProfilesPath);
+
+  console.log('\n  ── Portrait camera setup ─────────────────────────────');
+
+  if (hasExisting) {
+    const redo = await askYesNo('  Using existing portrait camera profiles. Redo camera setup?', false);
+    if (!redo) {
+      console.log('  (Using existing camera profiles)');
+      return;
+    }
+  }
+
+  const sourceProfiles = path.join(cwd, 'public', 'camera', 'camera-profiles.json');
+  if (!(await fs.pathExists(sourceProfiles))) {
+    console.log('  ⚠ No landscape camera profiles found at public/camera/camera-profiles.json');
+    console.log('  Run the longform wizard camera setup first, or use Path B for a fresh portrait recording.');
+    return;
+  }
+
+  try {
+    await spawnStep('npm', ['run', 'shorts:camera-setup', '--', '--source', sourceProfiles]);
+    console.log('  ✓ Portrait camera profiles created');
+  } catch (err) {
+    console.error(`  ✗ Camera setup failed: ${err.message}`);
+  }
+}
+
+async function runCutPreview(clipId) {
+  console.log('\n  ── Generate cut preview ──────────────────────────────');
+  console.log('  (This would generate a portrait preview MP4)');
+  console.log(`  Output: public/shorts/${clipId}/preview-cut.mp4`);
+  // TODO: Implement cut preview for portrait mode
+  console.log('  ⚠ Cut preview for portrait mode not yet implemented');
+}
+
+// ── Existing clips menu ─────────────────────────────────────────────────────
+
+function getStatusSymbol(status) {
+  if (status.hasPreview) return '✓';
+  if (status.hasCamera) return '●';
+  if (status.hasMerged) return '◑';
+  if (status.hasDoc) return '○';
+  return '·';
+}
+
+async function showExistingClips(clips, sourceType) {
+  console.log('\n  Existing short-form clips:');
+  clips.forEach(clip => {
+    const status = getClipStatus(clip.id);
+    const symbol = getStatusSymbol(status);
+    const info = clip.id;
+    console.log(`    ${symbol}  ${info}`);
+  });
+
+  console.log('\n  Options:');
+  console.log('  1. Create a new clip' + (sourceType === 'longform' ? ' from the same source' : ''));
+  console.log('  2. Continue / redo an existing clip');
+  if (sourceType !== 'longform') {
+    console.log('  3. Start fresh (new recording entirely)');
+  }
+
+  const choice = (await ask('  > [1] ')).trim() || '1';
+
+  if (choice === '1') {
+    return { action: 'new' };
+  } else if (choice === '2') {
+    console.log('\n  Select clip to continue:');
+    clips.forEach((clip, i) => {
+      const status = getClipStatus(clip.id);
+      const symbol = getStatusSymbol(status);
+      console.log(`  ${i + 1}. ${symbol} ${clip.id}`);
+    });
+    const clipChoice = (await ask('  > ')).trim();
+    const idx = parseInt(clipChoice) - 1;
+    if (idx >= 0 && idx < clips.length) {
+      return { action: 'continue', clipId: clips[idx].id };
+    }
+    console.log('  Invalid choice');
+    return { action: 'menu' };
+  } else if (choice === '3' && sourceType !== 'longform') {
+    return { action: 'fresh' };
+  }
+
+  return { action: 'menu' };
+}
+
+async function runContinueClip(clipId) {
+  const status = getClipStatus(clipId);
+
+  console.log(`\n  ── Continue ${clipId} ────────────────────────────────`);
+
+  // Determine available redo steps based on current status
+  console.log('\n  Redo steps:');
+  let stepNum = 1;
+  const steps = [];
+
+  steps.push({ id: 'extract', label: 'Re-extract doc from longform', always: true });
+  console.log(`  ${stepNum++}. Re-extract doc from longform`);
+
+  steps.push({ id: 'edit', label: 'Re-open doc for editing', always: true });
+  console.log(`  ${stepNum++}. Re-open doc for editing`);
+
+  if (status.hasMerged) {
+    steps.push({ id: 'merge', label: 'Re-merge doc', always: false });
+    console.log(`  ${stepNum++}. Re-merge doc`);
+  }
+
+  steps.push({ id: 'camera', label: 'Redo portrait camera', always: true });
+  console.log(`  ${stepNum++}. Redo portrait camera (shared — affects all clips)`);
+
+  if (status.hasMerged) {
+    steps.push({ id: 'preview', label: 'Re-generate cut preview', always: false });
+    console.log(`  ${stepNum++}. Re-generate cut preview`);
+  }
+
+  steps.push({ id: 'remotion', label: 'Relaunch Remotion', always: true });
+  console.log(`  ${stepNum++}. Relaunch Remotion`);
+
+  const choice = (await ask('  > ')).trim();
+  const stepIdx = parseInt(choice) - 1;
+
+  if (stepIdx < 0 || stepIdx >= steps.length) {
+    console.log('  Invalid choice');
+    return;
+  }
+
+  const step = steps[stepIdx];
+
+  switch (step.id) {
+    case 'extract':
+      // Re-run Path A from the beginning for this clip
+      await runPathA();
+      break;
+    case 'edit':
+      const docPath = path.join(cwd, 'public', 'shorts', clipId, 'transcript.doc.txt');
+      openFile(docPath);
+      await ask('  Press Enter when done editing...');
+      break;
+    case 'merge':
+      const cutPauses = await askYesNo('  Auto-cut silences longer than 0.5 s?', false);
+      try {
+        await spawnStep('npm', [
+          'run', 'shorts:merge-doc', '--',
+          '--doc', `public/shorts/${clipId}/transcript.doc.txt`,
+          '--parent-transcript', 'public/edit/transcript.json',
+          '--id', clipId,
+          ...(cutPauses ? ['--cut-pauses'] : []),
+        ]);
+        console.log('  ✓ Merged successfully');
+      } catch (err) {
+        console.error(`  ✗ Merge failed: ${err.message}`);
+      }
+      break;
+    case 'camera':
+      await runCameraSetup();
+      break;
+    case 'preview':
+      await runCutPreview(clipId);
+      break;
+    case 'remotion':
+      console.log('\n  → Launching Remotion studio...');
+      console.log('  Select the "ShortFormClip" composition from the dropdown.');
+      await spawnStep('npm', ['run', 'remotion:studio']);
+      break;
+  }
+}
+
+// ── Main ─────────────────────────────────────────────────────────────────────
+
+async function main() {
+  const args = process.argv.slice(2);
+  const fromLongform = args.includes('--from-longform');
+
+  console.log('\n  DeckCreate — Short-form Clip Wizard');
+  console.log('  ───────────────────────────────────\n');
+
+  // Detect existing work
+  const existing = await detectExistingWork();
+
+  // If launched from longform wizard, jump straight to Path A
+  if (fromLongform) {
+    await runPathA(true);
+    rl.close();
+    return;
+  }
+
+  // Determine startup case
+  const hasShorts = existing.shortClips.length > 0;
+  const hasShortTranscribe = existing.hasShortTranscribe;
+
+  // Case 3: Dedicated recording in progress
+  if (hasShortTranscribe && !hasShorts) {
+    console.log('  Found dedicated portrait recording in progress.');
+    console.log('  (Path B resume not yet implemented — please continue manually)');
+    console.log('\n  Transcribed audio found at:');
+    console.log('    public/shorts/transcribe/output/raw/transcript.raw.json');
+    rl.close();
+    return;
+  }
+
+  // Case 2: Existing shorts — show list and options
+  if (hasShorts) {
+    const sourceType = existing.hasLongformTranscript ? 'longform' : 'dedicated';
+    const action = await showExistingClips(existing.shortClips, sourceType);
+
+    if (action.action === 'new') {
+      if (existing.hasLongformTranscript) {
+        const confirmNew = await askYesNo('  Create a new clip from the longform recording?', true);
+        if (confirmNew) {
+          await runPathA();
+        }
+      } else {
+        console.log('  ⚠ Creating new clips from dedicated recording not yet implemented');
+      }
+    } else if (action.action === 'continue') {
+      await runContinueClip(action.clipId);
+    } else if (action.action === 'fresh') {
+      console.log('  Starting fresh (Path B not yet implemented)');
+    }
+
+    rl.close();
+    return;
+  }
+
+  // Case 1: No existing shorts
+  console.log('  No existing short-form clips found.');
+
+  if (existing.hasLongformTranscript) {
+    const useLongform = await askYesNo('  Found longform transcript. Clip a short from it?', true);
+    if (useLongform) {
+      await runPathA();
+      rl.close();
+      return;
+    }
+
+    const startFresh = await askYesNo('  Start a new dedicated portrait recording?', false);
+    if (startFresh) {
+      console.log('  (Path B — dedicated portrait recording — not yet implemented)');
+      console.log('  Place portrait video/audio files in public/shorts/input/ and run the sync/transcribe pipeline manually.');
+    }
+  } else {
+    console.log('  No longform transcript found.');
+    console.log('  (Path B — dedicated portrait recording — not yet implemented)');
+    console.log('  For now, please run the longform wizard first to create a recording,');
+    console.log('  or manually place portrait files in public/shorts/input/');
+  }
+
+  rl.close();
+}
+
+main().catch(err => {
+  console.error('Error:', err.message);
+  process.exit(1);
+});
