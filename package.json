@@ -26,7 +26,7 @@
     "shorts:camera-setup:docker": "docker compose run --rm --service-ports setup-camera npm run shorts:camera-setup",
     "shorts:merge-doc": "node scripts/shorts/merge-short-doc.js",
     "shorts:wizard": "node scripts/shorts-wizard.js",
-    "shorts:wizard:docker": "docker compose run --rm --service-ports video-wizard node scripts/shorts-wizard.js",
+    "shorts:wizard:docker": "docker compose run --rm --service-ports wizard npm run shorts:wizard",
     "review:hooks": "node scripts/hook-qa.js",
     "review:hooks:docker": "docker compose run --rm hook-qa",
     "speakers:assign": "node scripts/diarize/assign-speakers.js",
@@ -54,7 +54,7 @@
     "transcript:merge:cut-pauses": "node scripts/edit-transcript.js --merge-doc public/edit/transcript.doc.txt --auto-cut-pauses 0.5",
     "util:vtt-to-srt": "node scripts/shared/vtt-to-srt.js",
     "video:wizard": "node scripts/wizard.js",
-    "video:wizard:docker": "docker compose run --rm --service-ports video-wizard"
+    "video:wizard:docker": "docker compose run --rm --service-ports wizard"
   },
   "dependencies": {
     "@mantine/carousel": "^8.3.15",
