@@ -128,7 +128,7 @@ async function runPathA(fromLongform = false) {
   docContent = docContent
     .split('\n')
     .filter(line => !/^\s*>\s*CAM\b/i.test(line))
-    .filter(line => !/^\s*>\s*HOOK\b/i.test(line))  // Remove all HOOK cues (with or without phrases/timing)
+    // Note: HOOK cues are preserved for shorts — user can add them for teasers
     .filter(line => !/^\s*>\s*START\b/i.test(line))  // Remove any existing START
     .filter(line => !/^\s*>\s*END\b/i.test(line))    // Remove any existing END
     .join('\n');
@@ -137,21 +137,51 @@ async function runPathA(fromLongform = false) {
   console.log(`  ✓ Copied cleaned doc to public/shorts/${clipId}/transcript.doc.txt`);
 
   // 4. Show instructions for defining clip range
-  console.log('\n  ── Define clip range ────────────────────────────────');
-  console.log('  Edit the doc to define your clip range:');
-  console.log('    1. Add "> START" on its own line BEFORE the first segment to include');
-  console.log('    2. Add "> END" on its own line AFTER the last segment to include');
-  console.log('  Everything outside START..END will be excluded from the short.');
-  console.log('  You can also mark hooks with "> HOOK" and add cuts with {curly braces}.');
+  console.log('\n  ── Short-form editing guide ─────────────────────────');
+  console.log('  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('');
+  console.log('  ▶ DEFINE CLIP RANGE with START/END:');
+  console.log('');
+  console.log('    Basic (whole segments):');
+  console.log('      > START');
+  console.log('      [5] First segment to include...');
+  console.log('      [12] Last segment to include...');
+  console.log('      > END');
+  console.log('');
+  console.log('    Precise (specific phrase within a segment):');
+  console.log('      > START at="exact phrase"');
+  console.log('      [5] Some text {before} the exact phrase you want...');
+  console.log('      > END at="ending phrase"');
+  console.log('');
+  console.log('  ▶ ADD A HOOK (teaser that plays before main clip):');
+  console.log('');
+  console.log('    Entire segment as hook:');
+  console.log('      [8] This whole segment becomes the hook...');
+  console.log('      > HOOK');
+  console.log('');
+  console.log('    Specific phrase as hook:');
+  console.log('      [8] This segment has a {great soundbite} here...');
+  console.log('      > HOOK "great soundbite"');
+  console.log('');
+  console.log('    With explicit timing (optional):');
+  console.log('      > HOOK "great soundbite" 45.2-48.5');
+  console.log('');
+  console.log('  ▶ WORD-LEVEL CUTS:');
+  console.log('      [5] Remove these {um} {you know} filler words');
+  console.log('');
+  console.log('  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   openFile(clipDocPath);
 
   // 5. Edit doc
   console.log('\n  ── Edit clip doc ─────────────────────────────────────');
-  console.log('  Open the doc and:');
-  console.log('    - Add "> START" and "> END" to define the clip range');
-  console.log('    - Mark a > HOOK segment for the hook/teaser');
-  console.log('    - Adjust cuts with {curly braces}');
-  console.log('    - Correct any text as needed');
+  console.log('  The doc is open. Now you:');
+  console.log('    1. Add "> START" before the first segment (or phrase) to include');
+  console.log('    2. Add "> END" after the last segment (or phrase) to include');
+  console.log('    3. Optionally mark "> HOOK" segments for the teaser');
+  console.log('    4. Add {cuts} and correct text as needed');
+  console.log('');
+  console.log('  Remember: Everything OUTSIDE > START .. > END is excluded.');
+  console.log('  The hook(s) play first, then the main clip from START to END.');
 
   // Validate START/END markers are present before proceeding
   let hasStartEnd = false;
