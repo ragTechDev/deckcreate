@@ -21,6 +21,7 @@
     "remotion:studio": "npx remotion studio",
     "render:hook-intro": "node scripts/render-hook-intro.js",
     "review:guest": "node scripts/guest-review.js",
+    "shorts:extract-doc": "node scripts/shorts/extract-short-doc.js",
     "review:hooks": "node scripts/hook-qa.js",
     "review:hooks:docker": "docker compose run --rm hook-qa",
     "speakers:assign": "node scripts/diarize/assign-speakers.js",
