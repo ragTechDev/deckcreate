@@ -94,7 +94,9 @@
     "@img/sharp-libvips-linux-x64": "1.0.4",
     "@img/sharp-linux-x64": "0.33.5",
     "@tailwindcss/oxide-linux-x64-gnu": "4.1.18",
-    "lightningcss-linux-x64-gnu": "1.30.2"
+    "lightningcss-linux-x64-gnu": "1.30.2",
+    "@tailwindcss/oxide-linux-arm64-gnu": "4.1.18",
+    "lightningcss-linux-arm64-gnu": "1.30.2"
   },
   "devDependencies": {
     "@babel/core": "^7.29.0",
