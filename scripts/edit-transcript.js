@@ -593,12 +593,13 @@ function buildInstructionsBlock() {
     '                    bg="public/assets/background.jpg"',
     '                    middlespeaker="GuestName"',
     '                    title="Custom **highlighted** title"',
-    '                    layout=left|right|center',
+    '                    extendedTitle="Extended title for portrait thumbnail"',
+    '                    episodeNumber="001"',
     '                  bg= image path(s) — internal (relative to /public) or external URL (comma-separated)',
     '                  middlespeaker= speaker name(s) to center (comma-separated)',
     '                  title= custom thumbnail title; use **text** for accent highlight',
-    '                  layout= forces left/right/center variant (default: auto from title)',
-    '',
+    '                  extendedTitle= longer title shown above thumbnail in portrait mode',
+    '                  episodeNumber= episode number for portrait thumbnail (renders as white pill)',
     '  SAVE EDITS       npm run merge-doc',
     '',
     '════════════════════════════════════════════════════════════════',
@@ -619,11 +620,13 @@ function buildThumbnailSection(transcript) {
   const bgValue = thumb?.bg?.length ? thumb.bg.join(',') : 'public/assets/background.jpg';
   const speakerValue = thumb?.middleSpeakers?.length ? thumb.middleSpeakers.join(',') : 'GuestName';
   const titleValue = thumb?.title ?? 'Custom **highlighted** title';
-  const layoutValue = thumb?.layoutVariant ?? 'left|right|center';
+  const extendedTitleValue = thumb?.extendedTitle ?? 'Extended title for portrait thumbnail';
+  const episodeNumberValue = thumb?.episodeNumber ?? '001';
   lines.push(`bg="${bgValue}"`);
   lines.push(`middlespeaker="${speakerValue}"`);
   lines.push(`title="${titleValue}"`);
-  lines.push(`layout=${layoutValue}`);
+  lines.push(`extendedTitle="${extendedTitleValue}"`);
+  lines.push(`episodeNumber="${episodeNumberValue}"`);
   return lines.join('\n') + '\n\n---\n\n';
 }
 
@@ -693,6 +696,34 @@ function parseKv(str) {
 }
 
 /**
+ * Resolve an `at` value to a timestamp.
+ * `at` can be:
+ *   - A numeric timestamp (e.g., "125.5")
+ *   - A phrase to find in tokens (e.g., "key insight")
+ *   - A phrase with occurrence (e.g., "word:2" for 2nd occurrence)
+ * Falls back to `defaultTime` if phrase not found or parse fails.
+ */
+function resolveAtValue(raw, tokens, defaultTime) {
+  const colonIdx = raw.lastIndexOf(':');
+  let phrase, occurrence;
+  if (colonIdx > 0 && !isNaN(raw.slice(colonIdx + 1))) {
+    phrase = raw.slice(0, colonIdx);
+    occurrence = parseInt(raw.slice(colonIdx + 1)) - 1;
+  } else {
+    phrase = raw;
+    occurrence = 0;
+  }
+  if (occurrence === 0) {
+    const tokenIdx = resolvePhraseToFirstTokenIndex(phrase, tokens);
+    return tokenIdx !== -1 ? tokens[tokenIdx].t_dtw : (parseFloat(raw) || defaultTime);
+  } else {
+    const matches = tokens.filter(t => normalize(t.text) === phrase.toLowerCase());
+    const token = matches[occurrence] ?? null;
+    return token ? token.t_dtw : (parseFloat(raw) || defaultTime);
+  }
+}
+
+/**
  * Parse the text after "> CAM " into a CameraCue.
  * Format: "SpeakerName" | "wide"  [at="word"]
  * `segStart` is used as the default `at` when no at= attribute is present.
@@ -705,24 +736,7 @@ function parseCameraLine(line, tokens, segStart) {
 
   let at = segStart;
   if (kv.at !== undefined) {
-    const raw = kv.at;
-    const colonIdx = raw.lastIndexOf(':');
-    let phrase, occurrence;
-    if (colonIdx > 0 && !isNaN(raw.slice(colonIdx + 1))) {
-      phrase = raw.slice(0, colonIdx);
-      occurrence = parseInt(raw.slice(colonIdx + 1)) - 1;
-    } else {
-      phrase = raw;
-      occurrence = 0;
-    }
-    if (occurrence === 0) {
-      const tokenIdx = resolvePhraseToFirstTokenIndex(phrase, tokens);
-      at = tokenIdx !== -1 ? tokens[tokenIdx].t_dtw : (parseFloat(raw) || segStart);
-    } else {
-      const matches = tokens.filter(t => normalize(t.text) === phrase.toLowerCase());
-      const token = matches[occurrence] ?? null;
-      at = token ? token.t_dtw : (parseFloat(raw) || segStart);
-    }
+    at = resolveAtValue(kv.at, tokens, segStart);
   }
 
   const shot = target.toLowerCase() === 'wide' ? 'wide' : 'closeup';
@@ -1063,6 +1077,8 @@ function parseThumbnailFromDoc(docContent) {
       thumb.middleSpeakers = thumb.middleSpeakers ? [...thumb.middleSpeakers, ...newSpeakers] : newSpeakers;
     }
     if (kv.title) thumb.title = kv.title;
+    if (kv.extendedTitle) thumb.extendedTitle = kv.extendedTitle;
+    if (kv.episodeNumber) thumb.episodeNumber = kv.episodeNumber;
     if (kv.layout) thumb.layoutVariant = kv.layout;
   }
   return Object.keys(thumb).length ? thumb : null;
