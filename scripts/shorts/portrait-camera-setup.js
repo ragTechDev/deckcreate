@@ -86,12 +86,32 @@ async function openGuiAndWait(portraitProfiles) {
   const cameraUrl = 'http://127.0.0.1:3000/camera';
   const ready = await waitForHttp(cameraUrl, 90000, 700);
 
+  console.log('\n  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('  📷 Portrait Camera Setup — Action Required');
+  console.log('  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('');
+
   if (ready) {
-    console.log('\n  → Open http://localhost:3000/camera in your browser');
-    console.log('  Adjust portrait crop positions, then click Save profiles.');
+    console.log('  ✓ Camera server is ready');
   } else {
-    console.log('\n  ⚠ Camera server may not be ready — open http://localhost:3000/camera manually');
+    console.log('  ⏳ Camera server is starting...');
   }
+
+  console.log('');
+  console.log('  STEP 1: Open the camera editor in your browser');
+  console.log('          → http://localhost:3000/camera');
+  console.log('');
+  console.log('  STEP 2: For each speaker, adjust the portrait crop');
+  console.log('          - The yellow box shows the closeup framing');
+  console.log('          - Drag the red dot to center the speaker face');
+  console.log('          - Use the Angle tabs if you have multiple cameras');
+  console.log('');
+  console.log('  STEP 3: Click "Save profiles" when satisfied');
+  console.log('          (This writes to public/shorts/camera-profiles.json)');
+  console.log('');
+  console.log('  STEP 4: Return here and press Enter to continue');
+  console.log('');
+  console.log('  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
   openFile('http://localhost:3000/camera');
 
