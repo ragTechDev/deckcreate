@@ -25,6 +25,7 @@
     "shorts:camera-setup": "node scripts/shorts/portrait-camera-setup.js",
     "shorts:camera-setup:docker": "docker compose run --rm --service-ports setup-camera npm run shorts:camera-setup",
     "shorts:merge-doc": "node scripts/shorts/merge-short-doc.js",
+    "shorts:render": "node scripts/shorts/render-short.js",
     "shorts:wizard": "node scripts/shorts-wizard.js",
     "shorts:wizard:docker": "docker compose run --rm --service-ports wizard npm run shorts:wizard",
     "review:hooks": "node scripts/hook-qa.js",
