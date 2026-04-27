@@ -64,6 +64,130 @@ async function main() {
   // mergeDocIntoTranscript handles > START / > END and sets meta.videoStart / videoEnd
   let transcript = mergeDocIntoTranscript(baseTranscript, docContent);
 
+  // Clear all existing hook markers - shorts define their own hooks fresh
+  transcript = {
+    ...transcript,
+    segments: transcript.segments.map(s => ({ ...s, hook: false, hookPhrase: undefined, hookFrom: undefined, hookTo: undefined, hookTitle: undefined })),
+  };
+
+  // Process > HOOK markers in the doc - mark corresponding segments as hooks
+  // Only processes hooks between > START and > END cues
+  // Syntax: > HOOK                           (entire segment)
+  //         > HOOK "phrase"                  (specific phrase within segment)
+  //         > HOOK "phrase" title="My Title" (with title for first hook)
+  const docLines = docContent.split('\n');
+  let pendingHookSegId = null;
+  let firstHookTitle = null;
+  let insideClipRange = false;
+
+  for (const line of docLines) {
+    const trimmed = line.trim();
+
+    // Track START/END boundaries
+    if (/^>\s*START\b/i.test(trimmed)) {
+      insideClipRange = true;
+      continue;
+    }
+    if (/^>\s*END\b/i.test(trimmed)) {
+      insideClipRange = false;
+      continue;
+    }
+
+    // Check for segment line
+    const segMatch = trimmed.match(/^\[(\d+)\]/);
+    if (segMatch) {
+      pendingHookSegId = parseInt(segMatch[1], 10);
+    }
+
+    // Match: > HOOK, optionally "phrase", optionally title="..."
+    // Only process if inside START/END range
+    const hookMatch = trimmed.match(/^>\s*HOOK\b(?:\s+"([^"]+)")?(?:\s+title="([^"]+)")?/i);
+    if (hookMatch && pendingHookSegId !== null && insideClipRange) {
+      const phrase = hookMatch[1]; // undefined if no phrase quoted
+      const title = hookMatch[2];    // undefined if no title specified
+
+      // Store first hook title for video title display
+      if (title && !firstHookTitle) {
+        firstHookTitle = title;
+      }
+
+      transcript.segments = transcript.segments.map(s => {
+        if (s.id !== pendingHookSegId) return s;
+
+        if (phrase) {
+          // Phrase matching - join tokens and search (handles multi-token words like "medi"+"ocr"+"ity")
+          const tokenTexts = s.tokens.map(t => t.text);
+          const searchPhrase = phrase.toLowerCase().trim();
+
+          // Build search text by joining all tokens
+          const fullText = tokenTexts.join('').toLowerCase();
+
+          // Find phrase position
+          const phraseIndex = fullText.indexOf(searchPhrase);
+
+          if (phraseIndex === -1) {
+            console.log(`  Warning: phrase "${phrase}" not found in segment [${s.id}]`);
+            return { ...s, hook: true, hookTitle: title };
+          }
+
+          // Map character position back to token indices
+          // Use ACTUAL token text lengths (not trimmed) to match phraseIndex
+          let charPos = 0;
+          let matchStart = -1;
+          let matchEnd = -1;
+
+          for (let i = 0; i < tokenTexts.length; i++) {
+            const tokenLen = tokenTexts[i].length;
+            const tokenStart = charPos;
+            const tokenEnd = charPos + tokenLen;
+
+            // Find first token that contains phrase start
+            if (matchStart === -1 && tokenEnd > phraseIndex) {
+              matchStart = i;
+            }
+
+            // Find last token that contains phrase end
+            if (matchStart !== -1 && tokenStart < phraseIndex + searchPhrase.length) {
+              matchEnd = i;
+            }
+
+            charPos = tokenEnd;
+          }
+
+          if (matchStart === -1 || matchEnd === -1) {
+            console.log(`  Warning: phrase "${phrase}" not found in segment [${s.id}]`);
+            return { ...s, hook: true, hookTitle: title };
+          }
+
+          // Calculate timings from matched tokens
+          const hookFrom = s.tokens[matchStart].t_dtw;
+          const lastToken = s.tokens[matchEnd];
+          const hookTo = lastToken.t_end || lastToken.t_dtw + 0.4;
+
+          console.log(`  Marked segment [${s.id}] as hook with phrase "${phrase}" (${hookFrom.toFixed(2)}s - ${hookTo.toFixed(2)}s)`);
+          return {
+            ...s,
+            hook: true,
+            hookPhrase: phrase,
+            hookFrom,
+            hookTo,
+            hookTitle: title,
+          };
+        }
+
+        // No phrase specified - use entire segment
+        console.log(`  Marked segment [${s.id}] as hook (full segment)`);
+        return { ...s, hook: true, hookTitle: title };
+      });
+    }
+  }
+
+  // Store first hook title in transcript meta for easy access
+  if (firstHookTitle) {
+    transcript.meta.hookTitle = firstHookTitle;
+    console.log(`  First hook title: "${firstHookTitle}"`);
+  }
+
   if (args.cutPauses) {
     transcript = autoCutPauses(transcript, 0.5);
   }

@@ -588,6 +588,11 @@ function buildInstructionsBlock() {
     '                    [12] last segment you want...',
     '                    > END',
     '                  Anything outside these markers is excluded.',
+    '                  Add a phrase for exact trim timing (searches current segment):',
+    '                    [5] we need to talk about...',
+    '                    > START "we need"',
+    '                    [12] ...that is all for today.',
+    '                    > END "for today"',
     '',
     '  THUMBNAIL       Edit # THUMBNAIL section frontmatter to override thumbnail:',
     '                    bg="public/assets/background.jpg"',
@@ -1201,13 +1206,41 @@ function mergeDocIntoTranscript(transcript, docContent) {
       continue;
     }
 
-    // Special trim markers: > START / > END
-    if (trimmed === '> START') {
-      nextSegIsVideoStart = true;
+    // Special trim markers: > START / > END (optionally with phrase for exact trim)
+    const startMatch = trimmed.match(/^>\s*START(?:\s+"([^"]+)")?$/);
+    const endMatch   = trimmed.match(/^>\s*END(?:\s+"([^"]+)")?$/);
+    if (startMatch) {
+      const phrase = startMatch[1];
+      if (phrase && pendingSeg) {
+        // Find exact time of phrase start within current segment
+        const range = resolvePhraseToTimeRange(phrase, pendingSeg.tokens, pendingSeg.end);
+        if (range) {
+          videoStart = range.from;
+          console.log(`  START phrase "${phrase}" → ${videoStart.toFixed(3)}s`);
+        } else {
+          console.warn(`  ⚠ START phrase not found: "${phrase}"`);
+          nextSegIsVideoStart = true; // fallback to segment start
+        }
+      } else {
+        nextSegIsVideoStart = true;
+      }
       continue;
     }
-    if (trimmed === '> END') {
-      if (pendingSeg) videoEnd = pendingSeg.end;
+    if (endMatch) {
+      const phrase = endMatch[1];
+      if (phrase && pendingSeg) {
+        // Find exact time of phrase end within current segment
+        const range = resolvePhraseToTimeRange(phrase, pendingSeg.tokens, pendingSeg.end);
+        if (range) {
+          videoEnd = range.to;
+          console.log(`  END phrase "${phrase}" → ${videoEnd.toFixed(3)}s`);
+        } else {
+          console.warn(`  ⚠ END phrase not found: "${phrase}"`);
+          videoEnd = pendingSeg.end; // fallback to segment end
+        }
+      } else if (pendingSeg) {
+        videoEnd = pendingSeg.end;
+      }
       continue;
     }
 

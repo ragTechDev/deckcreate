@@ -10,7 +10,7 @@ import { getEffectiveDuration } from './SegmentPlayer';
 // ── Layout constants for 1080 × 1920 ──────────────────────────────────────────
 
 const CAPTION_TOP       = 1300;
-const CAPTION_FONT_SIZE = 120;
+const CAPTION_FONT_SIZE = 60;
 
 // ── Timing constants (must match HookOverlay / SegmentPlayer) ──────────────────
 
@@ -156,7 +156,7 @@ function buildAllTimings(
 
     const captions = buildCaptions(seg.tokens, sourceStart, sourceEnd, isBoundedHook);
     const dur = Math.max(1, Math.ceil(sourceEnd * fps) - Math.floor(sourceStart * fps));
-    const { pages } = createTikTokStyleCaptions({ captions, combineTokensWithinMilliseconds: 1200 });
+    const { pages } = createTikTokStyleCaptions({ captions, combineTokensWithinMilliseconds: 800 });
     timings.push({ outputStartFrame: cum, outputEndFrame: cum + dur, sourceStart, sourceEnd, pages });
     cum += dur;
   }
@@ -174,15 +174,37 @@ function buildAllTimings(
     if (durationFrames <= 0) continue;
 
     const captions = buildCaptions(seg.tokens, sourceStart, sourceEnd, false);
-    const { pages } = createTikTokStyleCaptions({ captions, combineTokensWithinMilliseconds: 1200 });
+    const { pages } = createTikTokStyleCaptions({ captions, combineTokensWithinMilliseconds: 800 });
     timings.push({ outputStartFrame: cum, outputEndFrame: cum + durationFrames, sourceStart, sourceEnd, pages });
     cum += durationFrames;
+  }
+
+  // ── Hook segments in main section ─────────────────────────────────────────────
+  // buildMainSubClips() is range-based and does NOT exclude hook segment source ranges,
+  // so hook content plays in the main section video. Add caption timings for the full
+  // source range of each hook segment so the section-based lookup finds them.
+  // These are appended last so hook-section timings (added above) take precedence
+  // for overlapping source times via Array.find's first-match behaviour.
+  for (const seg of hookSegments) {
+    if (seg.cut) continue;
+    if (videoStart !== undefined && seg.end <= videoStart) continue;
+    if (videoEnd   !== undefined && seg.start >= videoEnd) continue;
+
+    const sourceStart = videoStart !== undefined ? Math.max(seg.start, videoStart) : seg.start;
+    const sourceEnd   = videoEnd   !== undefined ? Math.min(seg.end,   videoEnd)   : seg.end;
+
+    const captions = buildCaptions(seg.tokens, sourceStart, sourceEnd, false);
+    const { pages } = createTikTokStyleCaptions({ captions, combineTokensWithinMilliseconds: 800 });
+    // outputStartFrame/outputEndFrame unused in section-based path — set to 0
+    timings.push({ outputStartFrame: 0, outputEndFrame: 0, sourceStart, sourceEnd, pages });
   }
 
   return timings;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
+
+type Section = { trimBefore: number; trimAfter: number };
 
 type Props = {
   hookSegments?: Segment[];
@@ -192,6 +214,9 @@ type Props = {
   videoEnd?: number;
   totalHookFrames?: number;
   brand: Brand;
+  /** Pass these from buildSections() to ensure captions sync exactly with video jump-cuts */
+  hookSections?: Section[];
+  mainSections?: Section[];
 };
 
 export const CaptionOverlay: React.FC<Props> = ({
@@ -202,6 +227,8 @@ export const CaptionOverlay: React.FC<Props> = ({
   videoEnd: videoEndProp,
   totalHookFrames: totalHookFramesProp,
   brand,
+  hookSections: hookSectionsProp,
+  mainSections: mainSectionsProp,
 }) => {
   // Support both old interface (hookSegments/mainSegments) and new interface (segments + totalHookFrames)
   const hookSegments = hookSegmentsProp ?? segments?.filter(s => s.hook && !s.cut) ?? [];
@@ -211,32 +238,59 @@ export const CaptionOverlay: React.FC<Props> = ({
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
+  // Use provided sections if available (guarantees sync with video), otherwise build our own
+  const useSections = hookSectionsProp !== undefined && mainSectionsProp !== undefined;
+
   const timings = useMemo(
     () => buildAllTimings(hookSegments, mainSegments, fps, videoStart, videoEnd),
     [hookSegments, mainSegments, fps, videoStart, videoEnd],
   );
 
-  const active = useMemo(
-    () => timings.find(t => frame >= t.outputStartFrame && frame < t.outputEndFrame) ?? null,
-    [timings, frame],
-  );
+  // Map frame to source time using sections for accurate jump-cut sync
+  const { active, sourceTime, currentMs } = useMemo(() => {
+    if (!useSections) {
+      // Legacy path: use calculated timings
+      const t = timings.find(t => frame >= t.outputStartFrame && frame < t.outputEndFrame) ?? null;
+      if (!t) return { active: null, sourceTime: 0, currentMs: 0 };
+      const localFrame = frame - t.outputStartFrame;
+      const st = t.sourceStart + localFrame / fps;
+      return { active: t, sourceTime: st, currentMs: st * 1000 };
+    }
+
+    // Section-based path for accurate sync with video player
+    const allSections = [
+      ...(hookSectionsProp ?? []).map(s => ({ ...s, isHook: true })),
+      ...(mainSectionsProp ?? []).map(s => ({ ...s, isHook: false })),
+    ];
+
+    let cumFrames = 0;
+    for (const sec of allSections) {
+      const secDur = sec.trimAfter - sec.trimBefore;
+      if (frame >= cumFrames && frame < cumFrames + secDur) {
+        const frameInSec = frame - cumFrames;
+        const sourceFrame = sec.trimBefore + frameInSec;
+        const st = sourceFrame / fps;
+        // Find matching timing for captions
+        const t = timings.find(t => st >= t.sourceStart && st < t.sourceEnd) ?? null;
+        return { active: t, sourceTime: st, currentMs: st * 1000 };
+      }
+      cumFrames += secDur;
+    }
+    return { active: null, sourceTime: 0, currentMs: 0 };
+  }, [timings, frame, fps, hookSectionsProp, mainSectionsProp, useSections]);
 
   if (!active) return null;
 
-  const localFrame  = frame - active.outputStartFrame;
-  const sourceTime  = active.sourceStart + localFrame / fps;
-  const currentMs   = sourceTime * 1000;
-
-  const activePage = active.pages.findLast(p => currentMs >= p.startMs) ?? null;
+  // Find the active page (caption line) based on current time
+  const activePageIndex = active.pages.findIndex(p => currentMs < p.startMs) - 1;
+  const activePage = activePageIndex >= 0 
+    ? active.pages[activePageIndex] 
+    : active.pages.findLast(p => currentMs >= p.startMs) ?? null;
+  
   if (!activePage) return null;
 
-  const pageStartMs    = activePage.startMs;
-  const pageStartFrame = active.outputStartFrame + Math.round((pageStartMs / 1000 - active.sourceStart) * fps);
-  const framesIntoPage = frame - pageStartFrame;
-  const pageOpacity    = interpolate(framesIntoPage, [0, 6], [0, 1], { extrapolateRight: 'clamp' });
-
   const { typography, colors } = brand;
-
+  
   return (
     <AbsoluteFill style={{ pointerEvents: 'none', zIndex: 101 }}>
       <div style={{
@@ -250,11 +304,10 @@ export const CaptionOverlay: React.FC<Props> = ({
         fontFamily: typography.fontFamily,
         fontWeight: typography.weights.black,
         fontSize:   CAPTION_FONT_SIZE,
-        lineHeight: 1.25,
+        lineHeight: 1.2,
         color:      colors.text.primary,
-        textShadow: '0 3px 20px rgba(0,0,0,0.95), 0 0 6px rgba(0,0,0,0.8)',
-        opacity:    pageOpacity,
-        whiteSpace: 'pre-wrap',
+        textShadow: '0 2px 10px rgba(0,0,0,0.9), 0 0 4px rgba(0,0,0,0.8)',
+        whiteSpace: 'nowrap',
       }}>
         {activePage.text.trim()}
       </div>

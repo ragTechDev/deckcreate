@@ -102,10 +102,9 @@ async function main() {
   // endLineIdx shifts by 1 due to the START insertion; insert END after that
   out.splice(endLineIdx + 2, 0, '> END');
 
-  // Filter unwanted cue lines
+  // Filter unwanted cue lines (keep HOOK markers for short-form)
   const filtered = out.filter(line => {
     if (/^>\s*CAM\b/i.test(line)) return false;
-    if (/^>\s*HOOK\b/i.test(line)) return false;
     if (!args.carryGraphics && GRAPHIC_RE.test(line)) return false;
     return true;
   });

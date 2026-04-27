@@ -26,12 +26,12 @@ const {
 async function detectExistingWork() {
   const p = (...parts) => path.join(cwd, ...parts);
 
-  // Check for existing short clips
+  // Check for existing short clips (any directory with transcript files)
   const shortsDir = p('public', 'shorts');
   let shortClips = [];
   if (await fs.pathExists(shortsDir)) {
     const entries = await fs.readdir(shortsDir, { withFileTypes: true });
-    const shortDirs = entries.filter(e => e.isDirectory() && /^short-/.test(e.name));
+    const shortDirs = entries.filter(e => e.isDirectory());
     shortClips = await Promise.all(shortDirs.map(async (dir) => {
       const id = dir.name;
       return {
@@ -41,6 +41,8 @@ async function detectExistingWork() {
         hasPreview: await fs.pathExists(p('public', 'shorts', id, 'preview-cut.mp4')),
       };
     }));
+    // Only include dirs that actually have clip content
+    shortClips = shortClips.filter(c => c.hasDoc || c.hasMerged);
   }
 
   const hasCameraProfiles = await fs.pathExists(p('public', 'shorts', 'camera-profiles.json'));

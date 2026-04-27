@@ -1,13 +1,14 @@
 import React from 'react';
-import {Composition} from 'remotion';
+import {Composition, getInputProps} from 'remotion';
 import {MyComposition, calculateMetadata} from './Composition';
 import { ShortFormClip, calculateShortMetadata } from './ShortFormClip';
-import { PodcastIntroComposition, INTRO_DURATION_FRAMES } from './components/PodcastIntro';
-import { PodcastOutroComposition, OUTRO_DURATION_FRAMES } from './components/PodcastOutro';
 import { OverlayGalleryComposition, GALLERY_TOTAL_FRAMES } from './components/OverlayGallery';
-import { PodcastThumbnailComposition } from './components/PodcastThumbnail';
 
 export const RemotionRoot: React.FC = () => {
+  // Support dynamic short selection via URL query parameter: ?shortId=mediocrity
+  const inputProps = getInputProps();
+  const shortId = (inputProps.shortId as string) || 'mediocrity';
+
   return (
     <>
         <Composition
@@ -33,29 +34,7 @@ export const RemotionRoot: React.FC = () => {
         width={1920}
         height={1080}
         />
-        <Composition
-        id="PodcastOutro"
-        component={PodcastOutroComposition}
-        durationInFrames={OUTRO_DURATION_FRAMES}
-        fps={60}
-        width={1920}
-        height={1080}
-        />
-        <Composition
-        id="PodcastThumbnail"
-        component={PodcastThumbnailComposition}
-        durationInFrames={1}
-        fps={60}
-        width={1280}
-        height={720}
-        defaultProps={{
-            transcriptSrc: 'edit/transcript.json',
-            brandSrc: 'brand.json',
-            manifestSrc: 'thumbnail/cutouts/manifest.json',
-            layoutVariant: 'left' as const,
-        }}
-        />
-        <Composition
+<Composition
         id="ShortFormClip"
         component={ShortFormClip}
         durationInFrames={300}
@@ -64,7 +43,7 @@ export const RemotionRoot: React.FC = () => {
         height={1920}
         defaultProps={{
             src: 'sync/output/synced-output-1.mp4',
-            transcriptSrc: 'shorts/short-1/transcript.json',
+            transcriptSrc: `shorts/${shortId}/transcript.json`,
             cameraProfilesSrc: 'shorts/camera-profiles.json',
             brandSrc: 'brand.json',
             hookMusicSrc: 'sounds/hook-music.mp3',

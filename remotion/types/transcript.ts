@@ -97,6 +97,18 @@ export type TranscriptMeta = {
    * to know which angles to run face detection on.
    */
   videoSrcs?: string[];
+  /** Episode number for display in thumbnail/preview overlays */
+  episodeNumber?: string;
+  /** Title from first hook segment — displayed during hooks section */
+  hookTitle?: string;
+  /** Thumbnail configuration for portrait shorts */
+  thumbnail?: {
+    bg?: string | string[];
+    middleSpeakers?: string[];
+    title?: string;
+    extendedTitle?: string;
+    episodeNumber?: string;
+  };
 };
 
 export type Transcript = {

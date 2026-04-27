@@ -13,7 +13,12 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { SegmentPlayer, buildSections, buildMainSubClips } from './components/SegmentPlayer';
 import { CameraPlayer } from './components/CameraPlayer';
 import { CaptionOverlay } from './components/CaptionOverlay';
+import { OverlayRenderer } from './components/OverlayRenderer';
+import { EpisodePill } from './components/overlays/EpisodePill';
+import { HookTitle } from './components/overlays/HookTitle';
+import { ShortFormOutro } from './components/overlays/ShortFormOutro';
 import { loadNunito } from './loadFonts';
+import { Transition } from './components/Transition';
 import type { Transcript, Segment } from './types/transcript';
 import type { CameraProfiles } from './types/camera';
 import type { Brand } from './types/brand';
@@ -151,7 +156,7 @@ const TranscriptComposition: React.FC<TranscriptCompositionProps> = ({
   cameraProfiles,
   brand,
 }) => {
-  const { fps } = useVideoConfig();
+  const { fps, durationInFrames } = useVideoConfig();
 
   const hookSegments = useMemo(
     () => transcript.segments.filter(s => s.hook && !s.cut),
@@ -180,6 +185,7 @@ const TranscriptComposition: React.FC<TranscriptCompositionProps> = ({
         mainOffset={0}
         segments={orderedSegments}
         profiles={cameraProfiles}
+        isShortForm
       />
     )
     : <SegmentPlayer src={resolvedSrc} hookSections={hookSections} mainSections={mainSections} mainOffset={0} />;
@@ -193,7 +199,51 @@ const TranscriptComposition: React.FC<TranscriptCompositionProps> = ({
         segments={orderedSegments}
         brand={brand}
         totalHookFrames={totalHookFrames}
+        hookSections={hookSections}
+        mainSections={mainSections}
       />
+
+      {/* Overlay graphics from transcript segments (NameTitle, ConceptExplainer, etc.) */}
+      <OverlayRenderer
+        segments={orderedSegments}
+        brand={brand}
+        mainSections={mainSections}
+        hookSections={hookSections}
+        mainStartFrame={totalHookFrames}
+        isShortForm
+      />
+
+      {/* Episode pill and title — persistent top-right overlay */}
+      {transcript.meta.thumbnail?.episodeNumber && (
+        <EpisodePill
+          brand={brand}
+          episodeNumber={transcript.meta.thumbnail.episodeNumber}
+          title={transcript.meta.thumbnail?.title || transcript.meta.title || ''}
+        />
+      )}
+
+      {/* Hook title — displayed during hooks section (center, above captions) */}
+      {hasHooks && transcript.meta.hookTitle && totalHookFrames > 0 && (
+        <HookTitle
+          brand={brand}
+          title={transcript.meta.hookTitle}
+          startFrame={0}
+          endFrame={totalHookFrames}
+        />
+      )}
+
+      {/* Outro overlay — last 5 seconds */}
+      <Sequence from={Math.max(0, durationInFrames - 3 * fps)}>
+        <ShortFormOutro brand={brand} />
+      </Sequence>
+
+      {/* Transition effect between hooks and main content */}
+      {hasHooks && totalHookFrames > 0 && (
+        <Transition
+          startFrame={totalHookFrames}
+          durationInFrames={30}
+        />
+      )}
 
       {/* Hook music — looped over hook duration */}
       {!!hookMusicSrc && hasHooks && hookMusicDurationSecs > 0 && (

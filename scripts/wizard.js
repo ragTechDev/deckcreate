@@ -8,6 +8,7 @@ import readline from 'readline';
 import fs from 'fs-extra';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { spawn } from 'child_process';
 import { createHelpers } from './shared/wizard-helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -813,6 +814,8 @@ async function main() {
       if (dynamicAngleIndices) {
         cameraDetectArgs.push('--dynamic-angles-indices', dynamicAngleIndices.join(','));
       }
+    } else {
+      cameraDetectArgs.push('--no-dynamic-angles');
     }
     try {
       await spawnStep('node', cameraDetectArgs);
@@ -874,7 +877,7 @@ async function main() {
       console.log('  (Stop the dev server manually if it is still running)');
     }
 
-    const profilePath = path.join(cwd, 'public', 'transcribe', 'output', 'camera', 'camera-profiles.json');
+    const profilePath = path.join(cwd, 'public', 'camera', 'camera-profiles.json');
     if (await fs.pathExists(profilePath)) {
       console.log(`  ✓ camera-profiles.json saved`);
     } else {
@@ -929,7 +932,7 @@ async function main() {
     const extractArgs = [
       'scripts/thumbnail/extract-speaker-candidates.py',
       '--transcript', path.join(cwd, 'public', 'transcribe', 'output', 'edit', 'transcript.json'),
-      '--camera-profiles', path.join(cwd, 'public', 'transcribe', 'output', 'camera', 'camera-profiles.json'),
+      '--camera-profiles', path.join(cwd, 'public', 'camera', 'camera-profiles.json'),
       '--video', path.join(cwd, 'public', videoPath || 'sync/output/synced-output-1.mp4'),
       '--output-dir', thumbnailDir,
       '--num-candidates', '3',
@@ -1069,13 +1072,13 @@ async function main() {
     if (redoStepId === 'remotion') {
       // Direct redo: launch Remotion immediately
       console.log('\n  Starting Remotion...\n');
-      await spawnStep('npm', ['run', 'remotion']);
+      await spawnStep('npm', ['run', 'remotion:studio']);
     } else if (!redoStepId) {
       console.log('');
       const doRemotion = await confirm('  Launch Remotion studio?', false);
       if (doRemotion) {
         console.log('\n  Starting Remotion...\n');
-        await spawnStep('npm', ['run', 'remotion']);
+        await spawnStep('npm', ['run', 'remotion:studio']);
       }
     }
   }

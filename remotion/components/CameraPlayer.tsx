@@ -196,6 +196,7 @@ export function buildCameraShots(
   fps: number,
   mainSections: Section[],
   hookSections: Section[],
+  isShortForm = false,
 ): CameraShot[] {
   // Sort all segments by start time to ensure chronological processing
   const activeSegments = [...activeSegmentsInput].sort((a, b) => a.start - b.start);
@@ -231,10 +232,25 @@ export function buildCameraShots(
   let totalCloseupF    = 0;     // total closeup frames since last wide
   let cumFrame         = 0;     // used only while processing hook segments
   let currentSourceTime = 0;    // track source time for time-keyed viewports
+  let reactionIdx      = 0;     // cycles through non-speaking speakers for short-form reaction shots
 
   const firstAngleVideoSrc = profiles.angles
     ? Object.values(profiles.angles)[0]?.videoSrc
     : undefined;
+
+  // Short-form: pick the next non-speaking configured speaker for a reaction closeup.
+  function getReactionInfo(currentSpeaker: string): { speaker: string } | undefined {
+    const allSpeakers = [...new Set(
+      Object.keys(profiles.speakers).map(key => key.split(':')[0])
+    )];
+    const others = allSpeakers.filter(s => s !== currentSpeaker);
+    if (others.length === 0) return undefined;
+    const speaker = others[reactionIdx % others.length];
+    reactionIdx++;
+    return getSpeakerProfile(profiles, speaker, getSpeakerAngles(speaker)[0]?.angleName)
+      ? { speaker }
+      : undefined;
+  }
 
   // Helper: get all angles where this speaker has a configured profile
   // Speakers are keyed as "speakerName:angleName" in the profiles
@@ -340,12 +356,19 @@ export function buildCameraShots(
         if (segStart > shotStart) shots.push(emitShot(segStart, currentSourceTime));
         const prevSpeaker = shotSpeaker;
         shotStart     = segStart;
-        shotType      = 'wide';
-        if (!profile) shotSpeaker = '';
-        if (profile && shotSpeaker === prevSpeaker) { shotAngleIndex++; }
-        else if (shotSpeaker !== prevSpeaker) { shotAngleIndex = 0; }
         framesInShot  = segDur;
         totalCloseupF = 0;
+        const reaction = isShortForm ? getReactionInfo(speaker) : undefined;
+        if (reaction) {
+          shotType      = 'closeup';
+          shotSpeaker   = reaction.speaker;
+          shotAngleIndex = 0;
+        } else {
+          shotType      = 'wide';
+          if (!profile) shotSpeaker = '';
+          if (profile && shotSpeaker === prevSpeaker) { shotAngleIndex++; }
+          else if (shotSpeaker !== prevSpeaker) { shotAngleIndex = 0; }
+        }
       } else if (speakerChange) {
         if (isEarlySeg) console.log(`[CameraDebug] speakerChange seg=${segId} ${shotSpeaker}->${speaker} framesInShot=${framesInShot} fps=${fps} shotStart=${shotStart} segStart=${segStart}`);
         // Always cut to the new speaker immediately at segment boundaries — delaying the cut
@@ -547,9 +570,10 @@ type Props = {
   mainOffset?: number;
   segments: Segment[];
   profiles: CameraProfiles;
+  isShortForm?: boolean;
 };
 
-export const CameraPlayer: React.FC<Props> = ({ src, hookSections, mainSections, mainOffset = 0, segments, profiles }) => {
+export const CameraPlayer: React.FC<Props> = ({ src, hookSections, mainSections, mainOffset = 0, segments, profiles, isShortForm = false }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
@@ -569,7 +593,7 @@ export const CameraPlayer: React.FC<Props> = ({ src, hookSections, mainSections,
   // If mainOffset > 0, shift every main-content shot forward by mainOffset so
   // the composition-frame lookup stays in sync with the actual playback position.
   const shots = useMemo(() => {
-    const pacing    = buildCameraShots(segments, profiles, fps, mainSections, hookSections);
+    const pacing    = buildCameraShots(segments, profiles, fps, mainSections, hookSections, isShortForm);
     const overrides = collectCameraOverrides(segments, profiles, fps, mainSections);
     const applied   = applyOverrides(pacing, overrides);
     if (mainOffset === 0) return applied;
@@ -592,7 +616,7 @@ export const CameraPlayer: React.FC<Props> = ({ src, hookSections, mainSections,
       }
     }
     return result;
-  }, [segments, profiles, fps, hookSections, mainSections, hookOutputFrames, mainOffset]);
+  }, [segments, profiles, fps, hookSections, mainSections, hookOutputFrames, mainOffset, isShortForm]);
 
   // Find current shot
   const currentShot = useMemo(() => {

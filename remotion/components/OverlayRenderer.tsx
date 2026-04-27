@@ -6,6 +6,8 @@ import type { Section } from './SegmentPlayer';
 
 // Core / general editing overlays
 import { ConceptExplainer, NameTitle, ChapterMarker } from './overlays/lower-thirds';
+import { ConceptExplainerShort } from './overlays/lower-thirds/ConceptExplainer.short';
+import { NameTitleShort } from './overlays/lower-thirds/NameTitle.short';
 import { ImageWindowOverlay } from './overlays/ImageWindowOverlay';
 import { GifWindowOverlay } from './overlays/GifWindowOverlay';
 
@@ -31,11 +33,11 @@ interface OverlayRendererProps {
   hookSections: Section[];
   /** First composition frame of the main section (totalHookFrames + introFrames) */
   mainStartFrame: number;
+  /** Use portrait-scaled overlay variants sized for short-form (1080×1920) */
+  isShortForm?: boolean;
 }
 
-// Map of component names to their React components
-const COMPONENT_MAP: Record<string, React.FC<any>> = {
-  // Concept overlays
+const LONGFORM_COMPONENT_MAP: Record<string, React.FC<any>> = {
   AwardsOverlay,
   CodingOverlay,
   EngineeringOverlay,
@@ -47,13 +49,17 @@ const COMPONENT_MAP: Record<string, React.FC<any>> = {
   FrameworkOverlay,
   EducationOverlay,
   RagtechOverlay,
-  // Lower-third overlays
   ConceptExplainer,
   NameTitle,
   ChapterMarker,
-  // Image / GIF windows
   ImageWindow: ImageWindowOverlay,
   GifWindow: GifWindowOverlay,
+};
+
+const SHORTFORM_COMPONENT_MAP: Record<string, React.FC<any>> = {
+  ...LONGFORM_COMPONENT_MAP,
+  ConceptExplainer: ConceptExplainerShort,
+  NameTitle: NameTitleShort,
 };
 
 /**
@@ -89,7 +95,9 @@ export const OverlayRenderer: React.FC<OverlayRendererProps> = ({
   mainSections,
   hookSections,
   mainStartFrame,
+  isShortForm = false,
 }) => {
+  const componentMap = isShortForm ? SHORTFORM_COMPONENT_MAP : LONGFORM_COMPONENT_MAP;
   const { fps } = useVideoConfig();
   const currentFrame = useCurrentFrame();
 
@@ -249,7 +257,7 @@ export const OverlayRenderer: React.FC<OverlayRendererProps> = ({
   return (
     <>
       {visibleCues.map(({ cue, startFrame, durationInFrames, key, nextMarkerFrame }) => {
-        const Component = COMPONENT_MAP[cue.type];
+        const Component = componentMap[cue.type];
         if (!Component) {
           console.warn(`Unknown overlay component: ${cue.type}`);
           return null;

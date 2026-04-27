@@ -70,7 +70,7 @@ function autoVariant(title) {
 function renderThumbnail(outputPath, props) {
   const result = spawnSync('npx', [
     'remotion', 'still',
-    'remotion/index.ts',
+    'remotion/thumbnail-entry.ts',
     'PodcastThumbnail',
     outputPath,
     '--props', JSON.stringify(props),

@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   ActionIcon, Alert, Box, Button, Container, Group,
   Loader, Paper, Select, Stack, Text, Title, Tooltip,
@@ -161,7 +162,7 @@ function computeCloseup(
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function CameraPage() {
+function CameraPageContent() {
   const [boxes, setBoxes]                 = useState<FaceBox[]>([]);
   const [rawDetections, setRawDetections] = useState<Detection[] | null>(null);
   const [speakers, setSpeakers]           = useState<string[]>([]);
@@ -194,6 +195,12 @@ export default function CameraPage() {
   anglesRef.current        = angles;
   currentAngleIdxRef.current = currentAngleIdx;
   currentTimeframeIdxRef.current = currentTimeframeIdx;
+
+  // ── Mode: 'shorts' = portrait 9:16 output; default = landscape longform ──────
+  const searchParams = useSearchParams();
+  const isShorts = searchParams.get('mode') === 'shorts';
+  const isPortraitMode = isShorts;
+  const outputDims = isShorts ? { w: 1080, h: 1920 } : null;
 
   // ── Load data ───────────────────────────────────────────────────────────────
 
@@ -265,11 +272,13 @@ export default function CameraPage() {
     if (angles) return; // multi-angle handled below
     if (!imgSize || !rawDetections || boxesInitialized.current) return;
     boxesInitialized.current = true;
-    const aspectRatio = imgSize.w / imgSize.h;
+    const sourceAspect = imgSize.w / imgSize.h;
+    // For portrait shorts, compute viewports targeting 9:16 output
+    const outputAspect = isPortraitMode && outputDims ? (outputDims.w / outputDims.h) : sourceAspect;
     // Expand detected face bboxes to the actual closeup viewport size so
     // what you see in the GUI is exactly what will appear in the cut.
     setBoxes(rawDetections.map(d => {
-      const vp = computeCloseup(d, aspectRatio);
+      const vp = computeCloseup(d, sourceAspect, outputAspect);
       return {
         id: nextId.current++,
         x: vp.cx - vp.w / 2,
@@ -279,7 +288,7 @@ export default function CameraPage() {
         speaker: '',
       };
     }));
-  }, [angles, imgSize, rawDetections]);
+  }, [angles, imgSize, rawDetections, isPortraitMode, outputDims]);
 
   // Multi-angle: initialise boxes for the current angle/timeframe once its image has loaded
   useEffect(() => {
@@ -306,9 +315,11 @@ export default function CameraPage() {
     if (!aImgSize || !rawDets || angleBoxesInitialized.current.has(initKey)) return;
     angleBoxesInitialized.current.add(initKey);
 
-    const aspectRatio = aImgSize.w / aImgSize.h;
+    const sourceAspect = aImgSize.w / aImgSize.h;
+    // For portrait shorts, compute viewports targeting 9:16 output
+    const outputAspect = isPortraitMode && outputDims ? (outputDims.w / outputDims.h) : sourceAspect;
     const newBoxes: FaceBox[] = rawDets.map(d => {
-      const vp = computeCloseup(d, aspectRatio);
+      const vp = computeCloseup(d, sourceAspect, outputAspect);
       return {
         id: nextId.current++,
         x: vp.cx - vp.w / 2,
@@ -321,7 +332,7 @@ export default function CameraPage() {
       };
     });
     if (newBoxes.length > 0) setBoxes(prev => [...prev, ...newBoxes]);
-  }, [angles, currentAngleIdx, currentTimeframeIdx, angleImgSizes, angleRawDetections]);
+  }, [angles, currentAngleIdx, currentTimeframeIdx, angleImgSizes, angleRawDetections, isPortraitMode, outputDims]);
 
   // ── Coordinate helpers ───────────────────────────────────────────────────────
 
@@ -353,8 +364,13 @@ export default function CameraPage() {
         }));
       } else if (d.mode === 'resize') {
         const dx = x - d.mx0, dy = y - d.my0;
-        // ratio = 1 for same-aspect output; portrait would use (9/16)/(16/9)
-        const patch = applyResize(d.orig, d.handle, dx, dy, 1);
+        // ratio = 1 for same-aspect output; portrait uses (outputAspect / sourceAspect)
+        // For 9:16 output on 16:9 source: (9/16) / (16/9) ≈ 0.316
+        const imgSizeRef = angles ? angleImgSizes[angles[currentAngleIdx]?.angleName] : imgSize;
+        const sourceAspect = imgSizeRef ? (imgSizeRef.w / imgSizeRef.h) : (16 / 9);
+        const outputAspect = isPortraitMode && outputDims ? (outputDims.w / outputDims.h) : sourceAspect;
+        const ratio = outputAspect / sourceAspect;
+        const patch = applyResize(d.orig, d.handle, dx, dy, ratio);
         setBoxes(prev => prev.map(b => b.id !== d.id ? b : { ...b, ...patch }));
       } else if (d.mode === 'draw') {
         setDrag(prev => prev.mode === 'draw' ? { ...prev, cx: x, cy: y } : prev);
@@ -607,11 +623,15 @@ export default function CameraPage() {
         )
       : undefined;
 
+    // Use portrait dimensions when in portrait mode (9:16 shorts), otherwise match source
+    const outW = isPortraitMode && outputDims ? outputDims.w : sw;
+    const outH = isPortraitMode && outputDims ? outputDims.h : sh;
+
     const profiles = {
       sourceWidth:  sw,
       sourceHeight: sh,
-      outputWidth:  sw,
-      outputHeight: sh,
+      outputWidth:  outW,
+      outputHeight: outH,
       wideViewport: { cx: 0.5, cy: 0.5, w: 1.0, h: 1.0 },
       speakers: speakerMap,
       ...(anglesConfig ? { angles: anglesConfig } : {}),
@@ -619,13 +639,17 @@ export default function CameraPage() {
 
     setSaving(true);
     try {
-      const res = await fetch('/api/camera/save-profiles', {
+      const saveUrl = isShorts
+        ? '/api/camera/save-profiles?dest=shorts'
+        : '/api/camera/save-profiles';
+      const res = await fetch(saveUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(profiles),
       });
       if (!res.ok) throw new Error((await res.json()).error);
-      notifications.show({ color: 'green', message: 'camera-profiles.json saved.' });
+      const dest = isShorts ? 'public/shorts/camera-profiles.json' : 'public/camera/camera-profiles.json';
+      notifications.show({ color: 'green', message: `Saved to ${dest}` });
     } catch (err) {
       notifications.show({ color: 'red', message: String(err) });
     } finally {
@@ -664,7 +688,14 @@ export default function CameraPage() {
 
   return (
     <Container size="xl" py="xl">
-      <Title order={2} mb={4}>Camera Setup</Title>
+      <Group mb={4}>
+        <Title order={2}>Camera Setup</Title>
+        {isPortraitMode && (
+          <Text size="xs" c="teal" bg="teal.0" px={8} py={2} style={{ borderRadius: 4 }}>
+            9:16 Portrait Mode
+          </Text>
+        )}
+      </Group>
       <Text c="dimmed" size="sm" mb="lg">
         Drag boxes to move · Drag handles to resize · Click &amp; drag on empty area to draw a new box
       </Text>
@@ -929,5 +960,13 @@ export default function CameraPage() {
         </Group>
       )}
     </Container>
+  );
+}
+
+export default function CameraPage() {
+  return (
+    <Suspense>
+      <CameraPageContent />
+    </Suspense>
   );
 }

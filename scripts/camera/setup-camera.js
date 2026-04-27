@@ -49,7 +49,8 @@ function parseArgs() {
     else if (args[i] === '--transcript' && args[i + 1]) { result.transcriptPath  = args[++i]; }
     else if (args[i] === '--skip-detect')              { result.skipDetect      = true; }
     else if (args[i] === '--detect-only')              { result.detectOnly      = true; }
-    else if (args[i] === '--dynamic-angles')           { result.dynamicAngles   = true; }
+    else if (args[i] === '--dynamic-angles')            { result.dynamicAngles   = true; }
+    else if (args[i] === '--no-dynamic-angles')         { result.dynamicAngles   = false; result.dynamicAnglesSet = true; }
     else if (args[i] === '--interval-minutes' && args[i + 1]) { result.intervalMinutes = parseFloat(args[++i]); }
     else if (args[i] === '--dynamic-angles-indices' && args[i + 1]) {
       result.dynamicAngleIndices = args[++i].split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
@@ -327,7 +328,7 @@ async function main() {
   // Only prompt if not already set via CLI flags
   const rl = createReadline();
   try {
-    if (!args.dynamicAngles) {
+    if (!args.dynamicAngles && !args.dynamicAnglesSet) {
       useDynamicAngles = await askYesNo(rl, 'Does your camera switch angles while filming (e.g., drooping)?', false);
     }
 

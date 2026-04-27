@@ -35,11 +35,18 @@ RUN apt-get update && apt-get install -y \
 # Set working directory
 WORKDIR /app
 
+# Skip browser downloads from postinstall scripts (puppeteer, playwright).
+# Do NOT use --ignore-scripts — it breaks native binary setup for lightningcss
+# and @tailwindcss/oxide, which need their postinstall to copy the ARM64 .node file.
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+ENV CHROMIUM_FLAGS=""
+
 # Copy package files
 COPY package*.json ./
 
 # Install Node.js dependencies
-RUN npm ci --ignore-scripts
+RUN npm ci
 
 # Copy application code
 COPY . .

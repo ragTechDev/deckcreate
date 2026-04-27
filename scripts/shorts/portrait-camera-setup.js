@@ -64,18 +64,18 @@ function buildPortraitProfiles(source) {
   return portrait;
 }
 
-async function openGuiAndWait(portraitProfiles) {
-  // Write portrait profiles to the GUI's save location so it loads them
-  const cameraProfilesPath = path.join(cwd, 'public', 'camera', 'camera-profiles.json');
-  await fs.ensureDir(path.dirname(cameraProfilesPath));
+async function openGuiAndWait() {
+  // The GUI runs at /camera?mode=shorts — portrait mode is signalled via the
+  // query param, so we never touch public/camera/camera-profiles.json here.
+  // The Save button in the GUI calls /api/camera/save-profiles?dest=shorts
+  // which writes directly to public/shorts/camera-profiles.json.
 
-  // Back up existing landscape profiles if present and different
-  let backup = null;
-  if (await fs.pathExists(cameraProfilesPath)) {
-    backup = await fs.readJson(cameraProfilesPath);
-  }
+  const cameraUrl = 'http://127.0.0.1:3000/camera?mode=shorts';
 
-  await fs.writeJson(cameraProfilesPath, portraitProfiles, { spaces: 2 });
+  console.log('\n  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('  📷 Portrait Camera Setup — Action Required');
+  console.log('  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('');
 
   const devServer = spawn('npm', ['run', 'dev', '--', '--hostname', '0.0.0.0', '--port', '3000'], {
     cwd,
@@ -83,43 +83,43 @@ async function openGuiAndWait(portraitProfiles) {
     stdio: 'ignore',
   });
 
-  const cameraUrl = 'http://127.0.0.1:3000/camera';
-  const ready = await waitForHttp(cameraUrl, 90000, 700);
+  console.log('  ⏳ Starting camera server (this may take 10-30 seconds)...');
+  console.log('     Please wait — instructions will appear shortly.');
+  process.stdout.write('  ');
 
-  console.log('\n  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('  📷 Portrait Camera Setup — Action Required');
-  console.log('  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  const dotInterval = setInterval(() => { process.stdout.write('.'); }, 1000);
+  const ready = await waitForHttp('http://127.0.0.1:3000/camera', 90000, 700);
+  clearInterval(dotInterval);
   console.log('');
 
   if (ready) {
     console.log('  ✓ Camera server is ready');
   } else {
-    console.log('  ⏳ Camera server is starting...');
+    console.log('  ⚠ Camera server is slow — you may need to refresh the browser');
   }
 
   console.log('');
-  console.log('  STEP 1: Open the camera editor in your browser');
-  console.log('          → http://localhost:3000/camera');
+  console.log('  STEP 1: Open the portrait camera editor in your browser');
+  console.log('          → http://localhost:3000/camera?mode=shorts');
   console.log('');
   console.log('  STEP 2: For each speaker, adjust the portrait crop');
-  console.log('          - The yellow box shows the closeup framing');
+  console.log('          - The yellow box shows the 9:16 closeup framing');
   console.log('          - Drag the red dot to center the speaker face');
   console.log('          - Use the Angle tabs if you have multiple cameras');
   console.log('');
   console.log('  STEP 3: Click "Save profiles" when satisfied');
-  console.log('          (This writes to public/shorts/camera-profiles.json)');
+  console.log('          (Saves to public/shorts/camera-profiles.json)');
   console.log('');
   console.log('  STEP 4: Return here and press Enter to continue');
   console.log('');
   console.log('  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
-  openFile('http://localhost:3000/camera');
+  openFile(cameraUrl);
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   await new Promise(resolve => rl.question('\n  Press Enter when done saving...\n  ', resolve));
   rl.close();
 
-  // Kill dev server
   try {
     if (process.platform === 'win32') {
       spawn('taskkill', ['/pid', String(devServer.pid), '/f', '/t'], { shell: true, stdio: 'ignore' });
@@ -127,17 +127,6 @@ async function openGuiAndWait(portraitProfiles) {
       process.kill(devServer.pid, 'SIGTERM');
     }
   } catch { /* ignore */ }
-
-  // Read the saved profiles (GUI writes to public/camera/camera-profiles.json)
-  const saved = await fs.readJson(cameraProfilesPath);
-
-  // Restore backup if we overwrote landscape profiles
-  if (backup && (backup.outputWidth !== PORTRAIT_WIDTH || backup.outputHeight !== PORTRAIT_HEIGHT)) {
-    await fs.writeJson(cameraProfilesPath, backup, { spaces: 2 });
-    console.log('  (Restored landscape camera-profiles.json)');
-  }
-
-  return saved;
 }
 
 async function main() {
@@ -162,10 +151,15 @@ async function main() {
     console.log(`  ✓ Initial portrait profiles written: ${outPath}`);
 
     if (!args.skipGui) {
-      const saved = await openGuiAndWait(portraitProfiles);
-      // Patch the saved profiles to ensure portrait dimensions are set
-      const final = { ...saved, outputWidth: PORTRAIT_WIDTH, outputHeight: PORTRAIT_HEIGHT };
-      await fs.writeJson(outPath, final, { spaces: 2 });
+      await openGuiAndWait();
+      // GUI saved directly to outPath via /api/camera/save-profiles?dest=shorts.
+      // Patch to guarantee portrait dimensions in case the GUI lost them.
+      if (await fs.pathExists(outPath)) {
+        const saved = await fs.readJson(outPath);
+        if (saved.outputWidth !== PORTRAIT_WIDTH || saved.outputHeight !== PORTRAIT_HEIGHT) {
+          await fs.writeJson(outPath, { ...saved, outputWidth: PORTRAIT_WIDTH, outputHeight: PORTRAIT_HEIGHT }, { spaces: 2 });
+        }
+      }
       console.log(`  ✓ Portrait profiles updated from GUI: ${outPath}`);
     }
 
