@@ -76,22 +76,6 @@ function formatDuration(seconds) {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-function parseTimeInput(input) {
-  const trimmed = input.trim();
-  // HH:MM:SS or MM:SS format
-  const timeMatch = trimmed.match(/^(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)$/);
-  if (timeMatch) {
-    const hours = parseInt(timeMatch[1] || '0');
-    const mins = parseInt(timeMatch[2]);
-    const secs = parseFloat(timeMatch[3]);
-    return hours * 3600 + mins * 60 + secs;
-  }
-  // Plain seconds
-  const num = parseFloat(trimmed);
-  if (!isNaN(num)) return num;
-  return null;
-}
-
 // ── Path A: Clip from longform ──────────────────────────────────────────────
 
 async function runPathA(fromLongform = false) {
@@ -118,50 +102,7 @@ async function runPathA(fromLongform = false) {
   console.log(`  Speakers: ${speakers.join(', ')}`);
   console.log(`  Segments: ${segments.length}`);
 
-  // 2. Define clip range
-  console.log('\n  ── Define clip range ─────────────────────────────────');
-
-  let fromTime, toTime;
-  while (true) {
-    const fromInput = await askQuestion('  Clip start time (HH:MM:SS or seconds): ');
-    fromTime = parseTimeInput(fromInput);
-    if (fromTime === null || fromTime < 0 || fromTime >= duration) {
-      console.log('  Invalid time. Please try again.');
-      continue;
-    }
-
-    const toInput = await askQuestion('  Clip end time (HH:MM:SS or seconds): ');
-    toTime = parseTimeInput(toInput);
-    if (toTime === null || toTime <= fromTime || toTime > duration) {
-      console.log('  Invalid time (must be after start and within duration). Please try again.');
-      continue;
-    }
-
-    // Show context around boundaries
-    const fromIdx = segments.findIndex(s => s.start >= fromTime);
-    const toIdx = segments.findIndex(s => s.end >= toTime);
-
-    console.log('\n  Context around start:');
-    const startContext = segments.slice(Math.max(0, fromIdx - 2), fromIdx + 3);
-    startContext.forEach((s, i) => {
-      const relIdx = Math.max(0, fromIdx - 2) + i;
-      const marker = relIdx === fromIdx ? '>' : ' ';
-      console.log(`  ${marker} [${s.id}] ${formatDuration(s.start)} ${s.speaker}: ${s.text.slice(0, 50)}${s.text.length > 50 ? '...' : ''}`);
-    });
-
-    console.log('\n  Context around end:');
-    const endContext = segments.slice(Math.max(0, toIdx - 2), toIdx + 3);
-    endContext.forEach((s, i) => {
-      const relIdx = Math.max(0, toIdx - 2) + i;
-      const marker = relIdx === toIdx ? '>' : ' ';
-      console.log(`  ${marker} [${s.id}] ${formatDuration(s.end)} ${s.speaker}: ${s.text.slice(0, 50)}${s.text.length > 50 ? '...' : ''}`);
-    });
-
-    const happy = await askYesNo('\n  Happy with this range?', true);
-    if (happy) break;
-  }
-
-  // 3. Assign clip ID
+  // 2. Assign clip ID
   const shortsDir = path.join(cwd, 'public', 'shorts');
   await fs.ensureDir(shortsDir);
 
@@ -174,33 +115,34 @@ async function runPathA(fromLongform = false) {
   const idInput = (await askQuestion(`  Clip ID [${defaultId}]: `)).trim();
   const clipId = idInput || defaultId;
 
-  // 4. Carry-over graphics
-  const carryGraphics = await askYesNo('  Carry over graphic overlay cues from the longform doc?', false);
-
-  // 5. Extract doc
-  console.log('\n  ── Extract clip doc ─────────────────────────────────');
-  const extractArgs = [
-    'run', 'shorts:extract-doc', '--',
-    '--transcript', 'public/edit/transcript.json',
-    '--from', String(fromTime),
-    '--to', String(toTime),
-    '--id', clipId,
-    ...(carryGraphics ? ['--carry-graphics'] : []),
-  ];
-
-  try {
-    await spawnStep('npm', extractArgs);
-    console.log(`  ✓ Extracted to public/shorts/${clipId}/transcript.doc.txt`);
-  } catch (err) {
-    console.error(`  ✗ Extraction failed: ${err.message}`);
-    process.exit(1);
-  }
-
-  // Open for editing
+  // 3. Copy full doc for editing
+  console.log('\n  ── Prepare clip doc ──────────────────────────────────');
   const clipDocPath = path.join(cwd, 'public', 'shorts', clipId, 'transcript.doc.txt');
+  await fs.ensureDir(path.dirname(clipDocPath));
+
+  // Read longform doc and strip CAM/HOOK/graphics cues
+  let docContent = await fs.readFile(docPath, 'utf-8');
+
+  // Strip lines that shouldn't carry over
+  docContent = docContent
+    .split('\n')
+    .filter(line => !/^>\s*CAM\b/i.test(line))
+    .filter(line => !/^>\s*HOOK\b/i.test(line))
+    .join('\n');
+
+  await fs.writeFile(clipDocPath, docContent);
+  console.log(`  ✓ Copied full doc to public/shorts/${clipId}/transcript.doc.txt`);
+
+  // 4. Show instructions for defining clip range
+  console.log('\n  ── Define clip range ────────────────────────────────');
+  console.log('  Edit the doc to define your clip range:');
+  console.log('    1. Add "> START" on its own line BEFORE the first segment to include');
+  console.log('    2. Add "> END" on its own line AFTER the last segment to include');
+  console.log('  Everything outside START..END will be excluded from the short.');
+  console.log('  You can also mark hooks with "> HOOK" and add cuts with {curly braces}.');
   openFile(clipDocPath);
 
-  // 6. Edit doc
+  // 5. Edit doc
   console.log('\n  ── Edit clip doc ─────────────────────────────────────');
   console.log('  Open the doc and:');
   console.log('    - Mark a > HOOK segment for the hook/teaser');
@@ -208,7 +150,7 @@ async function runPathA(fromLongform = false) {
   console.log('    - Correct any text as needed');
   await ask('  Press Enter when done editing...');
 
-  // 7. Merge doc
+  // 6. Merge doc
   console.log('\n  ── Merge clip doc ────────────────────────────────────');
   const cutPauses = await askYesNo('  Auto-cut silences longer than 0.5 s?', false);
 
@@ -228,16 +170,16 @@ async function runPathA(fromLongform = false) {
     process.exit(1);
   }
 
-  // 8. Portrait camera setup
+  // 7. Portrait camera setup
   await runCameraSetup();
 
-  // 9. Cut preview (optional)
+  // 8. Cut preview (optional)
   const doPreview = await askYesNo('\n  Generate portrait cut preview?', false);
   if (doPreview) {
     await runCutPreview(clipId);
   }
 
-  // 10. Launch Remotion (optional)
+  // 9. Launch Remotion (optional)
   const doRemotion = await askYesNo('\n  Launch Remotion studio with this short?', false);
   if (doRemotion) {
     console.log('\n  → Launching Remotion studio...');
