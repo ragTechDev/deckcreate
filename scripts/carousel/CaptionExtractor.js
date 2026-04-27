@@ -99,7 +99,10 @@ class CaptionExtractor {
     }
 
     if (!captionData) {
-      throw new Error('Could not fetch caption data');
+      console.log('  Trying youtubei.js fallback...');
+      const youtubeiSegments = await this.fetchViaYoutubei(videoId);
+      if (!youtubeiSegments) throw new Error('Could not fetch caption data from any source');
+      return youtubeiSegments;
     }
 
     // Step 3: Parse all segments into a unified timed array
@@ -224,6 +227,26 @@ class CaptionExtractor {
       }
     }
     return null;
+  }
+
+  async fetchViaYoutubei(videoId) {
+    try {
+      const { Innertube } = await import('youtubei.js');
+      const yt = await Innertube.create({ retrieve_player: false });
+      const info = await yt.getInfo(videoId);
+      const transcriptData = await info.getTranscript();
+      const segments = transcriptData?.transcript?.content?.body?.initial_segments;
+      if (!segments || segments.length === 0) return null;
+
+      return segments.map(s => ({
+        startSec: (s.start_ms ?? 0) / 1000,
+        endSec: (s.end_ms ?? s.start_ms ?? 0) / 1000,
+        text: s.snippet?.text ?? '',
+      })).filter(s => s.text);
+    } catch (e) {
+      console.log(`  youtubei.js failed: ${e.message}`);
+      return null;
+    }
   }
 
   // Parse caption data (XML or JSON) into array of { startSec, endSec, text }
