@@ -1081,6 +1081,15 @@ async function main() {
   }
 
   console.log('\n  ✓ All done!\n');
+
+  // ── STEP: Short-form clips (optional) ────────────────────────────────────
+  const doShorts = await confirm('  Create short-form clips from this recording?', false);
+  if (doShorts) {
+    rl.close();
+    await spawnStep('node', ['scripts/shorts-wizard.js', '--from-longform']);
+    return;
+  }
+
   rl.close();
 }
 
