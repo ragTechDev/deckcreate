@@ -199,13 +199,13 @@ class CaptionExtractor {
         { headers: { 'x-api-key': process.env.SUPADATA_API_KEY } }
       );
       if (!resp.ok) {
-        console.log(`  Supadata failed: ${resp.status}`);
+        console.log(`Supadata failed: ${resp.status}`);
         return null;
       }
       const data = await resp.json();
       const content = data?.content;
       if (!content || content.length === 0) return null;
-      console.log(`  Supadata succeeded with ${content.length} segments`);
+      console.log(`Supadata succeeded with ${content.length} segments`);
       return content.map(s => ({
         startSec: (s.offset ?? 0) / 1000,
         endSec: ((s.offset ?? 0) + (s.duration ?? 0)) / 1000,
