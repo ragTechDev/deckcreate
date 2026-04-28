@@ -10,6 +10,7 @@ export interface ChapterMarkerProps {
   chapterTitle?: string;
   durationInFrames: number;
   nextMarkerFrame?: number;
+  side?: 'left' | 'right';
 }
 
 // Loop duration for typing animation (in seconds)
@@ -21,6 +22,7 @@ export const ChapterMarker: React.FC<ChapterMarkerProps> = ({
   chapterTitle = 'Chapter',
   durationInFrames,
   nextMarkerFrame,
+  side = 'right',
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -131,8 +133,8 @@ export const ChapterMarker: React.FC<ChapterMarkerProps> = ({
     <div
       style={{
         position: 'absolute',
-        top: 40,
-        right: 0,
+        top: 120,
+        ...(side === 'left' ? { left: 50 } : { right: 120 }),
         display: 'flex',
         alignItems: 'flex-start',
         justifyContent: 'flex-start',

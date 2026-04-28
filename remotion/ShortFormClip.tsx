@@ -46,7 +46,7 @@ async function fetchJson<T>(src: string): Promise<T> {
 function getActiveSegments(transcript: Transcript) {
   const { videoStart, videoEnd } = transcript.meta;
   return transcript.segments.filter(s => {
-    if (videoStart !== undefined && s.start < videoStart) return false;
+    if (videoStart !== undefined && s.end <= videoStart) return false;
     if (videoEnd !== undefined && s.end > videoEnd) return false;
     return true;
   });

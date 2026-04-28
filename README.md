@@ -219,6 +219,186 @@ Generates a flat MP4 for quick review outside Remotion.
 
 ---
 
+## Editing: Long-form video
+
+The wizard handles the full editing flow interactively.
+
+```bash
+npm run video:wizard
+# Docker:
+docker-compose run --rm --service-ports wizard npm run video:wizard
+```
+
+**Resume behaviour:** The wizard detects existing work and picks up where you left off. Choose *Resume*, *Jump to a specific step*, or *Start fresh*.
+
+### Steps
+
+**1. Build the transcript doc**
+
+After transcription and speaker assignment complete, the wizard generates:
+
+```
+public/edit/transcript.doc.txt
+```
+
+This plain-text file represents every segment of the recording as a numbered line. The wizard opens it automatically.
+
+**2. Edit the doc**
+
+Each line looks like:
+
+```
+[42]  Natasha: And I think the real issue is context windows.
+```
+
+Make edits directly in the file:
+
+| What you want | How to write it |
+|---|---|
+| Cut a word or phrase | Wrap in `{curly braces}` — `{um}`, `{you know}` |
+| Cut an entire segment | Add `CUT` after the segment number: `[42] CUT` |
+| Fix a transcript error | Retype the word inline |
+| Rename a speaker | Edit the `SPEAKERS` block at the top of the file |
+
+Save the file, return to the terminal, press **Enter**.
+
+**3. Apply edits**
+
+The wizard runs `merge-doc` to bake your changes back into `transcript.json`:
+
+```bash
+# Optional flags you can pass when jumping to this step manually:
+npm run transcript:merge
+npm run transcript:merge:cut-pauses   # also auto-cut silences > 0.5 s
+```
+
+**4. Camera setup (optional)**
+
+Sets up digitally-simulated punch-in/punch-out cuts to the speaking face. The wizard:
+1. Detects faces via MediaPipe
+2. Opens `http://localhost:3000/camera` — assign each face box to a speaker, click **Save profiles**
+
+Output: `public/camera/camera-profiles.json`
+
+**5. Preview in Remotion Studio**
+
+```bash
+npm run remotion
+```
+
+Open the `ragTechVodcast` composition. Scrub through the timeline to review all cuts and overlays.
+
+**6. Render**
+
+```bash
+npm run shorts:render   # renders the final MP4 based on outName in transcript meta
+```
+
+Or use Remotion's built-in render button in the Studio.
+
+---
+
+## Editing: Short-form clips
+
+Short-form clips are vertical (9:16) cuts derived from the longform recording. Each clip lives in `public/shorts/<clip-id>/`.
+
+**Prerequisite:** the longform pipeline must have run and produced `public/edit/transcript.json`.
+
+```bash
+npm run shorts:wizard
+# Docker:
+docker-compose run --rm --service-ports wizard npm run shorts:wizard
+```
+
+### Choosing a path
+
+The wizard offers two paths:
+
+| Path | When to use |
+|---|---|
+| **A — Clip from longform** | You recorded landscape and want to cut a vertical clip from it |
+| **B — Dedicated portrait recording** | You recorded directly in portrait (phone, vertical camera) |
+
+### Path A walkthrough
+
+**1. Pick a clip ID**
+
+Give the clip a short slug, e.g. `mediocrity`. Output goes to `public/shorts/mediocrity/`.
+
+**2. Edit the clip doc**
+
+The wizard copies a cleaned version of the longform doc to `public/shorts/<clip-id>/transcript.doc.txt` and opens it. You define the clip by adding directives:
+
+**Define the clip range** — required:
+
+```
+> START
+[42]  This is the first segment to include.
+[55]  This is the last segment to include.
+> END
+```
+
+For a precise sub-segment start or end, use `at=`:
+
+```
+> START at="the real issue is"
+[42]  And I think the real issue is context windows.
+> END at="context windows"
+```
+
+**Add a hook** — optional teaser that plays before the main clip:
+
+```
+# Whole segment as hook:
+[38]  This is a great hook line.
+> HOOK
+
+# Specific phrase as hook:
+[38]  This segment has a {great soundbite} in the middle.
+> HOOK "great soundbite"
+```
+
+The hook section plays first, then the main clip from `START` to `END`.
+
+**Word-level cuts** — same as longform:
+
+```
+[42]  Remove these {um} {you know} filler words.
+```
+
+Save the file, return to the terminal, press **Enter**.
+
+**3. Apply edits**
+
+The wizard runs `shorts:merge-doc`, which writes `public/shorts/<clip-id>/transcript.json` including:
+- `meta.videoStart` / `meta.videoEnd` — the source time range
+- `meta.hookTitle` — derived from the first `> HOOK` phrase
+- `meta.outName` — auto-named `<source-filename>_<clip-id>.mp4`
+
+**4. Portrait camera setup**
+
+Uses the existing longform camera profiles and re-maps them for the 9:16 frame. Opens `http://localhost:3000/camera` — review face positions and click **Save profiles**.
+
+Output: `public/shorts/<clip-id>/camera-profiles.json`
+
+**5. Preview in Remotion Studio**
+
+```bash
+npm run remotion
+```
+
+Select the **ShortFormClip** composition. The studio reads from `public/shorts/mediocrity/` by default; pass `?shortId=<clip-id>` in the URL to switch clips.
+
+**6. Render**
+
+```bash
+npm run shorts:render -- --id <clip-id>
+```
+
+Output MP4 is written to the path stored in `transcript.meta.outName`.
+
+---
+
 ## Pipeline: Carousel Generation
 
 ```bash

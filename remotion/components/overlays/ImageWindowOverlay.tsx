@@ -21,7 +21,7 @@ export interface ImageWindowOverlayProps {
 }
 
 const CHAPTER_MARKER_PADDING = 120; // Space reserved for chapter marker at top
-const WINDOW_MARGIN = 60; // Margin on sides and bottom
+const WINDOW_MARGIN = 24; // Small margin for shorts - fills width with tiny gap
 
 export const ImageWindowOverlay: React.FC<ImageWindowOverlayProps> = ({
   brand,
@@ -39,8 +39,8 @@ export const ImageWindowOverlay: React.FC<ImageWindowOverlayProps> = ({
   const availableHeight = videoHeight - CHAPTER_MARKER_PADDING - WINDOW_MARGIN;
   const availableWidth = videoWidth - WINDOW_MARGIN * 2;
 
-  // Default to 720 or fit within available width, whichever is smaller
-  const width = Math.min(propWidth ?? 720, availableWidth);
+  // For shorts: fill width with small gap (use all available width)
+  const width = propWidth ?? availableWidth;
   const maxImageHeight = availableHeight - 42 - (caption ? 44 : 0); // Subtract title bar and optional caption
 
   // Open: spring from bottom, scale 0→1 + translateY 200→0

@@ -116,9 +116,12 @@ function getSpeakerProfile(
   }
   // Try legacy speaker-only format
   if (profiles.speakers[speaker]) return profiles.speakers[speaker];
-  // Search for any key that starts with "speaker:" (speaker:angle format)
+  // Search for any key that starts with "speaker:" — case-insensitive so
+  // > CAM victoria matches a profile keyed as "Victoria"
+  const speakerLower = speaker.toLowerCase();
   for (const key of Object.keys(profiles.speakers)) {
-    if (key === speaker || key.startsWith(`${speaker}:`)) {
+    const keyLower = key.toLowerCase();
+    if (keyLower === speakerLower || keyLower.startsWith(`${speakerLower}:`)) {
       return profiles.speakers[key];
     }
   }
@@ -218,10 +221,6 @@ export function buildCameraShots(
   console.log('[CameraDebug] hookTotalFrames:', hookTotalFrames, '= seconds:', (hookTotalFrames/fps).toFixed(1));
 
   const mainTotalFrames = mainSections.reduce((sum, s) => sum + s.trimAfter - s.trimBefore, 0);
-
-  // Non-cut main segments in order — used to compute pacing duration (seg start →
-  // next seg start, which includes inter-segment silence in the new model).
-  const mainSegsNonCut = activeSegments.filter(s => !s.hook && !s.cut);
 
   // State
   let shotType: 'wide' | 'closeup' = 'wide';
@@ -352,7 +351,22 @@ export function buildCameraShots(
       const forceWide     = framesInShot >= MAX_CLOSEUP_F || totalCloseupF >= PERIODIC_F;
       const speakerChange = !!profile && speaker !== shotSpeaker;
 
-      if (forceWide || !profile) {
+      // speakerChange takes priority over forceWide so explicit speaker transitions
+      // (SPEAKER: overrides, natural turns) are always honoured even mid-periodic-cut.
+      if (speakerChange) {
+        if (isEarlySeg) console.log(`[CameraDebug] speakerChange seg=${segId} ${shotSpeaker}->${speaker} framesInShot=${framesInShot} fps=${fps} shotStart=${shotStart} segStart=${segStart}`);
+        if (segStart > shotStart) {
+          if (isEarlySeg) console.log(`[CameraDebug] Emitting shot on speaker change`);
+          shots.push(emitShot(segStart, currentSourceTime));
+        }
+        shotStart      = segStart;
+        shotSpeaker    = speaker;
+        shotAngleIndex = 0;
+        framesInShot   = segDur;
+        // Reset the periodic timer when a forced cut was also due, so we don't
+        // immediately fire forceWide again on the very next segment.
+        totalCloseupF  = forceWide ? segDur : totalCloseupF + segDur;
+      } else if (forceWide || !profile) {
         if (segStart > shotStart) shots.push(emitShot(segStart, currentSourceTime));
         const prevSpeaker = shotSpeaker;
         shotStart     = segStart;
@@ -363,26 +377,19 @@ export function buildCameraShots(
           shotType      = 'closeup';
           shotSpeaker   = reaction.speaker;
           shotAngleIndex = 0;
+        } else if (isShortForm) {
+          // Never go wide in short-form — stay on closeup, updating speaker if they have a profile
+          shotType = 'closeup';
+          if (profile) {
+            if (shotSpeaker === speaker) { shotAngleIndex++; }
+            else { shotSpeaker = speaker; shotAngleIndex = 0; }
+          }
         } else {
           shotType      = 'wide';
           if (!profile) shotSpeaker = '';
           if (profile && shotSpeaker === prevSpeaker) { shotAngleIndex++; }
           else if (shotSpeaker !== prevSpeaker) { shotAngleIndex = 0; }
         }
-      } else if (speakerChange) {
-        if (isEarlySeg) console.log(`[CameraDebug] speakerChange seg=${segId} ${shotSpeaker}->${speaker} framesInShot=${framesInShot} fps=${fps} shotStart=${shotStart} segStart=${segStart}`);
-        // Always cut to the new speaker immediately at segment boundaries — delaying the cut
-        // causes subsequent segments to be incorrectly covered by the old speaker's closeup
-        // since shotSpeaker is never updated while the cut is "pending".
-        if (segStart > shotStart) {
-          if (isEarlySeg) console.log(`[CameraDebug] Emitting shot on speaker change`);
-          shots.push(emitShot(segStart, currentSourceTime));
-        }
-        shotStart      = segStart;
-        shotSpeaker    = speaker;
-        shotAngleIndex = 0;
-        framesInShot   = segDur;
-        totalCloseupF += segDur;
       } else {
         framesInShot  += segDur;
         totalCloseupF += segDur;
@@ -431,6 +438,17 @@ export function buildCameraShots(
   // pile-driving the initial camera state before the first real main segment is processed.
   const mainVideoStartSec = mainSections.length > 0 ? mainSections[0].trimBefore / fps : 0;
   const allActiveSegs = activeSegments.filter(s => !s.cut && (!s.hook || s.start >= mainVideoStartSec));
+
+  // For short-form, never start the main pass with a wide shot — initialize directly to
+  // the first speaker's closeup so the gap between hookTotalFrames and the first segment
+  // (inter-segment silence) doesn't produce a wide-angle frame.
+  if (isShortForm && allActiveSegs.length > 0) {
+    const firstMainSeg = allActiveSegs.find(s => !s.hook) ?? allActiveSegs[0];
+    if (firstMainSeg.speaker) {
+      shotType    = 'closeup';
+      shotSpeaker = firstMainSeg.speaker;
+    }
+  }
 
   for (const seg of allActiveSegs) {
     const sourceFrame = sourceToOutputFrame(seg.start, mainSections, fps);

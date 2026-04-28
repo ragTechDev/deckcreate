@@ -56,17 +56,39 @@ export function buildMainSubClips(
   videoStart: number | undefined,
   videoEnd: number | undefined,
 ): SubClip[] {
+  const cutSegments = allMainSegments.filter(s => s.cut);
   const activeMain = allMainSegments.filter(s => !s.cut);
   if (activeMain.length === 0) return [];
 
   const rangeStart = videoStart ?? activeMain[0].start;
-  const rangeEnd   = videoEnd   ?? activeMain[activeMain.length - 1].end;
+  // Clamp rangeEnd to the last non-cut segment's end so that when videoEnd
+  // lands on a cut segment (e.g. > END after -[261]), we don't render the
+  // gap between the last kept segment and the cut segment as dead air.
+  const lastActiveEnd = activeMain[activeMain.length - 1].end;
+  const rangeEnd = Math.min(videoEnd ?? lastActiveEnd, lastActiveEnd);
+
+  console.log(`[buildMainSubClips] range: ${rangeStart.toFixed(2)}-${rangeEnd.toFixed(2)}, cutSegments: ${cutSegments.length}`);
 
   // Collect all exclusion ranges
   const cutRanges: { from: number; to: number }[] = [];
 
-  for (const seg of allMainSegments) {
-    if (seg.cut) cutRanges.push({ from: seg.start, to: seg.end });
+  for (const seg of cutSegments) {
+    console.log(`  Adding cut segment [${seg.id}]: ${seg.start.toFixed(2)}-${seg.end.toFixed(2)}`);
+    cutRanges.push({ from: seg.start, to: seg.end });
+  }
+  // Add gaps between non-contiguous non-cut segments as cuts
+  // (when cut segments exist between two kept segments)
+  for (let i = 1; i < activeMain.length; i++) {
+    const prev = activeMain[i - 1];
+    const curr = activeMain[i];
+    const gapStart = prev.end;
+    const gapEnd = curr.start;
+    // Only add gap if there's actual cut content between them
+    const hasCutContentBetween = cutSegments.some(s => s.start >= gapStart && s.end <= gapEnd);
+    if (gapEnd > gapStart && hasCutContentBetween) {
+      console.log(`  Adding gap between [${prev.id}] and [${curr.id}]: ${gapStart.toFixed(2)}-${gapEnd.toFixed(2)}`);
+      cutRanges.push({ from: gapStart, to: gapEnd });
+    }
   }
   for (const seg of activeMain) {
     for (const c of [...(seg.cuts ?? []), ...(seg.visualCuts ?? [])]) {
@@ -79,13 +101,17 @@ export function buildMainSubClips(
   // Sort and merge overlapping/adjacent exclusion ranges
   cutRanges.sort((a, b) => a.from - b.from);
   const merged: { from: number; to: number }[] = [];
+  const FRAME_TOLERANCE = 2.0; // Merge gaps up to 2 seconds (handles adjacent cut segments)
   for (const c of cutRanges) {
-    if (merged.length > 0 && c.from <= merged[merged.length - 1].to) {
-      merged[merged.length - 1].to = Math.max(merged[merged.length - 1].to, c.to);
+    const last = merged[merged.length - 1];
+    if (last && c.from <= last.to + FRAME_TOLERANCE) {
+      last.to = Math.max(last.to, c.to);
     } else {
-      merged.push({ ...c });
+      merged.push(c);
     }
   }
+
+  console.log(`  Merged cut ranges:`, merged.map(c => `${c.from.toFixed(2)}-${c.to.toFixed(2)}`));
 
   // Invert: the gaps between exclusions are the playable clips
   const clips: SubClip[] = [];
@@ -95,6 +121,8 @@ export function buildMainSubClips(
     cursor = Math.max(cursor, cut.to);
   }
   if (cursor < rangeEnd) clips.push({ sourceStart: cursor, sourceEnd: rangeEnd });
+
+  console.log(`  Generated ${clips.length} subclips:`, clips.map(c => `${c.sourceStart.toFixed(2)}-${c.sourceEnd.toFixed(2)}`));
 
   // Drop clips shorter than 2 frames at 60fps (Whisper segmentation artifacts
   // between adjacent cut=true segments).
@@ -204,7 +232,18 @@ export function buildSections(
   }
   const allMainSegments = segments.filter(s => !s.hook);
   const mainSubClips = buildMainSubClips(allMainSegments, videoStart, videoEnd);
-  const mainSections = toSections(mainSubClips, fps);
+  const rawMainSections = toSections(mainSubClips, fps);
+
+  // De-overlap: ensure no gaps between main sections (fix microsecond cut remnants)
+  const mainSections: Section[] = [];
+  for (const s of rawMainSections) {
+    const prev = mainSections[mainSections.length - 1];
+    const trimBefore = prev ? Math.max(s.trimBefore, prev.trimAfter) : s.trimBefore;
+    if (trimBefore < s.trimAfter) {
+      mainSections.push({ trimBefore, trimAfter: s.trimAfter });
+    }
+  }
+
   return { hookSections, mainSections };
 }
 

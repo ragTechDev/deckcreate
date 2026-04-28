@@ -275,6 +275,9 @@ export const OverlayRenderer: React.FC<OverlayRendererProps> = ({
         if (cue.type === 'ChapterMarker' && nextMarkerFrame !== undefined) {
           props.nextMarkerFrame = nextMarkerFrame;
         }
+        if (cue.type === 'ChapterMarker' && isShortForm) {
+          props.side = 'left';
+        }
 
         console.log(`[OverlayRenderer] Rendering ${cue.type} at frame ${startFrame} for ${durationInFrames} frames`);
 
