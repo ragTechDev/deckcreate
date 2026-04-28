@@ -101,11 +101,17 @@ class CaptionExtractor {
     if (!captionData) {
       console.log('  Trying youtubei.js fallback...');
       const youtubeiSegments = await this.fetchViaYoutubei(videoId);
-      if (!youtubeiSegments) throw new Error('Could not fetch caption data from any source');
-      return youtubeiSegments;
+      if (youtubeiSegments) return youtubeiSegments;
     }
 
-    // Step 3: Parse all segments into a unified timed array
+    if (process.env.SUPADATA_API_KEY) {
+      console.log('  Trying Supadata API fallback...');
+      const supadata = await this.fetchViaSupadata(videoId);
+      if (supadata) return supadata;
+    }
+
+    if (!captionData) throw new Error('Could not fetch caption data from any source');
+
     return this.parseAllSegments(captionData);
   }
 
@@ -186,6 +192,31 @@ class CaptionExtractor {
 
     return null;
   }
+  async fetchViaSupadata(videoId) {
+    try {
+      const resp = await fetch(
+        `https://api.supadata.ai/v1/youtube/transcript?videoId=${videoId}&lang=en`,
+        { headers: { 'x-api-key': process.env.SUPADATA_API_KEY } }
+      );
+      if (!resp.ok) {
+        console.log(`  Supadata failed: ${resp.status}`);
+        return null;
+      }
+      const data = await resp.json();
+      const content = data?.content;
+      if (!content || content.length === 0) return null;
+      console.log(`  Supadata succeeded with ${content.length} segments`);
+      return content.map(s => ({
+        startSec: (s.offset ?? 0) / 1000,
+        endSec: ((s.offset ?? 0) + (s.duration ?? 0)) / 1000,
+        text: s.text ?? '',
+      })).filter(s => s.text);
+    } catch (e) {
+      console.log(`  Supadata error: ${e.message}`);
+      return null;
+    }
+  }
+
   async fetchViaInnertube(videoId) {
     const clients = [
       { clientName: 'ANDROID', clientVersion: '19.09.37', apiKey: 'AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w', ua: 'com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip' },
