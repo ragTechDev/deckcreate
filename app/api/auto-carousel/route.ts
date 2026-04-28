@@ -96,7 +96,8 @@ STEP 2 — CLEAN & FORMAT EACH SEGMENT FOR SLIDES:
 - Clean up the transcript text for each line:
   • Fix grammar errors and typos (e.g. "jarens" → "jargons", "I I don't" → "I don't").
   • Remove filler words (uh, um, hmm) ONLY if it doesn't change meaning.
-  • Break long sentences into concise clauses. Each line should be 5-20 words — punchy and readable on a phone screen.
+  • Break long sentences into concise clauses. Each line should be 5-20 words, punchy and readable on a phone screen.
+  • Do NOT use em dashes (—) in any text. Use a comma, period, or rephrase instead.
   • Remove pure filler ("Yeah.", "Right.", "Uh huh.") — skip those moments entirely.
   • Do NOT invent new content. Only clean up what's in the transcript.
 - topTimestamp and bottomTimestamp must be actual timestamps from the transcript (the [Xs] values).
