@@ -83,8 +83,8 @@ export function buildMainSubClips(
     const curr = activeMain[i];
     const gapStart = prev.end;
     const gapEnd = curr.start;
-    // Only add gap if there's actual cut content between them
-    const hasCutContentBetween = cutSegments.some(s => s.start >= gapStart && s.end <= gapEnd);
+    // Only add gap if there's actual cut content overlapping it
+    const hasCutContentBetween = cutSegments.some(s => s.start < gapEnd && s.end > gapStart);
     if (gapEnd > gapStart && hasCutContentBetween) {
       console.log(`  Adding gap between [${prev.id}] and [${curr.id}]: ${gapStart.toFixed(2)}-${gapEnd.toFixed(2)}`);
       cutRanges.push({ from: gapStart, to: gapEnd });
