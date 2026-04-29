@@ -12,6 +12,8 @@
     "carousel:captions": "node scripts/carousel/CaptionExtractor.js",
     "carousel:generate": "node scripts/carousel/generate-carousel.js",
     "carousel:generate:bulk": "node scripts/carousel/generate-carousel.js --bulk",
+    "carousel:wizard": "node scripts/carousel/carousel-wizard.js",
+    "carousel:wizard:docker": "docker compose run --rm --service-ports carousel npm run carousel:wizard",
     "cut:preview": "node scripts/cut-preview.js",
     "dev": "next dev",
     "diarize": "node scripts/diarize/diarize-audio.js",

@@ -1,4 +1,4 @@
-import { YoutubeTranscript } from 'youtube-transcript';
+import { fetchTranscript } from 'youtube-transcript/dist/youtube-transcript.esm.js';
 
 const FILLER_WORDS = [
   'uh', 'um', 'uhh', 'umm', 'uhm', 'er', 'err', 'ah', 'ahh',
@@ -22,7 +22,7 @@ class CaptionExtractor {
 
     // Step 0: Try youtube-transcript package (most reliable)
     try {
-      const transcript = await YoutubeTranscript.fetchTranscript(videoId, { lang: 'en' });
+      const transcript = await fetchTranscript(videoId, { lang: 'en' });
       if (transcript && transcript.length > 0) {
         console.log(`  youtube-transcript succeeded with ${transcript.length} segments`);
         return transcript.map((s) => ({

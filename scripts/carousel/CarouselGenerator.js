@@ -185,13 +185,91 @@ class CarouselGenerator {
     return lines;
   }
 
+  // Word wrap segments while preserving segment boundaries
+  wordWrapSegments(segments, maxWidth, fontSize) {
+    const charWidth = fontSize * 0.6;
+    const lines = [];
+    let currentLineSegments = [];
+    let currentLineLength = 0;
+    let prevSegStyle = null;
+    
+    for (const seg of segments) {
+      const segText = seg.text;
+      const segWords = segText.split(' ').filter(w => w !== '');
+      const segEndsWithSpace = segText.endsWith(' ');
+      
+      for (let i = 0; i < segWords.length; i++) {
+        const word = segWords[i];
+        const isLastWordInSeg = i === segWords.length - 1;
+        const needsTrailingSpace = !isLastWordInSeg || segEndsWithSpace;
+        const wordWithSpace = needsTrailingSpace ? word + ' ' : word;
+        const wordLength = wordWithSpace.length * charWidth;
+        
+        // Check if we need a leading space (transitioning from different style segment)
+        const needsLeadingSpace = currentLineSegments.length > 0 && 
+                                   prevSegStyle !== null && 
+                                   prevSegStyle !== seg.isBold;
+        
+        // Use non-breaking space for inter-segment spacing to prevent collapse
+        const adjustedWord = needsLeadingSpace ? wordWithSpace + '\u00A0' : wordWithSpace;
+        const adjustedLength = (wordWithSpace.length + (needsLeadingSpace ? 1 : 0)) * charWidth;
+        
+        if (currentLineLength + adjustedLength > maxWidth && currentLineSegments.length > 0) {
+          // Start new line - trim trailing space from last segment of previous line
+          const lastSeg = currentLineSegments[currentLineSegments.length - 1];
+          lastSeg.text = lastSeg.text.trimEnd();
+          lines.push(currentLineSegments);
+          
+          // New line starts with this word (no leading space needed at line start)
+          currentLineSegments = [{ text: wordWithSpace, isBold: seg.isBold }];
+          currentLineLength = wordLength;
+          prevSegStyle = seg.isBold;
+        } else {
+          // Add to current line
+          if (currentLineSegments.length > 0 && currentLineSegments[currentLineSegments.length - 1].isBold === seg.isBold) {
+            // Merge with previous segment if same style
+            currentLineSegments[currentLineSegments.length - 1].text += adjustedWord;
+          } else {
+            // Different style - add as new segment with adjusted word
+            currentLineSegments.push({ text: adjustedWord, isBold: seg.isBold });
+          }
+          currentLineLength += adjustedLength;
+          prevSegStyle = seg.isBold;
+        }
+      }
+    }
+    
+    if (currentLineSegments.length > 0) {
+      // Trim trailing space from last segment
+      const lastSeg = currentLineSegments[currentLineSegments.length - 1];
+      lastSeg.text = lastSeg.text.trimEnd();
+      lines.push(currentLineSegments);
+    }
+    
+    return lines;
+  }
+
   async loadNunitoFont() {
     const fontPath = path.join(process.cwd(), 'public', 'fonts', 'Nunito', 'static', 'Nunito-Bold.ttf');
     const fontBuffer = await fs.readFile(fontPath);
     return fontBuffer.toString('base64');
   }
 
-  generateTextOverlaySVG(width, height, topText, bottomText, fontData) {
+  async loadLogoAsBase64(logoPath) {
+    if (!logoPath) return null;
+    try {
+      const fullPath = logoPath.startsWith('/') ? logoPath : path.join(process.cwd(), logoPath);
+      const logoBuffer = await fs.readFile(fullPath);
+      const ext = path.extname(fullPath).toLowerCase();
+      const mimeType = ext === '.png' ? 'image/png' : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : 'image/png';
+      return `data:${mimeType};base64,${logoBuffer.toString('base64')}`;
+    } catch (e) {
+      console.log(`  Could not load logo: ${e.message}`);
+      return null;
+    }
+  }
+
+  generateTextOverlaySVG(width, height, topText, bottomText, fontData, headerConfig = null) {
     const fontSize = 36;
     const padding = 30;
     const textBottomMargin = 20;
@@ -203,6 +281,86 @@ class CarouselGenerator {
     
     const topTextY = halfHeight - (topLines.length * lineHeight) - textBottomMargin;
     const bottomTextY = height - (bottomLines.length * lineHeight) - textBottomMargin;
+
+    // Generate header elements if config provided
+    let headerElements = '';
+    if (headerConfig) {
+      const { logoBase64, episodeNumber, episodeTitle, brandColor = '#3b82f6' } = headerConfig;
+      
+      // Logo on top-left
+      if (logoBase64) {
+        headerElements += `
+          <image x="40" y="30" width="120" height="60" href="${logoBase64}" preserveAspectRatio="xMidYMid meet"/>
+        `;
+      }
+      
+      // Episode pill and title on top-right
+      const rightMargin = 50;
+      const topMargin = 15; // Pill moved up
+      
+      // Episode pill (EP X) - minimal padding
+      if (episodeNumber) {
+        const pillText = `EP ${episodeNumber}`;
+        const pillWidth = pillText.length * 11 + 16;
+        headerElements += `
+          <g transform="translate(${width - rightMargin - pillWidth}, ${topMargin})">
+            <rect x="0" y="0" width="${pillWidth}" height="28" rx="14" ry="14" fill="white"/>
+            <text x="${pillWidth / 2}" y="20" font-family="Nunito, Arial, sans-serif" font-size="18" font-weight="700" fill="black" text-anchor="middle">${pillText}</text>
+          </g>
+        `;
+      }
+      
+      // Episode title below the pill - wrapped, white text with bold in brand color
+      if (episodeTitle) {
+        const titleFontSize = 18;
+        const titleLineHeight = titleFontSize * 1.4;
+        const maxTitleWidth = 300;
+        const titleStartY = topMargin + 44; // Gap below pill (28 + 16 = 44)
+        
+        // Split text into segments (regular and bold)
+        const segments = [];
+        const boldRegex = /\*\*(.*?)\*\*/g;
+        let lastIndex = 0;
+        let match;
+        
+        while ((match = boldRegex.exec(episodeTitle)) !== null) {
+          // Add text before bold
+          if (match.index > lastIndex) {
+            segments.push({ text: episodeTitle.slice(lastIndex, match.index), isBold: false });
+          }
+          // Add bold text
+          segments.push({ text: match[1], isBold: true });
+          lastIndex = match.index + match[0].length;
+        }
+        // Add remaining text
+        if (lastIndex < episodeTitle.length) {
+          segments.push({ text: episodeTitle.slice(lastIndex), isBold: false });
+        }
+        
+        // Word wrap segments together
+        const titleLines = this.wordWrapSegments(segments, maxTitleWidth, titleFontSize);
+        
+        // Generate SVG for each line
+        const titleSvgElements = titleLines.map((lineSegments, i) => {
+          const y = titleStartY + (i * titleLineHeight);
+          
+          // Build content with proper styling per segment
+          const content = lineSegments.map((seg, idx) => {
+            const fill = seg.isBold ? brandColor : 'white';
+            const fontWeight = seg.isBold ? '800' : '600';
+            // Add explicit non-breaking space when transitioning between styles
+            const trailingNbsp = (idx < lineSegments.length - 1 && 
+                                  seg.isBold !== lineSegments[idx + 1].isBold &&
+                                  !seg.text.endsWith(' ')) ? '\u00A0' : '';
+            return `<tspan fill="${fill}" font-weight="${fontWeight}">${this.escapeXml(seg.text + trailingNbsp)}</tspan>`;
+          }).join('');
+          
+          return `<text x="${width - rightMargin}" y="${y}" font-family="Nunito, Arial, sans-serif" font-size="${titleFontSize}" text-anchor="end" filter="url(#textShadow)">${content}</text>`;
+        }).join('');
+        
+        headerElements += titleSvgElements;
+      }
+    }
 
     const svg = `
       <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
@@ -218,10 +376,15 @@ class CarouselGenerator {
               font-family: 'Nunito', Arial, sans-serif;
             }
           ]]></style>
-          <filter id="shadow">
+          <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
             <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000000" flood-opacity="0.8"/>
           </filter>
+          <filter id="textShadow" x="-50%" y="-50%" width="200%" height="200%">
+            <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#000000" flood-opacity="0.8"/>
+          </filter>
         </defs>
+        
+        ${headerElements}
         
         <g filter="url(#shadow)">
           ${topLines.map((line, i) => `

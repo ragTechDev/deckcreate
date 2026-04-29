@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y \
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     git \
+    chromium \
     libasound2 \
     libatk-bridge2.0-0 \
     libatspi2.0-0 \
@@ -68,6 +69,7 @@ RUN mkdir -p input/video input/audio \
 
 # Set environment variables
 ENV PYTHON_PATH="/usr/local/bin/python"
+ENV PUPPETEER_EXECUTABLE_PATH="/usr/bin/chromium"
 
 # Expose ports for Next.js dev server and other services
 EXPOSE 3000 3001
