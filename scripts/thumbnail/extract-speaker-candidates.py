@@ -97,8 +97,35 @@ def get_candidate_timestamps(transcript: dict, speaker: str, num_candidates: int
             seg = speaking_segments[idx]
             timestamps.append((seg['start'] + seg['end']) / 2)
     else:
+        # Need more frames than segments - sample multiple times per segment
+        min_segment_duration = 0.5  # Minimum seconds between samples within a segment
+
         for seg in speaking_segments:
-            timestamps.append((seg['start'] + seg['end']) / 2)
+            seg_duration = seg['end'] - seg['start']
+            # Calculate how many samples we can fit in this segment
+            samples_in_seg = max(1, int(seg_duration / min_segment_duration))
+            # Distribute samples evenly: start, middle, end positions
+            for i in range(samples_in_seg):
+                if samples_in_seg == 1:
+                    t = (seg['start'] + seg['end']) / 2
+                else:
+                    # Linear interpolation from start+10% to end-10%
+                    pad = seg_duration * 0.1
+                    t = seg['start'] + pad + (seg['end'] - seg['start'] - 2 * pad) * (i / (samples_in_seg - 1))
+                timestamps.append(round(t, 3))
+                if len(timestamps) >= num_candidates:
+                    break
+            if len(timestamps) >= num_candidates:
+                break
+
+        # If still not enough, fall back to repeating midpoints of longest segments
+        while len(timestamps) < num_candidates and speaking_segments:
+            # Sort by duration, pick longest unused segments
+            sorted_segs = sorted(speaking_segments, key=lambda s: s['end'] - s['start'], reverse=True)
+            for seg in sorted_segs:
+                if len(timestamps) >= num_candidates:
+                    break
+                timestamps.append((seg['start'] + seg['end']) / 2)
 
     return timestamps[:num_candidates]
 

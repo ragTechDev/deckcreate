@@ -463,7 +463,7 @@ async function generateFromLocalVideo(generator, videoPath, slides, outputDir, c
       headerConfig = {
         logoBase64,
         episodeNumber: meta.thumbnail.episodeNumber,
-        episodeTitle: meta.thumbnail.title || meta.title,
+        episodeTitle: meta.thumbnail.extendedTitle || meta.thumbnail.title || meta.title,
         brandColor,
       };
       console.log(`  ✓ Loaded episode metadata: EP ${headerConfig.episodeNumber}`);
@@ -529,6 +529,30 @@ async function generateFromLocalVideo(generator, videoPath, slides, outputDir, c
   }
 
   console.log(`\n  ✓ Generated ${slides.length} slides`);
+
+  // Generate CTA slide
+  console.log('\n  ── Generating CTA slide ───────────────────────────────');
+  try {
+    // Check for thumbnail.png
+    const thumbnailPath = path.join(cwd, 'public', 'thumbnail', 'thumbnail.png');
+    const hasThumbnail = await fs.pathExists(thumbnailPath);
+    
+    // Prepare CTA config
+    const ctaConfig = {
+      bgColor: headerConfig?.brandColor ? '#1a1a2e' : '#1a1a2e',
+      episodeNumber: headerConfig?.episodeNumber || '',
+      episodeTitle: headerConfig?.episodeTitle || '',
+      brandColor: headerConfig?.brandColor || '#eebf89',
+      handle: 'ragtechdev',
+      thumbnailPath: hasThumbnail ? thumbnailPath : null,
+      logoBase64: headerConfig?.logoBase64 || null,
+    };
+    
+    await generator.generateCtaSlide(ctaConfig, slides.length + 1);
+    console.log('  ✓ CTA slide generated');
+  } catch (ctaError) {
+    console.log(`  (CTA slide skipped: ${ctaError.message})`);
+  }
 }
 
 // ─── Existing Carousels Menu ────────────────────────────────────────────────

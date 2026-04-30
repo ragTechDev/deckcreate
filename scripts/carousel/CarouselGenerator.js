@@ -523,100 +523,171 @@ class CarouselGenerator {
 
     const width = 1080;
     const height = 1080;
-    const bgColor = ctaConfig.bgColor || '#1a1a2e';
-    const ctaText = ctaConfig.text || '';
-    const thumbnailUrl = ctaConfig.thumbnailUrl || '';
-    const platforms = ctaConfig.platforms || [];
+    const bgColor = '#9cd2d0';
+    const episodeNumber = ctaConfig.episodeNumber || '';
+    const episodeTitle = ctaConfig.episodeTitle || '';
+    const brandColor = ctaConfig.brandColor || '#eebf89';
+    const handle = ctaConfig.handle || 'ragtechdev';
+    
+    let imageBase64 = null;
+    let useThumbnail = false;
+    
+    if (ctaConfig.thumbnailPath) {
+      try {
+        const thumbBuffer = await fs.readFile(ctaConfig.thumbnailPath);
+        imageBase64 = `data:image/png;base64,${thumbBuffer.toString('base64')}`;
+        useThumbnail = true;
+      } catch (e) {
+        console.log('  Could not load thumbnail.png, falling back to logo');
+      }
+    }
+    
+    if (!imageBase64 && ctaConfig.logoBase64) {
+      imageBase64 = ctaConfig.logoBase64;
+    }
 
-    // Parse hex color to RGB
     const hexToRgb = (hex) => {
       const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
       return result ? {
         r: parseInt(result[1], 16),
         g: parseInt(result[2], 16),
         b: parseInt(result[3], 16),
-      } : { r: 26, g: 26, b: 46 };
+      } : { r: 156, g: 210, b: 208 };
     };
 
     const rgb = hexToRgb(bgColor);
+    const fontData = await this.loadNunitoFont();
 
-    // Create base with background color
-    let composite = sharp({
-      create: {
-        width,
-        height,
-        channels: 4,
-        background: { r: rgb.r, g: rgb.g, b: rgb.b, alpha: 1 },
-      },
-    }).png();
-
-    const layers = [];
-
-    // Fetch and add YouTube thumbnail if available
-    if (thumbnailUrl) {
-      try {
-        const thumbResponse = await fetch(thumbnailUrl);
-        if (thumbResponse.ok) {
-          const thumbBuffer = Buffer.from(await thumbResponse.arrayBuffer());
-          // Resize thumbnail to fit nicely in center (max 700px wide)
-          const resizedThumb = await sharp(thumbBuffer)
-            .resize(700, 394, { fit: 'inside' })
-            .png()
-            .toBuffer();
-
-          const thumbMeta = await sharp(resizedThumb).metadata();
-          const thumbX = Math.round((width - thumbMeta.width) / 2);
-          const thumbY = Math.round((height / 2) - thumbMeta.height / 2 - 60);
-
-          // Add rounded corners to thumbnail
-          const roundedMask = Buffer.from(
-            `<svg width="${thumbMeta.width}" height="${thumbMeta.height}">
-              <rect x="0" y="0" width="${thumbMeta.width}" height="${thumbMeta.height}" rx="16" ry="16" fill="white"/>
-            </svg>`
-          );
-          const roundedThumb = await sharp(resizedThumb)
-            .composite([{ input: roundedMask, blend: 'dest-in' }])
-            .png()
-            .toBuffer();
-
-          layers.push({ input: roundedThumb, top: thumbY, left: thumbX });
-        }
-      } catch (e) {
-        console.log('  Could not fetch thumbnail:', e.message);
-      }
+    // Load Techybara image for top left corner
+    let techybaraBase64 = null;
+    try {
+      const techybaraPath = path.join(process.cwd(), 'public', 'assets', 'techybara', 'techybara-holding-mic.png');
+      const techybaraBuffer = await fs.readFile(techybaraPath);
+      techybaraBase64 = `data:image/png;base64,${techybaraBuffer.toString('base64')}`;
+    } catch (e) {
+      console.log('  Could not load Techybara image');
     }
 
-    // Platform icon SVGs (simple recognizable shapes)
-    const platformIcons = {
-      instagram: `<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><circle cx="12" cy="12" r="5"/><circle cx="17.5" cy="6.5" r="1.5" fill="white" stroke="none"/></svg>`,
-      youtube: `<svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22.54 6.42a2.78 2.78 0 0 0-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.46a2.78 2.78 0 0 0-1.94 2A29 29 0 0 0 1 11.75a29 29 0 0 0 .46 5.33A2.78 2.78 0 0 0 3.4 19.13C5.12 19.56 12 19.56 12 19.56s6.88 0 8.6-.46a2.78 2.78 0 0 0 1.94-2 29 29 0 0 0 .46-5.25 29 29 0 0 0-.46-5.33z"/><polygon points="9.75 15.02 15.5 11.75 9.75 8.48 9.75 15.02" fill="white" stroke="none"/></svg>`,
-      tiktok: `<svg width="32" height="32" viewBox="0 0 24 24" fill="white"><path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-2.88 2.5 2.89 2.89 0 0 1 0-5.78 2.92 2.92 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 3 15.57 6.33 6.33 0 0 0 9.37 22a6.33 6.33 0 0 0 6.37-6.22V9.4a8.16 8.16 0 0 0 3.85.96V7.1a4.85 4.85 0 0 1-1.59-.41z"/></svg>`,
-      linkedin: `<svg width="32" height="32" viewBox="0 0 24 24" fill="white"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"/><rect x="2" y="9" width="4" height="12"/><circle cx="4" cy="4" r="2"/></svg>`,
-      spotify: `<svg width="32" height="32" viewBox="0 0 24 24" fill="white"><circle cx="12" cy="12" r="10" fill="none" stroke="white" stroke-width="2"/><path d="M8 15s3-1 4-1 4 1 4 1" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"/><path d="M7 12s3.5-1.5 5-1.5 5 1.5 5 1.5" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"/><path d="M6.5 9s4-2 5.5-2 5.5 2 5.5 2" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>`,
-      apple: `<svg width="32" height="32" viewBox="0 0 24 24" fill="white"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83z"/><path d="M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>`,
-    };
+    const scale = 3;
+    const imageWidth = useThumbnail ? 700 : 400;
+    const imageHeight = useThumbnail ? 394 : 200;
+    const imageX = (width - imageWidth) / 2;
 
-    // Build CTA text and platform icons SVG overlay
-    const fontData = await this.loadNunitoFont();
-    const ctaFontSize = 32;
-    const ctaLines = this.wordWrapText(ctaText, width - 120, ctaFontSize);
-    const ctaStartY = height - 200;
+    const pillText = episodeNumber ? `EP ${episodeNumber}` : '';
+    const pillScale = 1.5;
+    const pillFontSize = 18 * pillScale;
+    const pillPaddingX = 16 * pillScale;
+    const pillHeight = 28 * pillScale;
+    const pillWidth = pillText.length * (pillFontSize * 0.55) + pillPaddingX * 2;
+    
+    const titleSegments = [];
+    const boldRegex = /\*\*(.*?)\*\*/g;
+    let lastIndex = 0;
+    let match;
+    while ((match = boldRegex.exec(episodeTitle)) !== null) {
+      if (match.index > lastIndex) {
+        titleSegments.push({ text: episodeTitle.slice(lastIndex, match.index), isBold: false });
+      }
+      titleSegments.push({ text: match[1], isBold: true });
+      lastIndex = match.index + match[0].length;
+    }
+    if (lastIndex < episodeTitle.length) {
+      titleSegments.push({ text: episodeTitle.slice(lastIndex), isBold: false });
+    }
 
-    // Platform icons layout
-    const iconSize = 40;
-    const iconGap = 20;
-    const totalIconsWidth = platforms.length * iconSize + (platforms.length - 1) * iconGap;
-    const iconsStartX = (width - totalIconsWidth) / 2;
-    const iconsY = ctaStartY + (ctaLines.length * ctaFontSize * 1.3) + 30;
+    const titleFontSize = 20 * scale;
+    const maxTitleWidth = width - 120;
+    const charWidth = titleFontSize * 0.6;
+    const titleLines = [];
+    let currentLineSegments = [];
+    let currentLineLength = 0;
+    let prevSegStyle = null;
 
-    const platformIconsSvg = platforms.map((p, i) => {
-      const icon = platformIcons[p.toLowerCase()];
-      if (!icon) return '';
-      const x = iconsStartX + i * (iconSize + iconGap);
-      return `<g transform="translate(${x}, ${iconsY})">${icon.replace(/width="\d+"/, `width="${iconSize}"`).replace(/height="\d+"/, `height="${iconSize}"`)}</g>`;
+    for (const seg of titleSegments) {
+      const segText = seg.text;
+      const segWords = segText.split(' ').filter(w => w !== '');
+      const segEndsWithSpace = segText.endsWith(' ');
+
+      for (let i = 0; i < segWords.length; i++) {
+        const word = segWords[i];
+        const isLastWordInSeg = i === segWords.length - 1;
+        const needsTrailingSpace = !isLastWordInSeg || segEndsWithSpace;
+        const wordWithSpace = needsTrailingSpace ? word + ' ' : word;
+        const wordLength = wordWithSpace.length * charWidth;
+
+        const isStyleTransition = currentLineSegments.length > 0 &&
+                                   prevSegStyle !== null &&
+                                   prevSegStyle !== seg.isBold;
+        const isFirstWordOfSegment = i === 0;
+        const adjustedWord = (isStyleTransition && isFirstWordOfSegment) ? '\u00A0' + wordWithSpace : wordWithSpace;
+        const adjustedLength = adjustedWord.length * charWidth;
+
+        if (currentLineLength + adjustedLength > maxTitleWidth && currentLineSegments.length > 0) {
+          const lastSeg = currentLineSegments[currentLineSegments.length - 1];
+          lastSeg.text = lastSeg.text.trimEnd();
+          titleLines.push(currentLineSegments);
+          currentLineSegments = [{ text: wordWithSpace, isBold: seg.isBold }];
+          currentLineLength = wordLength;
+          prevSegStyle = seg.isBold;
+        } else {
+          if (currentLineSegments.length > 0 && currentLineSegments[currentLineSegments.length - 1].isBold === seg.isBold) {
+            currentLineSegments[currentLineSegments.length - 1].text += adjustedWord;
+          } else {
+            currentLineSegments.push({ text: adjustedWord, isBold: seg.isBold });
+          }
+          currentLineLength += adjustedLength;
+          prevSegStyle = seg.isBold;
+        }
+      }
+    }
+    if (currentLineSegments.length > 0) {
+      const lastSeg = currentLineSegments[currentLineSegments.length - 1];
+      lastSeg.text = lastSeg.text.trimEnd();
+      titleLines.push(currentLineSegments);
+    }
+
+    const titleLineHeight = titleFontSize * 1.3;
+    const pillY = 110;
+    const titleStartY = pillY + pillHeight + titleLineHeight;
+    const titleSvgElements = titleLines.map((lineSegments, i) => {
+      const y = titleStartY + (i * titleLineHeight);
+      const content = lineSegments.map((seg, idx) => {
+        const fill = seg.isBold ? brandColor : 'white';
+        const fontWeight = seg.isBold ? '800' : '600';
+        const trailingNbsp = (idx < lineSegments.length - 1 && 
+                              seg.isBold !== lineSegments[idx + 1].isBold &&
+                              !seg.text.endsWith(' ')) ? '\u00A0' : '';
+        return `<tspan fill="${fill}" font-weight="${fontWeight}">${this.escapeXml(seg.text + trailingNbsp)}</tspan>`;
+      }).join('');
+      return `<text x="${width / 2}" y="${y}" font-family="Nunito, Arial, sans-serif" font-size="${titleFontSize}" font-weight="600" text-anchor="middle" filter="url(#textShadow)">${content}</text>`;
     }).join('');
 
-    const overlaySvg = `
+    const titleEndY = titleStartY + (titleLines.length * titleLineHeight);
+    const imageY = titleEndY - 7; // Moved up 15px (was +8, now -7)
+
+    const platforms = [
+      { name: 'YouTube', icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M23.5 6.19a3.02 3.02 0 0 0-2.12-2.14C19.5 3.5 12 3.5 12 3.5s-7.5 0-9.38.55A3.02 3.02 0 0 0 .5 6.19 31.5 31.5 0 0 0 0 12a31.5 31.5 0 0 0 .5 5.81 3.02 3.02 0 0 0 2.12 2.14c1.88.55 9.38.55 9.38.55s7.5 0 9.38-.55a3.02 3.02 0 0 0 2.12-2.14A31.5 31.5 0 0 0 24 12a31.5 31.5 0 0 0-.5-5.81zM9.55 15.5V8.5l6.27 3.5-6.27 3.5z"/></svg>` },
+      { name: 'Spotify', icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><circle cx="12" cy="12" r="10" fill="none" stroke="white" stroke-width="2"/><path d="M8 15s3-1 4-1 4 1 4 1" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"/><path d="M7 12s3.5-1.5 5-1.5 5 1.5 5 1.5" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"/><path d="M6.5 9s4-2 5.5-2 5.5 2 5.5 2" fill="none" stroke="white" stroke-width="2" stroke-linecap="round"/></svg>` },
+      { name: 'Apple Podcasts', icon: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83z"/><path d="M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>` },
+    ];
+
+    const platformIconSize = 28 * scale;
+    const platformGap = 100 * scale;
+    const platformStartX = width / 2;
+    const platformY = imageY + imageHeight + 33; // Moved up 15px (was +48, now +33)
+    const platformLabelY = platformIconSize + 30; // 30px gap between icon and text
+
+    const platformsSvg = platforms.map((p, i) => {
+      const x = platformStartX + (i - 1) * platformGap;
+      return `
+        <g transform="translate(${x}, ${platformY})">
+          <svg width="${platformIconSize}" height="${platformIconSize}" viewBox="0 0 24 24" fill="white" x="-${platformIconSize/2}" y="0">${p.icon}</svg>
+          <text x="0" y="${platformLabelY}" font-family="Nunito, Arial, sans-serif" font-size="${12 * scale}" font-weight="600" fill="white" text-anchor="middle" dominant-baseline="hanging">${this.escapeXml(p.name)}</text>
+        </g>
+      `;
+    }).join('');
+
+    const ctaSvg = `
       <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
         <defs>
           <style type="text/css"><![CDATA[
@@ -627,23 +698,39 @@ class CarouselGenerator {
               src: url(data:font/truetype;charset=utf-8;base64,${fontData}) format('truetype');
             }
           ]]></style>
+          <filter id="textShadow" x="-50%" y="-50%" width="200%" height="200%">
+            <feDropShadow dx="0" dy="3" stdDeviation="5" flood-color="#000000" flood-opacity="0.6"/>
+          </filter>
+          <filter id="streamNowLift" x="-50%" y="-50%" width="200%" height="200%">
+            <feDropShadow dx="0" dy="-3" stdDeviation="2" flood-color="#ffffff" flood-opacity="0.4"/>
+            <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.5"/>
+          </filter>
         </defs>
-        ${ctaLines.map((line, i) => `
-          <text
-            x="${width / 2}"
-            y="${ctaStartY + i * ctaFontSize * 1.3}"
-            font-family="Nunito, Arial, sans-serif"
-            font-size="${ctaFontSize}"
-            font-weight="700"
-            fill="white"
-            text-anchor="middle"
-          >${this.escapeXml(line)}</text>
-        `).join('')}
-        ${platformIconsSvg}
+        
+        ${techybaraBase64 ? `
+        <image x="940" y="20" width="120" height="120" href="${techybaraBase64}" preserveAspectRatio="xMidYMid meet"/>
+        ` : ''}
+        
+        <text x="${width / 2}" y="80" font-family="Nunito, Arial, sans-serif" font-size="${Math.round(24 * scale * 0.8)}" font-weight="600" fill="${brandColor}" text-anchor="middle" filter="url(#streamNowLift)">Stream now:</text>
+        
+        ${pillText ? `
+        <g transform="translate(${width / 2 - pillWidth / 2}, ${pillY})">
+          <rect x="0" y="0" width="${pillWidth}" height="${pillHeight}" rx="${pillHeight / 2}" ry="${pillHeight / 2}" fill="white"/>
+          <text x="${pillWidth / 2}" y="${pillHeight / 2 + 6}" font-family="Nunito, Arial, sans-serif" font-size="${pillFontSize}" font-weight="700" fill="black" text-anchor="middle" dominant-baseline="middle">${pillText}</text>
+        </g>
+        ` : ''}
+        
+        ${titleSvgElements}
+        
+        ${imageBase64 ? `
+        <image x="${imageX}" y="${imageY}" width="${imageWidth}" height="${imageHeight}" href="${imageBase64}" preserveAspectRatio="xMidYMid meet"/>
+        ` : ''}
+        
+        ${platformsSvg}
+        
+        <text x="${width / 2}" y="${platformY + platformLabelY + 45}" font-family="Nunito, Arial, sans-serif" font-size="${16 * scale}" font-weight="700" fill="${brandColor}" text-anchor="middle" filter="url(#streamNowLift)">@${this.escapeXml(handle)}</text>
       </svg>
     `;
-
-    layers.push({ input: Buffer.from(overlaySvg), top: 0, left: 0 });
 
     const composited = await sharp({
       create: {
@@ -653,7 +740,7 @@ class CarouselGenerator {
         background: { r: rgb.r, g: rgb.g, b: rgb.b, alpha: 1 },
       },
     })
-      .composite(layers)
+      .composite([{ input: Buffer.from(ctaSvg), top: 0, left: 0 }])
       .png()
       .toBuffer();
 
@@ -665,7 +752,7 @@ class CarouselGenerator {
         filename: `${this.config.name}-cta-slide-${slideNumber}.png`,
       };
     } else {
-      const outputPath = path.join(this.outputDir, `cta-slide-${slideNumber}.png`);
+      const outputPath = path.join(this.outputDir, `slide-cta.png`);
       await fs.writeFile(outputPath, composited);
       console.log(`✓ Saved CTA: ${outputPath}`);
       return outputPath;

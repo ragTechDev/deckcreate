@@ -87,7 +87,7 @@ async function main() {
   const videoPath = path.join('public', 'sync', 'output', videoFile);
 
   // Check prerequisites
-  const transcriptPath = path.join(cwd, 'public', 'transcribe', 'output', 'edit', 'transcript.json');
+  const transcriptPath = path.join(cwd, 'public', 'edit', 'transcript.json');
   const cameraProfilesPath = path.join(cwd, 'public', 'camera', 'camera-profiles.json');
 
   if (!await fs.pathExists(transcriptPath)) {
@@ -304,7 +304,7 @@ async function main() {
 
     const args = [
       'scripts/thumbnail/generate-thumbnail.js',
-      '--transcript', 'transcribe/output/edit/transcript.json',
+      '--transcript', 'edit/transcript.json',
       '--camera-profiles', 'camera/camera-profiles.json',
       '--video', videoPath.replace(/^public\//, ''),
       '--output', path.join(cwd, 'public', 'thumbnail', 'thumbnail.png'),
