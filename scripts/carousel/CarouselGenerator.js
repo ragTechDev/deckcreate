@@ -1,6 +1,7 @@
 import sharp from 'sharp';
 import fs from 'fs-extra';
 import path from 'path';
+import PDFDocument from 'pdfkit';
 
 
 class CarouselGenerator {
@@ -757,6 +758,48 @@ class CarouselGenerator {
       console.log(`✓ Saved CTA: ${outputPath}`);
       return outputPath;
     }
+  }
+
+  /**
+   * Compile all slides (1 to N) and CTA slide into a single PDF
+   * @param {number} slideCount - Total number of regular slides
+   * @returns {Promise<string>} - Path to generated PDF
+   */
+  async generatePdf(slideCount) {
+    console.log(`\n📄 Compiling PDF with ${slideCount} slides + CTA...`);
+
+    const pdfPath = path.join(this.outputDir, `${this.config.name}-carousel.pdf`);
+    const doc = new PDFDocument({ size: [1080, 1080] });
+    const stream = fs.createWriteStream(pdfPath);
+    doc.pipe(stream);
+
+    // Add regular slides (slide-1.png through slide-{slideCount}.png)
+    for (let i = 1; i <= slideCount; i++) {
+      const slidePath = path.join(this.outputDir, `slide-${i}.png`);
+      if (await fs.pathExists(slidePath)) {
+        if (i > 1) doc.addPage();
+        const imgBuffer = await fs.readFile(slidePath);
+        doc.image(imgBuffer, 0, 0, { width: 1080, height: 1080 });
+      }
+    }
+
+    // Add CTA slide at the end
+    const ctaPath = path.join(this.outputDir, `slide-cta.png`);
+    if (await fs.pathExists(ctaPath)) {
+      doc.addPage();
+      const ctaBuffer = await fs.readFile(ctaPath);
+      doc.image(ctaBuffer, 0, 0, { width: 1080, height: 1080 });
+    }
+
+    doc.end();
+
+    return new Promise((resolve, reject) => {
+      stream.on('finish', () => {
+        console.log(`✓ PDF compiled: ${pdfPath}`);
+        resolve(pdfPath);
+      });
+      stream.on('error', reject);
+    });
   }
 
 

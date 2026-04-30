@@ -77,6 +77,55 @@ function formatDuration(seconds) {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
+function buildCarouselGuide() {
+  return [
+    '════════════════════════════════════════════════════════════════',
+    '  CAROUSEL EDITOR  ─  Editing Guide',
+    '════════════════════════════════════════════════════════════════',
+    '',
+    '  MARK CAROUSEL SLIDES',
+    '    Use CAROUSEL START/END to define the slide range:',
+    '      > CAROUSEL START',
+    '      [8] First carousel slide segment...',
+    '      [12] Last carousel slide segment...',
+    '      > CAROUSEL END',
+    '',
+    '  EDIT TEXT',
+    '    Just retype any word. Changes are saved.',
+    '',
+    '  CUT WORDS (optional)',
+    '    Wrap in curly braces to exclude:  {um}  {you know}',
+    '',
+    '  RENAME SPEAKER',
+    '    Edit the name after the colon in SPEAKERS below.',
+    '',
+    '  THUMBNAIL',
+    '    Edit # THUMBNAIL section to customize the CTA slide:',
+    '      title="Carousel title for the CTA slide"',
+    '      extendedTitle="Longer title shown on CTA"',
+    '      episodeNumber="001"',
+    '',
+    '════════════════════════════════════════════════════════════════',
+    '',
+  ].join('\n');
+}
+
+function replaceWithCarouselGuide(content) {
+  // Find the end of the guide section (marked by # THUMBNAIL or # SPEAKERS)
+  const thumbnailMatch = content.match(/# THUMBNAIL/);
+  const speakersMatch = content.match(/# SPEAKERS/);
+
+  let contentStart = content.length;
+  if (thumbnailMatch) contentStart = Math.min(contentStart, thumbnailMatch.index);
+  if (speakersMatch) contentStart = Math.min(contentStart, speakersMatch.index);
+
+  // Get everything from # THUMBNAIL/# SPEAKERS onwards (keeping the transcript content)
+  const transcriptContent = content.slice(contentStart);
+
+  // Return new guide + original transcript content
+  return buildCarouselGuide() + transcriptContent;
+}
+
 // ─── Path A: Create carousel from longform ───────────────────────────────────
 
 async function runPathA(fromLongform = false) {
@@ -122,8 +171,9 @@ async function runPathA(fromLongform = false) {
   const carouselJsonPath = path.join(cwd, 'public', 'carousel', carouselId, 'transcript.json');
   await fs.ensureDir(path.dirname(carouselDocPath));
 
-  // Copy the full doc for editing
+  // Copy the full doc for editing, but replace the guide header with carousel-specific guide
   let docContent = await fs.readFile(docPath, 'utf-8');
+  docContent = replaceWithCarouselGuide(docContent);
   await fs.writeFile(carouselDocPath, docContent);
   console.log(`  ✓ Copied transcript.doc.txt to public/carousel/${carouselId}/`);
 
@@ -147,24 +197,19 @@ async function runPathA(fromLongform = false) {
   console.log('\n  ── Carousel creation guide ──────────────────────────');
   console.log('  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('');
-  console.log('  ▶ MARK SLIDES with CAROUSEL directive:');
+  console.log('  ▶ MARK CAROUSEL SLIDES:');
   console.log('');
-  console.log('    Mark segments to include in carousel:');
-  console.log('      [5] This segment will be in the carousel...');
-  console.log('      > CAROUSEL');
-  console.log('');
-  console.log('    For a specific range:');
+  console.log('    Use CAROUSEL START/END to define slide range:');
   console.log('      > CAROUSEL START');
   console.log('      [8] First carousel slide segment...');
   console.log('      [12] Last carousel slide segment...');
   console.log('      > CAROUSEL END');
   console.log('');
-  console.log('  ▶ HOOK segments for carousel highlights:');
-  console.log('      [3] {Key insight for first slide}...');
-  console.log('      > HOOK');
+  console.log('  ▶ EDIT TEXT:');
+  console.log('      Just retype any word. Changes are saved.');
   console.log('');
-  console.log('  ▶ WORD-LEVEL CUTS (content to exclude):');
-  console.log('      [5] Remove these {um} {you know} filler words');
+  console.log('  ▶ CUT WORDS (optional):');
+  console.log('      Wrap in curly braces:  {um}  {you know}');
   console.log('');
   console.log('  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   openFile(carouselDocPath);
@@ -172,9 +217,10 @@ async function runPathA(fromLongform = false) {
   // 6. Edit doc
   console.log('\n  ── Edit carousel doc ─────────────────────────────────');
   console.log('  The doc is open. Now you:');
-  console.log('    1. Add "> CAROUSEL" before segments to include (or use range)');
-  console.log('    2. Optionally mark "> HOOK" for key highlight slides');
-  console.log('    3. Add {cuts} to clean up filler words');
+  console.log('    1. Add "> CAROUSEL START" before first carousel segment');
+  console.log('    2. Add "> CAROUSEL END" after last carousel segment');
+  console.log('    3. Edit text directly in segments as needed');
+  console.log('    4. Add {cuts} to remove filler words (optional)');
   console.log('');
   await ask('  Press Enter when done editing...');
 
@@ -536,7 +582,7 @@ async function generateFromLocalVideo(generator, videoPath, slides, outputDir, c
     // Check for thumbnail.png
     const thumbnailPath = path.join(cwd, 'public', 'thumbnail', 'thumbnail.png');
     const hasThumbnail = await fs.pathExists(thumbnailPath);
-    
+
     // Prepare CTA config
     const ctaConfig = {
       bgColor: headerConfig?.brandColor ? '#1a1a2e' : '#1a1a2e',
@@ -547,11 +593,22 @@ async function generateFromLocalVideo(generator, videoPath, slides, outputDir, c
       thumbnailPath: hasThumbnail ? thumbnailPath : null,
       logoBase64: headerConfig?.logoBase64 || null,
     };
-    
+
     await generator.generateCtaSlide(ctaConfig, slides.length + 1);
     console.log('  ✓ CTA slide generated');
   } catch (ctaError) {
     console.log(`  (CTA slide skipped: ${ctaError.message})`);
+  }
+
+  // Prompt for PDF compilation
+  console.log('\n  ── PDF Compilation ────────────────────────────────────');
+  const compilePdf = await askYesNo('  Compile slides into PDF?', false);
+  if (compilePdf) {
+    try {
+      await generator.generatePdf(slides.length);
+    } catch (pdfError) {
+      console.log(`  (PDF compilation skipped: ${pdfError.message})`);
+    }
   }
 }
 
@@ -619,6 +676,11 @@ async function runContinueCarousel(carouselId) {
     if (status.hasConfig) {
       steps.push({ id: 'regenerate', label: 'Regenerate carousel', always: false });
       console.log(`  ${stepNum++}. Regenerate carousel`);
+    }
+
+    if (status.hasOutput) {
+      steps.push({ id: 'pdf', label: 'Compile to PDF', always: false });
+      console.log(`  ${stepNum++}. Compile to PDF`);
     }
 
     steps.push({ id: 'video', label: 'Change video source', always: true });
@@ -706,6 +768,26 @@ async function runContinueCarousel(carouselId) {
         const configPath = path.join(carouselDir, 'carousel-config.json');
         const config = await fs.readJson(configPath);
         await generateCarousel(carouselId, config);
+        break;
+      }
+      case 'pdf': {
+        const configPath = path.join(carouselDir, 'carousel-config.json');
+        const config = await fs.readJson(configPath);
+        const outputDir = path.join(cwd, 'public', 'output', config.name);
+        const generator = new CarouselGenerator(config);
+        generator.outputDir = outputDir;
+        const slideFiles = await fs.readdir(outputDir).then(files =>
+          files.filter(f => f.startsWith('slide-') && f.endsWith('.png') && !f.includes('cta'))
+        );
+        if (slideFiles.length === 0) {
+          console.log('  ✗ No slides found to compile');
+          break;
+        }
+        try {
+          await generator.generatePdf(slideFiles.length);
+        } catch (pdfError) {
+          console.log(`  (PDF compilation failed: ${pdfError.message})`);
+        }
         break;
       }
       case 'video': {
