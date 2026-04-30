@@ -321,7 +321,39 @@ async function runPathA(fromLongform = false) {
   console.log('\n  ✓ Carousel workflow complete!\n');
 }
 
+// ─── Text cleaning for carousel segments ───────────────────────────────────
+
+function cleanSegmentText(text) {
+  if (!text) return '';
+  // Remove hesitation markers from Whisper: ", , , , ," or ". . . . ." patterns
+  // These appear as individual punctuation separated by spaces
+  return text
+    .replace(/\{\s*,(?:\s*,)*\s*\}/g, '')  // Remove {, , , ,} cut blocks
+    .replace(/\s*,(?:\s*,)+\s*/g, ' ')      // Collapse ", , , , ," to single space
+    .replace(/\s*\.(?:\s*\.)+\s*/g, ' ')    // Collapse ". . . . ." to single space
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 // ─── Extract carousel segments from edited doc ─────────────────────────────
+
+function parseSegmentLine(line) {
+  // Parse [123] text... format, applying cuts
+  const match = line.match(/^\[(\d+)\]\s*(.+)$/);
+  if (!match) return null;
+
+  const id = parseInt(match[1], 10);
+  let text = match[2].trim();
+
+  // Check for inline CUT marker
+  if (line.match(/^\[-\d+\]/)) return null; // Cut segment
+
+  // Apply cuts: remove {content} and clean up
+  text = text.replace(/\{[^}]*\}/g, '');  // Remove {cut content}
+  text = cleanSegmentText(text);           // Clean hesitation markers
+
+  return { id, text };
+}
 
 async function extractCarouselSegments(docContent, jsonPath) {
   const transcript = await fs.readJson(jsonPath);
@@ -331,9 +363,23 @@ async function extractCarouselSegments(docContent, jsonPath) {
   const pairs = [];
   let inCarousel = false;
   let selectedSegments = [];
+  let inHeader = true;  // Skip guide header until we hit transcript content
 
   for (const line of lines) {
     const trimmed = line.trim();
+
+    // Detect end of header / start of transcript content
+    if (inHeader && (
+      trimmed.startsWith('# THUMBNAIL') ||
+      trimmed.startsWith('# SPEAKERS') ||
+      trimmed.startsWith('===') ||
+      /^\[\d+\]/.test(trimmed)
+    )) {
+      inHeader = false;
+    }
+
+    // Skip everything in the guide header
+    if (inHeader) continue;
 
     // Carousel start markers
     if (/^>\s*CAROUSEL\s*START/i.test(trimmed) || trimmed === '> CAROUSEL') {
@@ -347,13 +393,17 @@ async function extractCarouselSegments(docContent, jsonPath) {
       continue;
     }
 
-    // Parse segment IDs
-    const segMatch = trimmed.match(/^\[(\d+)\]/);
-    if (segMatch && inCarousel) {
-      const segId = parseInt(segMatch[1], 10);
-      const seg = segments.find(s => s.id === segId);
+    // Parse segment IDs and extract text from the line itself
+    const parsed = parseSegmentLine(trimmed);
+    if (parsed && inCarousel) {
+      // Get segment from transcript for timestamps
+      const seg = segments.find(s => s.id === parsed.id);
       if (seg && !seg.cut) {
-        selectedSegments.push(seg);
+        // Use text from doc (with cuts applied), timestamps from transcript
+        selectedSegments.push({
+          ...seg,
+          text: parsed.text
+        });
       }
     }
   }
