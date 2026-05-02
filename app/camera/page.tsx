@@ -196,9 +196,10 @@ function CameraPageContent() {
   currentAngleIdxRef.current = currentAngleIdx;
   currentTimeframeIdxRef.current = currentTimeframeIdx;
 
-  // ── Mode: 'shorts' = portrait 9:16 output; default = landscape longform ──────
+  // ── Mode: 'shorts' = portrait 9:16 output; 'thumbnail' = thumbnail extraction ──────
   const searchParams = useSearchParams();
   const isShorts = searchParams.get('mode') === 'shorts';
+  const isThumbnail = searchParams.get('mode') === 'thumbnail';
   const isPortraitMode = isShorts;
   const outputDims = isShorts ? { w: 1080, h: 1920 } : null;
 
@@ -639,17 +640,25 @@ function CameraPageContent() {
 
     setSaving(true);
     try {
-      const saveUrl = isShorts
-        ? '/api/camera/save-profiles?dest=shorts'
-        : '/api/camera/save-profiles';
+      let saveUrl: string;
+      let destPath: string;
+      if (isShorts) {
+        saveUrl = '/api/camera/save-profiles?dest=shorts';
+        destPath = 'public/shorts/camera-profiles.json';
+      } else if (isThumbnail) {
+        saveUrl = '/api/camera/save-profiles?dest=thumbnail';
+        destPath = 'public/thumbnail/camera-profiles.json';
+      } else {
+        saveUrl = '/api/camera/save-profiles';
+        destPath = 'public/camera/camera-profiles.json';
+      }
       const res = await fetch(saveUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(profiles),
       });
       if (!res.ok) throw new Error((await res.json()).error);
-      const dest = isShorts ? 'public/shorts/camera-profiles.json' : 'public/camera/camera-profiles.json';
-      notifications.show({ color: 'green', message: `Saved to ${dest}` });
+      notifications.show({ color: 'green', message: `Saved to ${destPath}` });
     } catch (err) {
       notifications.show({ color: 'red', message: String(err) });
     } finally {
@@ -693,6 +702,11 @@ function CameraPageContent() {
         {isPortraitMode && (
           <Text size="xs" c="teal" bg="teal.0" px={8} py={2} style={{ borderRadius: 4 }}>
             9:16 Portrait Mode
+          </Text>
+        )}
+        {isThumbnail && (
+          <Text size="xs" c="orange" bg="orange.0" px={8} py={2} style={{ borderRadius: 4 }}>
+            Thumbnail Mode
           </Text>
         )}
       </Group>
@@ -755,6 +769,7 @@ function CameraPageContent() {
 
             <Box style={{ position: 'relative' }}>
               <img
+              key={frameSrc}
               src={frameSrc}
               alt="Video frame"
               onLoad={e => {
@@ -950,7 +965,7 @@ function CameraPageContent() {
                   </Button>
                   {assignedCount > 0 && (
                     <Text size="xs" c="dimmed">
-                      Saves to public/camera/camera-profiles.json
+                      Saves to {isShorts ? 'public/shorts/camera-profiles.json' : isThumbnail ? 'public/thumbnail/camera-profiles.json' : 'public/camera/camera-profiles.json'}
                     </Text>
                   )}
                 </>

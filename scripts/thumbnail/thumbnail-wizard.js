@@ -102,6 +102,57 @@ async function main() {
     process.exit(1);
   }
 
+  // STEP 0: Define speaker frame boundaries
+  console.log('\n─── STEP 0: Define Speaker Frame Boundaries ───────────────────────');
+  console.log('Before extracting candidates, verify that each speaker\'s face box is');
+  console.log('correctly positioned in the camera GUI. This ensures the right faces');
+  console.log('are extracted for each speaker.\n');
+  console.log('Important: The camera GUI will open in "thumbnail" mode. For each');
+  console.log('speaker, ensure their face box is correctly assigned and positioned.');
+
+  const thumbnailProfilesPath = path.join(cwd, 'public', 'thumbnail', 'camera-profiles.json');
+  let haveThumbnailProfiles = await fs.pathExists(thumbnailProfilesPath);
+
+  if (haveThumbnailProfiles) {
+    const recheck = await confirm('Thumbnail camera profiles already exist. Re-configure?', false);
+    if (recheck === 'skip') {
+      console.log('  → Skipping frame boundary configuration');
+    } else if (recheck) {
+      haveThumbnailProfiles = false;
+    }
+  }
+
+  if (!haveThumbnailProfiles) {
+    // Copy main camera profiles as starting point
+    await fs.ensureDir(path.dirname(thumbnailProfilesPath));
+    const baseProfiles = await fs.readJson(cameraProfilesPath);
+    await fs.writeJson(thumbnailProfilesPath, baseProfiles, { spaces: 2 });
+    console.log('  ✓ Created editable thumbnail profiles from base camera profiles');
+
+    // Prompt user to open camera GUI
+    console.log('\n  Please open the camera GUI to verify speaker boundaries:');
+    console.log('    http://localhost:3000/camera?mode=thumbnail');
+    console.log('\n  Instructions:');
+    console.log('    1. Ensure the dev server is running: npm run dev');
+    console.log('    2. Open the URL above in your browser');
+    console.log('    3. Verify each face box is correctly positioned for each speaker');
+    console.log('    4. Click "Save profiles" when done (saves to thumbnail/camera-profiles.json)');
+    console.log('');
+
+    const ready = await confirm('Have you verified and saved the speaker boundaries?', false);
+    if (!ready) {
+      console.log('\n  Please run the wizard again after configuring boundaries.');
+      quit();
+    }
+
+    if (!await fs.pathExists(thumbnailProfilesPath)) {
+      console.error('\n  ✗ Thumbnail profiles not saved. Please save in the camera GUI.');
+      quit();
+    }
+
+    console.log('  ✓ Frame boundaries configured');
+  }
+
   // STEP 1: Extract candidate frames
   console.log('\n─── STEP 1: Extract Candidate Frames ───────────────────');
   console.log('Extract 3 candidate frames per speaker from speaking segments.');
@@ -122,7 +173,7 @@ async function main() {
       await spawnStep('python3', [
         'scripts/thumbnail/extract-speaker-candidates.py',
         '--transcript', transcriptPath,
-        '--camera-profiles', cameraProfilesPath,
+        '--camera-profiles', thumbnailProfilesPath,
         '--video', videoPath,
         '--output-dir', candidatesDir,
         '--num-candidates', '6',

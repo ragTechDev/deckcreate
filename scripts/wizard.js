@@ -274,7 +274,7 @@ async function main() {
     // Check transcript for multi-angle videoSrcs to properly infer mode
     if ((mode === 4 || mode === 1) && existing.transcriptJson) {
       try {
-        const transcript = await fs.readJson(path.join(cwd, 'public', 'transcribe', 'output', 'edit', 'transcript.json'));
+        const transcript = await fs.readJson(path.join(cwd, 'public', 'edit', 'transcript.json'));
         const hasVideoSrcs = transcript?.meta?.videoSrcs && transcript.meta.videoSrcs.length > 0;
         const hasVideoSrc = transcript?.meta?.videoSrc;
         if (hasVideoSrcs || hasVideoSrc) {
@@ -420,8 +420,8 @@ async function main() {
   // ── STEP: Choose Whisper model ────────────────────────────────────────────
   const rawTranscriptPath = path.join(cwd, 'public', 'transcribe', 'output', 'raw', 'transcript.raw.json');
   const diarizationPath   = path.join(cwd, 'public', 'transcribe', 'output', 'raw', 'diarization.json');
-  const docPath           = path.join(cwd, 'public', 'transcribe', 'output', 'edit', 'transcript.doc.txt');
-  const transcriptPath    = path.join(cwd, 'public', 'transcribe', 'output', 'edit', 'transcript.json');
+  const docPath           = path.join(cwd, 'public', 'edit', 'transcript.doc.txt');
+  const transcriptPath    = path.join(cwd, 'public', 'edit', 'transcript.json');
 
   let whisperModel = 'medium.en';
   if (resumeStep < 2 && (!redoStepId || redoStepId === 'transcribe')) {
@@ -528,11 +528,6 @@ async function main() {
       console.log(`\n  Output: ${rawTranscriptPath}`);
       console.log(`          ${diarizationPath}`);
     }
-
-    const happy = await confirm('\n  Happy with the result?');
-    if (!happy) {
-      console.log('  Re-run wizard from the transcription step when ready.\n');
-    }
     } // end else (diarization not already done)
   } else if (shouldTranscribe) {
     console.log('\n  ── Transcribe ────────────────────────────────────────');
@@ -557,7 +552,7 @@ async function main() {
   })();
   if (shouldRunAlignment) {
     console.log('\n  ── Forced alignment (WhisperX, CPU-local) ────────────');
-    let alignArgs = ['run', 'align'];
+    let alignArgs = ['run', 'transcript:align'];
     let alignOk = false;
 
     while (!alignOk) {
@@ -586,7 +581,7 @@ async function main() {
 
           const pythonPath = (await ask('  Python path [.venv\\Scripts\\python.exe]: ')).trim()
             || '.venv\\Scripts\\python.exe';
-          alignArgs = ['run', 'align', '--', '--python', pythonPath];
+          alignArgs = ['run', 'transcript:align', '--', '--python', pythonPath];
 
           console.log('\n  → Re-running alignment...');
           continue;
@@ -678,7 +673,7 @@ async function main() {
       ];
       const offsetArgs = extraFlags.length > 0 ? ['--', ...extraFlags] : [];
       try {
-        await spawnStep('npm', ['run', 'assign-speakers']);
+        await spawnStep('npm', ['run', 'speakers:assign']);
         await spawnStep('npm', ['run', 'transcript:init', ...offsetArgs]);
       } catch (err) {
         console.error(`  ✗ ${err.message}`);
@@ -931,7 +926,7 @@ async function main() {
     const videoPath = videoSrcsForRemotion?.[0] || videoSrcForRemotion;
     const extractArgs = [
       'scripts/thumbnail/extract-speaker-candidates.py',
-      '--transcript', path.join(cwd, 'public', 'transcribe', 'output', 'edit', 'transcript.json'),
+      '--transcript', path.join(cwd, 'public', 'edit', 'transcript.json'),
       '--camera-profiles', path.join(cwd, 'public', 'camera', 'camera-profiles.json'),
       '--video', path.join(cwd, 'public', videoPath || 'sync/output/synced-output-1.mp4'),
       '--output-dir', thumbnailDir,
@@ -1005,7 +1000,7 @@ async function main() {
 
     // 4. Generate thumbnail
     console.log('\n  Step 4: Generating thumbnail...');
-    const transcript = await fs.readJson(path.join(cwd, 'public', 'transcribe', 'output', 'edit', 'transcript.json'));
+    const transcript = await fs.readJson(path.join(cwd, 'public', 'edit', 'transcript.json'));
     const title = transcript.meta?.title || '';
     const speakerNames = selections.map(s => s.speaker);
 
@@ -1045,7 +1040,7 @@ async function main() {
 
   // ── STEP: Cut preview (optional — skip for audio-only) ───────────────────
   if (mode !== 4) {
-    const previewPath = path.join(cwd, 'public', 'transcribe', 'output', 'edit', 'preview-cut.mp4');
+    const previewPath = path.join(cwd, 'public', 'edit', 'preview-cut.mp4');
     if (redoStepId === 'preview') {
       // Direct redo: run cut preview immediately
       await runStep('npm run cut:preview', 'npm', ['run', 'cut:preview'], previewPath);

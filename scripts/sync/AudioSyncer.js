@@ -363,6 +363,77 @@ class AudioSyncer {
     ]);
   }
 
+  // ─── Validation ──────────────────────────────────────────────────────────────
+
+  /**
+   * Computes a quick content fingerprint from the first 64KB of the file.
+   * Catches copies made to different directories (e.g., angle1.mp4 copied to angle2/).
+   *
+   * @param {string} filePath
+   * @returns {Promise<string>} sha256 hash of sample
+   */
+  static async getContentFingerprint(filePath) {
+    const { createHash } = await import('crypto');
+    const hash = createHash('sha256');
+    const fd = await fs.open(filePath, 'r');
+    try {
+      const buffer = Buffer.alloc(64 * 1024); // Sample first 64KB
+      const { bytesRead } = await fd.read(buffer, 0, buffer.length, 0);
+      hash.update(buffer.slice(0, bytesRead));
+      return hash.digest('hex');
+    } finally {
+      await fd.close();
+    }
+  }
+
+  /**
+   * Validates that all video paths point to distinct files.
+   * Checks for: duplicate paths, same inode (hardlinks/symlinks), and same content.
+   *
+   * @param {string[]} videoPaths
+   * @throws {Error} if duplicates are detected
+   */
+  static async validateUniqueVideos(videoPaths) {
+    // Level 1: Path deduplication (catches same path passed twice)
+    const normalizedPaths = videoPaths.map(p => path.resolve(p));
+    const pathSet = new Set();
+    for (const p of normalizedPaths) {
+      if (pathSet.has(p)) {
+        throw new Error(`Duplicate video path detected: ${p}. Each angle must be a different video file.`);
+      }
+      pathSet.add(p);
+    }
+
+    // Level 2: Inode check (catches hardlinks/symlinks to same file)
+    const identities = await Promise.all(videoPaths.map(async (p) => {
+      const stats = await fs.stat(p);
+      return `${stats.dev}-${stats.ino}`;
+    }));
+    const inodeSet = new Set();
+    for (let i = 0; i < identities.length; i++) {
+      if (inodeSet.has(identities[i])) {
+        throw new Error(
+          `Same file used for multiple angles (symlink/hardlink): ${videoPaths[i]}. ` +
+          `Each angle must be a different video file.`
+        );
+      }
+      inodeSet.add(identities[i]);
+    }
+
+    // Level 3: Content fingerprint (catches copies to different directories)
+    const fingerprints = await Promise.all(videoPaths.map(p => this.getContentFingerprint(p)));
+    const contentSet = new Set();
+    for (let i = 0; i < fingerprints.length; i++) {
+      if (contentSet.has(fingerprints[i])) {
+        throw new Error(
+          `Duplicate video content detected: ${videoPaths[i]} matches another angle's file. ` +
+          `Each angle must be a different video recording.`
+        );
+      }
+      contentSet.add(fingerprints[i]);
+    }
+  }
+
   // ─── Orchestration ───────────────────────────────────────────────────────────
 
   /**
@@ -472,6 +543,7 @@ class AudioSyncer {
    * @returns {Promise<Array<{outputPath: string, videoSrc: string, sourceWidth: number, sourceHeight: number}>>}
    */
   static async syncMultiple(videoPaths, audioPath, outputDir) {
+    await this.validateUniqueVideos(videoPaths);
     await fs.ensureDir(outputDir);
 
     // ── Pass 1: compute lags ──────────────────────────────────────────────────

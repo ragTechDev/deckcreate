@@ -269,7 +269,10 @@ function isExternalUrl(src: string): boolean {
 }
 
 function resolveSrc(src: string): string {
-  return isExternalUrl(src) ? src : staticFile(src);
+  if (isExternalUrl(src)) return src;
+  // Strip public/ prefix if present - staticFile expects paths relative to /public
+  const cleanSrc = src.replace(/^public\//, '').replace(/^\//, '');
+  return staticFile(cleanSrc);
 }
 
 function BackgroundLayer({ srcs }: { srcs?: string[] }) {
