@@ -1061,12 +1061,17 @@ async function main() {
     }
   }
 
-  // ── STEP: Cut preview (optional — skip for audio-only) ───────────────────
+  // ── STEP: Cut preview — default review step before Remotion ─────────────
+  // Fast ffmpeg export (~2-5 min). Review this before launching Remotion so
+  // the full overlay render (30-45 min) only runs on an approved cut.
   if (mode !== 4) {
     const previewPath = path.join(cwd, 'public', 'edit', 'preview-cut.mp4');
     if (redoStepId === 'preview') {
       // Direct redo: run cut preview immediately
+      console.log('\n  ── Review your edit (cut preview) ───────────────────');
       await runStep('npm run cut:preview', 'npm', ['run', 'cut:preview'], previewPath);
+      openFile(previewPath);
+      console.log(`  → Opened preview: ${previewPath}`);
       if (singleStepMode) {
         singleStepMode = false;
         redoStepId = null;
@@ -1077,10 +1082,14 @@ async function main() {
         }
       }
     } else if (!redoStepId) {
-      console.log('');
-      const doPreview = await confirm('  Generate flat MP4 preview?', false);
+      console.log('\n  ── Review your edit (cut preview) ───────────────────');
+      console.log('  Fast ffmpeg export (~2-5 min). Review before launching Remotion.');
+      const doPreview = await confirm('  Generate cut preview?', true);
       if (doPreview) {
         await runStep('npm run cut:preview', 'npm', ['run', 'cut:preview'], previewPath);
+        openFile(previewPath);
+        console.log(`  → Opened preview: ${previewPath}`);
+        console.log('  Review the cut, then continue to launch Remotion for the final overlay render.');
       }
     }
   }
@@ -1093,7 +1102,7 @@ async function main() {
       await spawnStep('npm', ['run', 'remotion:studio']);
     } else if (!redoStepId) {
       console.log('');
-      const doRemotion = await confirm('  Launch Remotion studio?', false);
+      const doRemotion = await confirm('  Launch Remotion studio for final overlay render?', false);
       if (doRemotion) {
         console.log('\n  Starting Remotion...\n');
         await spawnStep('npm', ['run', 'remotion:studio']);
