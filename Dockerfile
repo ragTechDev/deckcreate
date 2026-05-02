@@ -52,20 +52,24 @@ RUN npm ci
 # Copy application code
 COPY . .
 
-# Pin lightning away from compromised versions before any package that pulls it in.
-# whisperx → pyannote-audio → lightning>=2.4 is the transitive exposure path.
-# Versions 2.6.2 and 2.6.3 contain malicious code (Mini Shai-Hulud supply chain attack)
-# that exfiltrates credentials at install time. The != constraint allows future clean releases.
-# NOTE: lightningcss in the comment above is a separate Node.js package — not affected.
-RUN pip install --no-cache-dir "lightning!=2.6.2,!=2.6.3"
+# Install CPU-only PyTorch before any package that depends on it.
+# Default pip install fetches the CUDA build (~2.5 GB). Docker on macOS runs in a Linux
+# VM with no GPU — CUDA binaries are dead weight. CPU-only build is ~250 MB.
+# Also pins lightning away from compromised versions 2.6.2/2.6.3 (Mini Shai-Hulud attack:
+# whisperx → pyannote-audio → lightning>=2.4 is the transitive exposure path).
+# NOTE: lightningcss above is a separate Node.js package — not affected.
+RUN pip install --no-cache-dir \
+      torch torchaudio \
+      --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir "lightning!=2.6.2,!=2.6.3"
 
 # Install Python dependencies globally (not in venv to avoid volume mount conflicts)
-RUN pip install --upgrade pip setuptools wheel && \
-    pip install -r scripts/diarize/requirements.txt && \
-    pip install whisperx faster-whisper && \
-    pip install -r scripts/camera/requirements.txt && \
-    pip install -r scripts/thumbnail/requirements.txt && \
-    pip install "coverage>=7.0"
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r scripts/diarize/requirements.txt && \
+    pip install --no-cache-dir whisperx faster-whisper && \
+    pip install --no-cache-dir -r scripts/camera/requirements.txt && \
+    pip install --no-cache-dir -r scripts/thumbnail/requirements.txt && \
+    pip install --no-cache-dir "coverage>=7.0"
 
 # Ensure directories exist
 RUN mkdir -p input/video input/audio \
