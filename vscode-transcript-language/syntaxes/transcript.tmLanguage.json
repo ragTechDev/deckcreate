@@ -1,0 +1,161 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Transcript Doc",
+  "scopeName": "source.transcript-doc",
+  "fileTypes": [],
+  "patterns": [
+    { "include": "#editing-guide" },
+    { "include": "#separator" },
+    { "include": "#section-header" },
+    { "include": "#speaker-heading" },
+    { "include": "#annotation" },
+    { "include": "#segment-cut" },
+    { "include": "#segment" },
+    { "include": "#kv-pair" },
+    { "include": "#speaker-map" }
+  ],
+  "repository": {
+    "editing-guide": {
+      "comment": "The entire editing guide header (between the two ═══ border lines) is a muted comment block",
+      "begin": "^[═]+\\s*$",
+      "end": "^[═]+\\s*$",
+      "name": "comment.block.transcript-doc",
+      "beginCaptures": { "0": { "name": "comment.block.transcript-doc" } },
+      "endCaptures": { "0": { "name": "comment.block.transcript-doc" } }
+    },
+
+    "separator": {
+      "match": "^---\\s*$",
+      "name": "comment.line.separator.transcript-doc"
+    },
+
+    "section-header": {
+      "match": "^(#)\\s+(THUMBNAIL|SPEAKERS)\\b",
+      "captures": {
+        "1": { "name": "punctuation.definition.heading.transcript-doc" },
+        "2": { "name": "entity.name.section.transcript-doc" }
+      }
+    },
+
+    "speaker-heading": {
+      "match": "^(={3})\\s+(.+?)\\s+(={3})\\s*$",
+      "captures": {
+        "1": { "name": "punctuation.definition.heading.transcript-doc" },
+        "2": { "name": "entity.name.type.speaker.transcript-doc" },
+        "3": { "name": "punctuation.definition.heading.transcript-doc" }
+      }
+    },
+
+    "annotation": {
+      "begin": "^(\\s*)(>)(\\s*)",
+      "end": "$",
+      "beginCaptures": {
+        "2": { "name": "keyword.operator.annotation.transcript-doc" }
+      },
+      "patterns": [
+        { "include": "#directive-name" },
+        { "include": "#attr-assignment" },
+        { "include": "#quoted-string" },
+        { "include": "#timing-range" },
+        { "include": "#number" },
+        { "include": "#image-path" }
+      ]
+    },
+
+    "directive-name": {
+      "match": "\\b(HOOK|CAM|SPEAKER|START|END|LowerThird|NameTitle|Callout|ChapterMarker|ChapterMarkerEnd|ConceptExplainer|ImageWindow|GifWindow|AIOverlay|CodingOverlay|EngineeringOverlay|LanguageOverlay|FrameworkOverlay|InfrastructureOverlay|PracticeOverlay|RoleOverlay|EducationOverlay|AwardsOverlay|RagtechOverlay)\\b",
+      "name": "keyword.control.directive.transcript-doc"
+    },
+
+    "attr-assignment": {
+      "match": "\\b(at|duration|name|title|text|chapterTitle|src|caption|width|gifHeight|playbackRate|loopBehavior|char|keyPhrase|description|side|concept|hookFrom|hookTo|bg|middlespeaker|extendedTitle|episodeNumber)(=)",
+      "captures": {
+        "1": { "name": "variable.parameter.attr.transcript-doc" },
+        "2": { "name": "punctuation.separator.key-value.transcript-doc" }
+      }
+    },
+
+    "quoted-string": {
+      "match": "\"(?:[^\"\\\\]|\\\\.)*\"",
+      "name": "string.quoted.double.transcript-doc"
+    },
+
+    "timing-range": {
+      "match": "\\b\\d+\\.\\d+(?:-\\d+\\.\\d+)?\\b",
+      "name": "constant.numeric.timing.transcript-doc"
+    },
+
+    "number": {
+      "match": "\\b\\d+\\b",
+      "name": "constant.numeric.transcript-doc"
+    },
+
+    "image-path": {
+      "match": "\\[([^\\]]+)\\]",
+      "name": "markup.underline.link.transcript-doc"
+    },
+
+    "segment-cut": {
+      "match": "^(\\s*-\\[)(\\d+)(\\])(.*$)",
+      "captures": {
+        "1": { "name": "markup.deleted.transcript-doc" },
+        "2": { "name": "markup.deleted.transcript-doc" },
+        "3": { "name": "markup.deleted.transcript-doc" },
+        "4": { "name": "markup.deleted.transcript-doc" }
+      }
+    },
+
+    "segment": {
+      "begin": "^(\\s*)(\\[)(\\d+)(\\])(\\s+)",
+      "end": "$",
+      "beginCaptures": {
+        "2": { "name": "punctuation.definition.segment.transcript-doc" },
+        "3": { "name": "constant.numeric.segment-id.transcript-doc" },
+        "4": { "name": "punctuation.definition.segment.transcript-doc" }
+      },
+      "patterns": [
+        { "include": "#cut-word" },
+        { "include": "#speaker-override-inline" }
+      ]
+    },
+
+    "cut-word": {
+      "begin": "\\{",
+      "end": "\\}",
+      "name": "markup.deleted.cut-word.transcript-doc",
+      "beginCaptures": { "0": { "name": "punctuation.definition.cut.begin.transcript-doc" } },
+      "endCaptures": { "0": { "name": "punctuation.definition.cut.end.transcript-doc" } },
+      "patterns": [
+        { "match": "\\|", "name": "punctuation.separator.cut.transcript-doc" },
+        { "match": "\\d+\\.\\d+(?:,\\s*\\d+\\.\\d+)?", "name": "constant.numeric.timing.transcript-doc" }
+      ]
+    },
+
+    "speaker-override-inline": {
+      "match": "^(SPEAKER)(:\\s*)(\\w+(?:[\\s]+\\w+)*?)(?=\\s)",
+      "captures": {
+        "1": { "name": "keyword.control.directive.transcript-doc" },
+        "2": { "name": "punctuation.separator.transcript-doc" },
+        "3": { "name": "entity.name.type.speaker.transcript-doc" }
+      }
+    },
+
+    "kv-pair": {
+      "match": "^(\\w[\\w-]*)\\s*(=)(\"(?:[^\"\\\\]|\\\\.)*\")",
+      "captures": {
+        "1": { "name": "variable.parameter.key.transcript-doc" },
+        "2": { "name": "punctuation.separator.key-value.transcript-doc" },
+        "3": { "name": "string.quoted.double.transcript-doc" }
+      }
+    },
+
+    "speaker-map": {
+      "match": "^(\\w[\\w\\s]*?)\\s*(:)\\s*(\\w[\\w\\s]*)\\s*$",
+      "captures": {
+        "1": { "name": "variable.other.speaker-key.transcript-doc" },
+        "2": { "name": "punctuation.separator.transcript-doc" },
+        "3": { "name": "entity.name.type.speaker.transcript-doc" }
+      }
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "name": "vscode-transcript-doc",
+  "displayName": "Transcript Doc",
+  "description": "Syntax highlighting, linting, and completions for RAG Tech transcript .doc.txt files",
+  "version": "0.1.0",
+  "engines": { "vscode": "^1.80.0" },
+  "scripts": {
+    "install-ext": "ln -sf \"$(pwd)\" \"$HOME/.vscode/extensions/vscode-transcript-doc-0.1.0\""
+  },
+  "categories": ["Programming Languages"],
+  "main": "./src/extension.js",
+  "activationEvents": ["onLanguage:transcript-doc"],
+  "contributes": {
+    "languages": [
+      {
+        "id": "transcript-doc",
+        "aliases": ["Transcript Doc", "transcript-doc"],
+        "filenamePatterns": ["*.doc.txt"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "transcript-doc",
+        "scopeName": "source.transcript-doc",
+        "path": "./syntaxes/transcript.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "transcript-doc",
+        "path": "./snippets/transcript.json"
+      }
+    ]
+  }
+}

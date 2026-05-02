@@ -1,0 +1,117 @@
+{
+  "Hook": {
+    "prefix": ">hook",
+    "body": "> HOOK \"$1\"",
+    "description": "HOOK annotation — teaser clip before the video"
+  },
+  "Hook with timing": {
+    "prefix": ">hooktime",
+    "body": "> HOOK \"$1\" ${2:start}-${3:end}",
+    "description": "HOOK with explicit from-to seconds"
+  },
+  "Hook with char": {
+    "prefix": ">hookchar",
+    "body": "> HOOK \"$1\" char=${2:techybara-holding-mic}",
+    "description": "HOOK with Techybara mascot"
+  },
+  "CAM speaker": {
+    "prefix": ">cam",
+    "body": "> CAM $1",
+    "description": "Force camera to a speaker"
+  },
+  "CAM speaker at word": {
+    "prefix": ">camat",
+    "body": "> CAM $1  at=\"$2\"",
+    "description": "Force camera to a speaker at a specific word"
+  },
+  "CAM wide": {
+    "prefix": ">camwide",
+    "body": "> CAM wide",
+    "description": "Force wide shot"
+  },
+  "SPEAKER override": {
+    "prefix": ">speaker",
+    "body": "> SPEAKER $1  at=\"$2\"",
+    "description": "Override/split speaker at a word"
+  },
+  "START trim": {
+    "prefix": ">start",
+    "body": "> START \"$1\"",
+    "description": "Trim video start point"
+  },
+  "END trim": {
+    "prefix": ">end",
+    "body": "> END \"$1\"",
+    "description": "Trim video end point"
+  },
+  "NameTitle": {
+    "prefix": ">nt",
+    "body": "> NameTitle  at=\"$1\"  duration=${2:3}  name=\"$3\"  title=\"$4\"",
+    "description": "Name/title lower-third graphic"
+  },
+  "LowerThird": {
+    "prefix": ">lt",
+    "body": "> LowerThird  at=\"$1\"  duration=${2:5}  name=\"$3\"  title=\"$4\"",
+    "description": "Lower-third graphic"
+  },
+  "Callout": {
+    "prefix": ">callout",
+    "body": "> Callout  at=\"$1\"  duration=${2:5}  text=\"$3\"",
+    "description": "Callout quote overlay"
+  },
+  "ChapterMarker": {
+    "prefix": ">chapter",
+    "body": "> ChapterMarker  at=\"$1\"  duration=${2:120}  chapterTitle=\"$3\"",
+    "description": "Chapter marker overlay (loops until ChapterMarkerEnd)"
+  },
+  "ChapterMarkerEnd": {
+    "prefix": ">chapterend",
+    "body": "> ChapterMarkerEnd  at=\"$1\"  duration=${2:1}",
+    "description": "Fade out chapter marker"
+  },
+  "ConceptExplainer": {
+    "prefix": ">concept",
+    "body": "> ConceptExplainer  at=\"$1\"  duration=${2:8}  keyPhrase=\"$3\"  description=\"$4\"",
+    "description": "Concept explainer overlay"
+  },
+  "ImageWindow": {
+    "prefix": ">image",
+    "body": "> ImageWindow  at=\"$1\"  duration=${2:8}  src=\"$3\"  title=\"$4\"",
+    "description": "macOS-style image window overlay"
+  },
+  "ImageWindow with caption": {
+    "prefix": ">imagecap",
+    "body": "> ImageWindow  at=\"$1\"  duration=${2:8}  src=\"$3\"  title=\"$4\"  caption=\"$5\"",
+    "description": "macOS-style image window overlay with caption"
+  },
+  "GifWindow": {
+    "prefix": ">gif",
+    "body": "> GifWindow  at=\"$1\"  duration=${2:8}  src=\"$3\"  title=\"$4\"",
+    "description": "Animated GIF window overlay"
+  },
+  "AIOverlay": {
+    "prefix": ">ai",
+    "body": "> AIOverlay  at=\"$1\"  duration=${2:5}  concept=\"ai\"",
+    "description": "AI keyword overlay"
+  },
+  "CodingOverlay": {
+    "prefix": ">coding",
+    "body": "> CodingOverlay  at=\"$1\"  duration=${2:5}  concept=\"coding\"",
+    "description": "Coding keyword overlay"
+  },
+  "RagtechOverlay": {
+    "prefix": ">ragtech",
+    "body": "> RagtechOverlay  at=\"$1\"  duration=${2:8}",
+    "description": "RAG Tech brand overlay"
+  },
+  "LanguageOverlay": {
+    "prefix": ">lang",
+    "body": "> LanguageOverlay  at=\"$1\"  duration=${2:5}  concept=\"${3:python}\"",
+    "description": "Programming language keyword overlay"
+  },
+  "FrameworkOverlay": {
+    "prefix": ">framework",
+    "body": "> FrameworkOverlay  at=\"$1\"  duration=${2:5}  concept=\"${3:react}\"",
+    "description": "Framework keyword overlay"
+  }
+}
