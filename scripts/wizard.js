@@ -59,14 +59,6 @@ async function placeFiles(mode) {
   return { videoFile, audioFile };
 }
 
-async function copyToSyncDirs(videoFile, audioFile) {
-  const syncVideo = path.join(cwd, 'public', 'sync', 'video');
-  const syncAudio = path.join(cwd, 'public', 'sync', 'audio');
-  await fs.ensureDir(syncVideo);
-  await fs.ensureDir(syncAudio);
-  await copyFileWithProgress(videoFile, path.join(syncVideo, path.basename(videoFile)), 'Copying video...');
-  await copyFileWithProgress(audioFile, path.join(syncAudio, path.basename(audioFile)), 'Copying audio...');
-}
 
 async function extractAudio(videoPath) {
   const outPath = path.join(cwd, 'public', 'transcribe', 'input', 'audio.wav');
@@ -382,11 +374,10 @@ async function main() {
       console.log(`  ✓ Synced ${numAngles} angles:`);
       syncResults.forEach((r, i) => console.log(`    Angle ${i + 1}: ${path.basename(r.outputPath)}`));
     } else {
-      // Single angle: use existing npm run sync (writes synced-output.mp4)
-      await copyToSyncDirs(videoFile, audioFile);
+      // Single angle: pass paths directly so no intermediate copy is needed
       await runStep(
         'npm run sync',
-        'npm', ['run', 'sync'],
+        'npm', ['run', 'sync', '--', '--video', videoFile, '--audio', audioFile],
         path.join(syncOutputDir, 'synced-output.mp4'),
       );
       videoForExtract = path.join(syncOutputDir, 'synced-output.mp4');
