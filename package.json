@@ -58,6 +58,7 @@
     "transcript:merge": "node scripts/edit-transcript.js --merge-doc public/edit/transcript.doc.txt",
     "transcript:merge:cut-pauses": "node scripts/edit-transcript.js --merge-doc public/edit/transcript.doc.txt --auto-cut-pauses 0.5",
     "util:vtt-to-srt": "node scripts/shared/vtt-to-srt.js",
+    "video:optimize": "node scripts/optimize/optimize-for-remotion.js",
     "video:wizard": "node scripts/wizard.js",
     "video:wizard:docker": "docker compose run --rm --service-ports wizard"
   },

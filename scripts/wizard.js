@@ -203,14 +203,15 @@ async function main() {
       resumeStep = 0;
     } else if (menuChoice === '2') {
       const stepDefs = [
-        { id: 'sync',       label: 'Sync audio + video',           done: existing.syncedVideo,        resumeAt: 0 },
-        { id: 'transcribe', label: 'Transcribe + Diarize',         done: existing.rawTranscript,      resumeAt: 1 },
-        { id: 'align',      label: 'Forced alignment',             done: existing.alignedTranscript,  resumeAt: 1 },
-        { id: 'buildDoc',   label: 'Build editable doc',           done: existing.transcriptDoc,      resumeAt: 2 },
-        { id: 'mergeDoc',   label: 'Merge doc → transcript.json',  done: existing.transcriptJson,     resumeAt: 3 },
-        { id: 'camera',     label: 'Camera setup',                 done: existing.cameraProfiles,     resumeAt: 4 },
-        { id: 'preview',    label: 'Cut preview (MP4)',            done: false,                       resumeAt: 4 },
-        { id: 'remotion',   label: 'Launch Remotion studio',       done: false,                       resumeAt: 4 },
+        { id: 'sync',       label: 'Sync audio + video',                    done: existing.syncedVideo,        resumeAt: 0 },
+        { id: 'optimize',   label: 'Re-optimise synced video for Remotion', done: false,                       resumeAt: 0 },
+        { id: 'transcribe', label: 'Transcribe + Diarize',                  done: existing.rawTranscript,      resumeAt: 1 },
+        { id: 'align',      label: 'Forced alignment',                      done: existing.alignedTranscript,  resumeAt: 1 },
+        { id: 'buildDoc',   label: 'Build editable doc',                    done: existing.transcriptDoc,      resumeAt: 2 },
+        { id: 'mergeDoc',   label: 'Merge doc → transcript.json',           done: existing.transcriptJson,     resumeAt: 3 },
+        { id: 'camera',     label: 'Camera setup',                          done: existing.cameraProfiles,     resumeAt: 4 },
+        { id: 'preview',    label: 'Cut preview (MP4)',                     done: false,                       resumeAt: 4 },
+        { id: 'remotion',   label: 'Launch Remotion studio',                done: false,                       resumeAt: 4 },
       ];
       console.log('\n  Which step would you like to run?');
       stepDefs.forEach((s, i) => {
@@ -389,6 +390,28 @@ async function main() {
         path.join(syncOutputDir, 'synced-output.mp4'),
       );
       videoForExtract = path.join(syncOutputDir, 'synced-output.mp4');
+    }
+  }
+
+  // ── STEP: Keyframe optimisation (post-sync, mode 1 only) ─────────────────
+  // Re-encodes synced video with -g 60 -movflags +faststart so Remotion can
+  // seek frame-by-frame without decoding back to sparse keyframes (~5h → ~35min).
+  if (resumeStep === 0 && mode === 1 && (!redoStepId || redoStepId === 'optimize')) {
+    console.log('\n  ── Optimise video for Remotion (keyframes) ──────────');
+    const { optimizeForRemotion } = await import('./optimize/optimize-for-remotion.js');
+    const pathsToOptimize = numAngles > 1
+      ? syncResults.map(r => r.outputPath)
+      : [path.join(syncOutputDir, 'synced-output.mp4')];
+    await optimizeForRemotion(pathsToOptimize);
+  }
+
+  if (singleStepMode && redoStepId === 'optimize') {
+    singleStepMode = false;
+    redoStepId = null;
+    if (!await confirm('  Continue with the next steps?', false)) {
+      console.log('\n  ✓ Done!\n');
+      rl.close();
+      return;
     }
   }
 
