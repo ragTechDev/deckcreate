@@ -153,7 +153,7 @@ package.json                         — new video:optimize script
 
 ---
 
-### Commit 1 — `fix: detect and replace wrong-platform whisper binary`
+### Commit 1 — `fix: detect and replace wrong-platform whisper binary` ✅ DONE
 
 **Status check:** `scripts/transcribe/Transcriber.js` `ensureWhisper()` contains a read
 of the first 4 bytes of `binaryPath` and a check against the ELF magic bytes `7F 45 4C 46`.
@@ -202,7 +202,7 @@ No other changes to the file.
 
 ---
 
-### Commit 2 — `perf: set remotion concurrency to available cpu cores`
+### Commit 2 — `perf: set remotion concurrency to available cpu cores` ✅ DONE
 
 **Status check:** `remotion.config.ts` imports `os` and calls `Config.setConcurrency()`.
 
@@ -232,7 +232,7 @@ on the actual machine).
 
 ---
 
-### Commit 3 — `feat: add post-sync keyframe optimization`
+### Commit 3 — `feat: add post-sync keyframe optimization` ✅ DONE
 
 **Status check:** `scripts/optimize/optimize-for-remotion.js` exists AND `package.json`
 has a `video:optimize` script entry AND `scripts/wizard.js` contains the string
@@ -329,7 +329,7 @@ existing synced-output files found in `public/sync/output/`.
 
 ---
 
-### Commit 4 — `feat: promote cut-preview as primary review step`
+### Commit 4 — `feat: promote cut-preview as primary review step` ✅ DONE
 
 **Status check:** In `scripts/wizard.js`, the cut-preview `confirm()` call uses `true` as
 its default argument (not `false`), AND the block calls `openFile(previewPath)` after the
@@ -380,7 +380,7 @@ No other changes.
 
 ---
 
-### Commit 5 — `fix: pin lightning away from compromised pypi versions` ⚠️ SECURITY
+### Commit 5 — `fix: pin lightning away from compromised pypi versions` ⚠️ SECURITY ✅ DONE
 
 **Status check:** `Dockerfile` contains `lightning!=2.6.2,!=2.6.3` on a `pip install`
 constraint line that appears **before** any `pip install whisperx` or
@@ -418,7 +418,7 @@ Confirm the version is neither `2.6.2` nor `2.6.3`.
 
 ---
 
-### Commit 6 — `fix: exclude media directories from docker build context`
+### Commit 6 — `fix: exclude media directories from docker build context` ✅ DONE
 
 **Status check:** `.dockerignore` contains `public/sync/output/` and `public/renders/`.
 
@@ -462,7 +462,7 @@ empty (or not exist). If media files appear, the `.dockerignore` is not taking e
 
 ---
 
-### Commit 7 — `perf: use cpu-only pytorch and no-cache-dir in dockerfile`
+### Commit 7 — `perf: use cpu-only pytorch and no-cache-dir in dockerfile` ✅ DONE
 
 **Status check:** `Dockerfile` contains `--index-url https://download.pytorch.org/whl/cpu`
 on the `pip install torch` line AND all `pip install` calls include `--no-cache-dir`.
