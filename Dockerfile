@@ -52,6 +52,13 @@ RUN npm ci
 # Copy application code
 COPY . .
 
+# Pin lightning away from compromised versions before any package that pulls it in.
+# whisperx → pyannote-audio → lightning>=2.4 is the transitive exposure path.
+# Versions 2.6.2 and 2.6.3 contain malicious code (Mini Shai-Hulud supply chain attack)
+# that exfiltrates credentials at install time. The != constraint allows future clean releases.
+# NOTE: lightningcss in the comment above is a separate Node.js package — not affected.
+RUN pip install --no-cache-dir "lightning!=2.6.2,!=2.6.3"
+
 # Install Python dependencies globally (not in venv to avoid volume mount conflicts)
 RUN pip install --upgrade pip setuptools wheel && \
     pip install -r scripts/diarize/requirements.txt && \
