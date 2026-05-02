@@ -78,6 +78,22 @@ class Transcriber {
       await fs.remove(this.whisperDir);
     }
 
+    // Guard against a wrong-platform binary (e.g. Linux ELF installed via Docker on macOS).
+    // ELF magic: 0x7F 'E' 'L' 'F'. On a non-Linux host an ELF binary cannot run and will
+    // not use Metal acceleration even if somehow invoked through a compatibility layer.
+    if (binaryExists && process.platform !== 'linux') {
+      const fd = await fs.open(binaryPath, 'r');
+      const magic = Buffer.alloc(4);
+      await fd.read(magic, 0, 4, 0);
+      await fd.close();
+      const isElf = magic[0] === 0x7F && magic[1] === 0x45 && magic[2] === 0x4C && magic[3] === 0x46;
+      if (isElf) {
+        console.log('  Detected Linux whisper.cpp binary on non-Linux host — reinstalling for this platform...');
+        await fs.remove(this.whisperDir);
+        binaryExists = false;
+      }
+    }
+
     if (!binaryExists) {
       console.log('  Installing whisper.cpp (one-time setup)...');
       await installWhisperCpp({ to: this.whisperDir, version: WHISPER_VERSION });
