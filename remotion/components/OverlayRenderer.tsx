@@ -243,10 +243,13 @@ export const OverlayRenderer: React.FC<OverlayRendererProps> = ({
     return cues;
   }, [segments, fps, mainSections, hookSections, mainStartFrame]);
 
+  const IMAGE_WINDOW_MINIMIZE_FRAMES = fps * 3;
+
   // Find cues that should be currently visible
-  const visibleCues = graphicsCues.filter(
-    (g) => currentFrame >= g.startFrame && currentFrame < g.startFrame + g.durationInFrames
-  );
+  const visibleCues = graphicsCues.filter((g) => {
+    const extra = g.cue.type === 'ImageWindow' ? IMAGE_WINDOW_MINIMIZE_FRAMES : 0;
+    return currentFrame >= g.startFrame && currentFrame < g.startFrame + g.durationInFrames + extra;
+  });
 
   console.log(`[OverlayRenderer] Frame ${currentFrame}: ${visibleCues.length} visible cues out of ${graphicsCues.length} total`);
 

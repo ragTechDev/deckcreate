@@ -462,25 +462,29 @@ function buildWordGroups(tokens) {
 }
 
 function buildGraphicLine(graphic, tokens) {
-  const wordGroups = buildWordGroups(tokens);
+  // Use preserved atWord if available, otherwise reconstruct from timestamp
   let atValue;
-
-  if (wordGroups.length) {
-    let best = wordGroups[0];
-    let bestDelta = Math.abs(best.t_dtw - graphic.at);
-    for (const g of wordGroups) {
-      const d = Math.abs(g.t_dtw - graphic.at);
-      if (d < bestDelta) { bestDelta = d; best = g; }
-    }
-    const word = stripPunctuation(best.text).trim();
-    const normalizedWord = word.toLowerCase();
-    const groupIdx = wordGroups.indexOf(best);
-    const occurrencesBefore = wordGroups
-      .slice(0, groupIdx)
-      .filter(g => normalize(g.text) === normalizedWord).length;
-    atValue = occurrencesBefore > 0 ? `"${word}:${occurrencesBefore + 1}"` : `"${word}"`;
+  if (graphic.atWord) {
+    atValue = `"${graphic.atWord}"`;
   } else {
-    atValue = String(graphic.at);
+    const wordGroups = buildWordGroups(tokens);
+    if (wordGroups.length) {
+      let best = wordGroups[0];
+      let bestDelta = Math.abs(best.t_dtw - graphic.at);
+      for (const g of wordGroups) {
+        const d = Math.abs(g.t_dtw - graphic.at);
+        if (d < bestDelta) { bestDelta = d; best = g; }
+      }
+      const word = stripPunctuation(best.text).trim();
+      const normalizedWord = word.toLowerCase();
+      const groupIdx = wordGroups.indexOf(best);
+      const occurrencesBefore = wordGroups
+        .slice(0, groupIdx)
+        .filter(g => normalize(g.text) === normalizedWord).length;
+      atValue = occurrencesBefore > 0 ? `"${word}:${occurrencesBefore + 1}"` : `"${word}"`;
+    } else {
+      atValue = String(graphic.at);
+    }
   }
 
   const pairs = [`at=${atValue}`, `duration=${graphic.duration}`];
@@ -554,8 +558,14 @@ function buildInstructionsBlock() {
     '                    > LowerThird  at="word"  duration=5  name="Name"  title="Role"',
     '                    > NameTitle  at="word"  duration=5  name="Name"  title="Role"',
     '                    > Callout  at="word"  duration=5  text="Quote"',
-    '                    > ChapterMarker  at="word"  duration=5',
+    '                    > ChapterMarker  at="word"  duration=5  chapterTitle="Section Name"',
     '                    > ChapterMarkerEnd  at="word"  duration=1',
+    '                  ChapterMarker displays a terminal-style code overlay that types out a chapter',
+    '                  header (e.g., `chapter: "Introduction",`). It loops continuously (3 min typing,',
+    '                  1 min pause) and fades to 50% opacity after 3 seconds. Use chapterTitle= to set',
+    '                  the displayed chapter name (appears in video and YouTube chapters). Use side=left',
+    '                  or side=right to position (defaults to right). ChapterMarkerEnd fades out the',
+    '                  previous marker to start a new chapter.',
     '                    > ConceptExplainer  at="word"  duration=8  keyPhrase="Term"  description="Explanation of the concept"',
     '                    > ImageWindow  at="word"  duration=8  src="https://example.com/image.png"  title="Window Title"  caption="Optional caption"',
     '                  ImageWindow opens like a macOS window from below (spring), shows the image',
@@ -655,7 +665,18 @@ function buildDoc(transcript) {
       lastSpeaker = speaker;
     }
 
-    if (videoStart !== undefined && seg.start === videoStart) lines.push('> START');
+    // Write > START when videoStart falls within this segment's time range
+    if (videoStart !== undefined && videoStart >= seg.start && videoStart <= seg.end) {
+      // Find the word at videoStart to preserve phrase-based START markers
+      let startPhrase = '';
+      for (const t of seg.tokens) {
+        if (t.t_dtw >= videoStart && !isSpecialToken(t)) {
+          startPhrase = t.text.trim();
+          break;
+        }
+      }
+      lines.push(startPhrase ? `> START "${startPhrase}"` : '> START');
+    }
 
     const text = cleanCaptionText(buildTextWithCuts(seg));
     let segLine = `${seg.cut ? '-' : ''}[${seg.id}]`;
@@ -682,7 +703,18 @@ function buildDoc(transcript) {
       lines.push(`    > CUT ${vc.from.toFixed(3)}-${vc.to.toFixed(3)}`);
     }
 
-    if (videoEnd !== undefined && seg.end === videoEnd) lines.push('> END');
+    // Write > END when videoEnd falls within this segment's time range
+    if (videoEnd !== undefined && videoEnd >= seg.start && videoEnd <= seg.end) {
+      // Find the word at videoEnd to preserve phrase-based END markers
+      let endPhrase = '';
+      for (const t of seg.tokens) {
+        if (t.t_dtw >= videoEnd && !isSpecialToken(t)) {
+          endPhrase = t.text.trim();
+          break;
+        }
+      }
+      lines.push(endPhrase ? `> END "${endPhrase}"` : '> END');
+    }
   }
 
   return instructions + thumbnailSection + speakersSection + lines.join('\n') + '\n';
@@ -788,6 +820,7 @@ function parseGraphicLine(line, tokens, segStart = 0) {
   // Resolve at="word" or at="word:2" to absolute seconds via token t_dtw.
   // Uses word-group matching so contractions (e.g. "I'm" → [" I", "'m"]) resolve correctly.
   let at = segStart;
+  let atWord = undefined; // Preserve original word to avoid reconstruction errors
   if (kv.at !== undefined) {
     const raw = kv.at;
     const colonIdx = raw.lastIndexOf(':');
@@ -800,6 +833,8 @@ function parseGraphicLine(line, tokens, segStart = 0) {
       phrase = raw;
       occurrence = 0;
     }
+
+    atWord = phrase; // Store original word for rebuild
 
     if (occurrence === 0) {
       const tokenIdx = resolvePhraseToFirstTokenIndex(phrase, tokens);
@@ -817,7 +852,7 @@ function parseGraphicLine(line, tokens, segStart = 0) {
     if (k !== 'at' && k !== 'duration') props[k] = v;
   }
 
-  return { type, at, duration, props };
+  return { type, at, duration, props, atWord };
 }
 
 function applyTextPartsToTokens(rawText, tokens) {
@@ -1114,6 +1149,7 @@ function mergeDocIntoTranscript(transcript, docContent) {
   let videoStart = transcript.meta.videoStart;
   let videoEnd = transcript.meta.videoEnd;
   let nextSegIsVideoStart = false;
+  let pendingStartPhrase = null; // Store phrase when START appears before segment
 
   function flushPending() {
     if (!pendingSeg) return;
@@ -1212,15 +1248,18 @@ function mergeDocIntoTranscript(transcript, docContent) {
     if (startMatch) {
       const phrase = startMatch[1];
       if (phrase && pendingSeg) {
-        // Find exact time of phrase start within current segment
+        // START after segment: resolve immediately
         const range = resolvePhraseToTimeRange(phrase, pendingSeg.tokens, pendingSeg.end);
         if (range) {
           videoStart = range.from;
           console.log(`  START phrase "${phrase}" → ${videoStart.toFixed(3)}s`);
         } else {
           console.warn(`  ⚠ START phrase not found: "${phrase}"`);
-          nextSegIsVideoStart = true; // fallback to segment start
+          nextSegIsVideoStart = true;
         }
+      } else if (phrase) {
+        // START before segment: defer resolution until segment is parsed
+        pendingStartPhrase = phrase;
       } else {
         nextSegIsVideoStart = true;
       }
@@ -1303,6 +1342,19 @@ function mergeDocIntoTranscript(transcript, docContent) {
       if (nextSegIsVideoStart) {
         videoStart = seg.start;
         nextSegIsVideoStart = false;
+      }
+
+      // Resolve deferred START phrase now that we have the segment
+      if (pendingStartPhrase) {
+        const range = resolvePhraseToTimeRange(pendingStartPhrase, tokens, seg.end);
+        if (range) {
+          videoStart = range.from;
+          console.log(`  START phrase "${pendingStartPhrase}" → ${videoStart.toFixed(3)}s`);
+        } else {
+          console.warn(`  ⚠ START phrase not found: "${pendingStartPhrase}" — using segment start`);
+          videoStart = seg.start;
+        }
+        pendingStartPhrase = null;
       }
 
       pendingSeg = { ...seg, speaker, cut, text: cleanText, tokens };

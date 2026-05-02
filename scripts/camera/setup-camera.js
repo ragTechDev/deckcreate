@@ -355,6 +355,7 @@ async function main() {
 
     if (isMultiAngle) {
       console.log(`\n── ${angleName}: ${path.basename(videoPath)}`);
+      console.log(`  Full path: ${videoPath}`);
     }
 
     // Get video duration for dynamic angle calculation
@@ -404,6 +405,8 @@ async function main() {
       }
 
       console.log(`\n  [${tIdx + 1}/${frameTimestamps.length}] Extracting frame at t=${timestamp.toFixed(1)}s...`);
+      console.log(`     From: ${videoPath}`);
+      console.log(`     To:   ${framePath}`);
       await extractFrame(videoPath, timestamp, framePath);
 
       if (args.skipDetect) {

@@ -6,10 +6,17 @@ import { OverlayGalleryComposition, GALLERY_TOTAL_FRAMES } from './components/Ov
 
 // require.context is a webpack API — scans public/shorts/ at bundle time
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const SHORT_IDS: string[] = (require as any)
-  .context('../public/shorts', true, /\/transcript\.json$/)
-  .keys()
-  .map((k: string) => k.split('/')[1]);
+const SHORT_IDS: string[] = (() => {
+  try {
+    return (require as any)
+      .context('../public/shorts', true, /\/transcript\.json$/)
+      .keys()
+      .map((k: string) => k.split('/')[1]);
+  } catch {
+    // Directory doesn't exist - no shorts configured yet
+    return [];
+  }
+})();
 
 export const RemotionRoot: React.FC = () => {
   return (

@@ -50,12 +50,13 @@ async function fetchJson<T>(src: string): Promise<T> {
   return res.json();
 }
 
-/** Returns only the segments within the video window defined by meta.videoStart/End. */
+/** Returns only the segments that overlap the video window defined by meta.videoStart/End. */
 function getActiveSegments(transcript: Transcript) {
   const { videoStart, videoEnd } = transcript.meta;
   return transcript.segments.filter(s => {
-    if (videoStart !== undefined && s.start < videoStart) return false;
-    if (videoEnd !== undefined && s.end > videoEnd) return false;
+    // Exclude segments that end before videoStart or start after videoEnd
+    if (videoStart !== undefined && s.end < videoStart) return false;
+    if (videoEnd !== undefined && s.start > videoEnd) return false;
     return true;
   });
 }

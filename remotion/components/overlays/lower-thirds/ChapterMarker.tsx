@@ -133,8 +133,7 @@ export const ChapterMarker: React.FC<ChapterMarkerProps> = ({
     <div
       style={{
         position: 'absolute',
-        top: 120,
-        ...(side === 'left' ? { left: 50 } : { right: 120 }),
+        ...(side === 'left' ? { top: 120, left: 50 } : { top: 3, right: 3 }),
         display: 'flex',
         alignItems: 'flex-start',
         justifyContent: 'flex-start',

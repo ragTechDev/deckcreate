@@ -334,6 +334,9 @@ const SectionGroupPlayer: React.FC<{
   const effectiveVolume = volume * groupFade;
 
   if (cut === null) return null;
+  // opacity:0 causes browsers to suspend video decode (videoWidth→0), which makes
+  // Remotion's createImageData call fail. Unmount instead of rendering invisible.
+  if (effectiveVolume <= 0 && groupFade <= 0) return null;
 
   const sourceFrame = cut.trimBefore + frame;
   const sourceSeconds = sourceFrame / fps;

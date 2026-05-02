@@ -7,9 +7,12 @@ from ML libraries that may print progress logs.
 """
 
 import argparse
+import gc
 import json
 import sys
 from pathlib import Path
+
+import torch
 
 
 def eprint(msg: str) -> None:
@@ -92,23 +95,102 @@ def main() -> int:
             )
             return 0
 
+        def log_memory(label=''):
+            try:
+                with open('/proc/meminfo', 'r') as f:
+                    meminfo = f.read()
+                total = 0
+                available = 0
+                for line in meminfo.split('\n'):
+                    if line.startswith('MemTotal:'):
+                        total = int(line.split()[1]) // 1024
+                    elif line.startswith('MemAvailable:'):
+                        available = int(line.split()[1]) // 1024
+                used = total - available
+                pct = int(used / total * 100) if total > 0 else 0
+                prefix = f'[{label}] ' if label else ''
+                eprint(f'  {prefix}Memory: {pct}% used ({used}MB / {total}MB), {available}MB available')
+            except Exception:
+                pass
+
         eprint('Loading audio...')
         audio = whisperx.load_audio(str(audio_path))
+        log_memory('after audio load')
 
         eprint(f'Loading WhisperX align model for language="{args.language}" on {args.device}...')
         model_a, metadata = whisperx.load_align_model(language_code=args.language, device=args.device)
+        log_memory('after model load')
 
-        eprint('Running forced alignment...')
-        result = whisperx.align(
-            align_inputs,
-            model_a,
-            metadata,
-            audio,
-            args.device,
-            return_char_alignments=False,
-        )
+        # Process ONE segment at a time to isolate crashes
+        aligned_segments = []
+        total_inputs = len(align_inputs)
 
-        aligned_segments = result.get('segments', []) if isinstance(result, dict) else []
+        for seg_idx in range(total_inputs):
+            global_idx = align_idx_to_raw_idx[seg_idx]
+            seg = align_inputs[seg_idx]
+            seg_duration = seg['end'] - seg['start']
+            word_count = len(seg['text'].split())
+            # Sanity check: max 10 seconds per word (generous upper bound)
+            max_reasonable_duration = max(30, word_count * 10)
+
+            if seg_duration > max_reasonable_duration:
+                eprint(f'WARNING: Segment {seg_idx} has suspicious duration {seg_duration:.1f}s for {word_count} words')
+                eprint(f'  Text: "{seg["text"]}"')
+                eprint(f'  Skipping alignment - using fallback timestamps')
+                aligned_segments.append({
+                    'raw_index': global_idx,
+                    'start': seg['start'],
+                    'end': seg['start'] + max(1.0, word_count * 0.5),  # Estimate ~0.5s per word
+                    'text': seg['text'],
+                    'words': [],
+                })
+                continue
+
+            eprint(f'Aligning segment {seg_idx}/{total_inputs} (raw index {global_idx}): "{seg["text"][:50]}..."')
+
+            try:
+                with torch.no_grad():
+                    result = whisperx.align(
+                        [seg],
+                        model_a,
+                        metadata,
+                        audio,
+                        args.device,
+                        return_char_alignments=False,
+                    )
+            except Exception as e:
+                eprint(f'ERROR: Segment {seg_idx} (raw index {global_idx}) failed: {e}')
+                eprint(f'  Text: "{seg["text"]}"')
+                eprint(f'  Start: {seg["start"]}, End: {seg["end"]}')
+                # Create fallback result
+                aligned_segments.append({
+                    'raw_index': global_idx,
+                    'start': seg['start'],
+                    'end': seg['end'],
+                    'text': seg['text'],
+                    'words': [],
+                })
+                continue
+
+            batch_aligned = result.get('segments', []) if isinstance(result, dict) else []
+            del result
+
+            if batch_aligned:
+                out_seg = batch_aligned[0]
+                aligned_segments.append(out_seg)
+            else:
+                # No alignment output - use fallback
+                aligned_segments.append({
+                    'raw_index': global_idx,
+                    'start': seg['start'],
+                    'end': seg['end'],
+                    'text': seg['text'],
+                    'words': [],
+                })
+
+            # Periodic GC every 10 segments
+            if seg_idx % 10 == 0:
+                gc.collect()
 
         output_segments = []
         for aligned_idx, out_seg in enumerate(aligned_segments):

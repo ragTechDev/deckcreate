@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useCurrentFrame, useVideoConfig, spring, interpolate, Img } from 'remotion';
 import type { Brand } from '../../types/brand';
 
@@ -35,13 +35,30 @@ export const ImageWindowOverlay: React.FC<ImageWindowOverlayProps> = ({
   const { fps, width: videoWidth, height: videoHeight } = useVideoConfig();
   const { colors, shape, typography } = brand;
 
+  const [naturalSize, setNaturalSize] = useState<{ w: number; h: number } | null>(null);
+
   // Calculate window size to fit viewport with padding for chapter marker
   const availableHeight = videoHeight - CHAPTER_MARKER_PADDING - WINDOW_MARGIN;
   const availableWidth = videoWidth - WINDOW_MARGIN * 2;
+  const maxW = propWidth ?? availableWidth;
+  const titleBarH = 42;
+  const captionH = caption ? 44 : 0;
+  const maxImageHeight = availableHeight - titleBarH - captionH;
 
-  // For shorts: fill width with small gap (use all available width)
-  const width = propWidth ?? availableWidth;
-  const maxImageHeight = availableHeight - 42 - (caption ? 44 : 0); // Subtract title bar and optional caption
+  // Size window to exactly fit the image — no blank space
+  let width: number;
+  let imageWidth: number;
+  let imageHeight: number;
+  if (naturalSize) {
+    const scale = Math.min(maxW / naturalSize.w, maxImageHeight / naturalSize.h);
+    imageWidth = naturalSize.w * scale;
+    imageHeight = naturalSize.h * scale;
+    width = imageWidth;
+  } else {
+    width = maxW;
+    imageWidth = maxW;
+    imageHeight = maxImageHeight;
+  }
 
   // Open: spring from bottom, scale 0→1 + translateY 200→0
   const openSpring = spring({
@@ -130,7 +147,7 @@ export const ImageWindowOverlay: React.FC<ImageWindowOverlayProps> = ({
               whiteSpace: 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
-              maxWidth: width - 120,
+              maxWidth: Math.max(0, width - 120),
               pointerEvents: 'none',
             }}
           >
@@ -138,23 +155,24 @@ export const ImageWindowOverlay: React.FC<ImageWindowOverlayProps> = ({
           </div>
         </div>
 
-        {/* Image area */}
+        {/* Image area — sized to exactly match rendered image dimensions */}
         <div
           style={{
             background: '#0d1117',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            overflow: 'hidden',
-            maxHeight: maxImageHeight,
+            width: imageWidth,
+            height: imageHeight,
+            flexShrink: 0,
           }}
         >
           <Img
             src={src}
+            onLoad={(e) => {
+              const img = e.currentTarget;
+              setNaturalSize({ w: img.naturalWidth, h: img.naturalHeight });
+            }}
             style={{
-              width: '100%',
-              maxHeight: maxImageHeight,
-              objectFit: 'contain',
+              width: imageWidth,
+              height: imageHeight,
               display: 'block',
             }}
           />

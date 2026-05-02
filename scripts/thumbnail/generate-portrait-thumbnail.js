@@ -337,8 +337,50 @@ async function generatePortraitThumbnail(args) {
   process.exit(0);
 }
 
+async function loadFromTranscript(args) {
+  const cwd = process.cwd();
+  const transcriptPath = path.join(cwd, 'public', 'edit', 'transcript.json');
+
+  if (!await fs.pathExists(transcriptPath)) {
+    return args;
+  }
+
+  try {
+    const transcript = await fs.readJson(transcriptPath);
+    const thumb = transcript.meta?.thumbnail;
+
+    if (!thumb) {
+      return args;
+    }
+
+    // Fill in missing values from transcript.json
+    if (!args.extendedTitle && thumb.extendedTitle) {
+      args.extendedTitle = thumb.extendedTitle;
+      console.log(`  Loaded extendedTitle from transcript: "${args.extendedTitle}"`);
+    }
+
+    if (!args.episodeNumber && thumb.episodeNumber) {
+      args.episodeNumber = thumb.episodeNumber;
+      console.log(`  Loaded episodeNumber from transcript: ${args.episodeNumber}`);
+    }
+
+    if (!args.bgImagesUrl && thumb.bg?.length) {
+      args.bgImagesUrl = thumb.bg.join(',');
+      console.log(`  Loaded ${thumb.bg.length} background image(s) from transcript`);
+    }
+
+    return args;
+  } catch (err) {
+    console.warn(`  Warning: Could not read transcript.json: ${err.message}`);
+    return args;
+  }
+}
+
 async function main() {
-  const args = parseArgs();
+  let args = parseArgs();
+
+  // Auto-fill from transcript.json if values not provided via CLI
+  args = await loadFromTranscript(args);
 
   try {
     await generatePortraitThumbnail(args);
