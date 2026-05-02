@@ -60,3 +60,24 @@ whisper.cpp
 # Temporary files
 *.tmp
 .cache
+
+# Generated media files — mounted as Docker volumes at runtime, never baked into image.
+# Without these exclusions, COPY . . silently copies GBs of video files into every build.
+input/video/
+input/audio/
+public/sync/video/
+public/sync/audio/
+public/sync/output/
+public/transcribe/input/
+public/transcribe/output/
+public/renders/
+public/output/
+public/edit/
+public/camera/
+public/thumbnail/
+public/shorts/
+public/proxy/
+
+# Build artefacts that have no place in the runtime image
+deckcreate-wizard.tar.gz
+docs/
