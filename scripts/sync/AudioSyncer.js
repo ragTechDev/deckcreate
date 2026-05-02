@@ -234,20 +234,22 @@ class AudioSyncer {
    * Shared processing chain applied to both outputs before loudness normalisation:
    *   0. Stereo→mono downmix (aformat) — only when input has ≥2 channels
    *   1. High-pass at 80 Hz  — removes low-frequency rumble and hiss
-   *   2. FFT denoising       — broadband noise reduction (noise floor -25 dB)
-   *   3. Low-mid cut 300 Hz  — reduces boxiness/muddiness
-   *   4. Presence boost 3 kHz — adds vocal clarity and intelligibility
-   *   5. Dynamic compressor  — evens out volume, ratio 4:1 with soft makeup gain
+   *   2. Low-mid cut 300 Hz  — reduces boxiness/muddiness
+   *   3. Presence boost 3 kHz — adds vocal clarity and intelligibility
+   *   4. Dynamic compressor  — evens out volume, ratio 2:1 (transparent)
+   *
+   * afftdn is intentionally absent: FFT denoising on clean podcast audio
+   * introduces spectral phase artifacts ("watery" / phasey effect). Loudnorm
+   * handles gain staging so no makeup gain is needed on the compressor.
    */
   buildBaseFilterChain(isStereo = false) {
     const filters = [];
     if (isStereo) filters.push('aformat=channel_layouts=mono');
     filters.push(
       'highpass=f=80',
-      'afftdn=nf=-25',
       'equalizer=f=300:width_type=o:width=2:g=-2',
       'equalizer=f=3000:width_type=o:width=2:g=2',
-      'acompressor=threshold=-20dB:ratio=4:attack=5:release=50:makeup=3dB',
+      'acompressor=threshold=-20dB:ratio=2:attack=5:release=50',
     );
     return filters.join(',');
   }
@@ -319,6 +321,12 @@ class AudioSyncer {
     // tonemapped video stream alongside the loudness-normalised audio stream.
     const filterComplex = `[0:v]${videoVf}[v_out];[1:a]${baseFilter},${loudnorm}[a_out]`;
 
+    // Use VideoToolbox hardware encoder on macOS; fall back to libx264 elsewhere.
+    // -sc_threshold and -keyint_min are libx264-only options, omitted for VideoToolbox.
+    const videoEncArgs = process.platform === 'darwin'
+      ? ['-c:v', 'h264_videotoolbox', '-q:v', '65', '-g', '60']
+      : ['-c:v', 'libx264', '-crf', '23', '-preset', 'fast', '-g', '60', '-keyint_min', '60', '-sc_threshold', '0'];
+
     await spawnProcess('ffmpeg', [
       '-ss', String(videoStart), '-i', this.videoPath,
       '-ss', String(audioStart), '-i', this.audioPath,
@@ -332,9 +340,8 @@ class AudioSyncer {
       // must seek into the middle of the file for hook clips; without nearby
       // keyframes it snaps to the preceding one and plays from there, causing
       // the hook to start many seconds before the intended frame.
-      '-c:v', 'libx264', '-crf', '23', '-preset', 'fast',
+      ...videoEncArgs,
       // format=yuv420p is already at the end of both videoVf chains
-      '-g', '60', '-keyint_min', '60', '-sc_threshold', '0',
       '-c:a', 'aac', '-ar', '48000', '-b:a', '192k',
       '-movflags', '+faststart',
       this.outputPath,
@@ -443,11 +450,11 @@ class AudioSyncer {
    * @returns {{ lagSeconds: number, snr: number, isReliable: boolean }}
    */
   async computeLag() {
-    console.log('  Step A: Extracting audio from video (may take a while for large files)...');
-    const videoWav = await this.extractVideoAudio();
-
-    console.log('  Step B: Converting audio file to WAV...');
-    const audioWav = await this.convertAudioToWav();
+    console.log('  Step A/B: Extracting audio tracks in parallel...');
+    const [videoWav, audioWav] = await Promise.all([
+      this.extractVideoAudio(),
+      this.convertAudioToWav(),
+    ]);
 
     console.log('  Step C: Loading waveform data...');
     const videoSamples = this.loadWavSamples(videoWav);
@@ -476,22 +483,22 @@ class AudioSyncer {
     if (isStereo) console.log(`  Input audio has ${audioChannels} channels — downmixing to mono.`);
     const baseFilter = this.buildBaseFilterChain(isStereo);
 
-    console.log('  Measuring loudness for video output (-1 dBFS TP)...');
+    console.log('  Measuring loudness (-16 LUFS target, single pass)...');
     const videoStats = await this.measureLoudness(trimPoints.audioStart, trimPoints.duration, baseFilter, -16, -1);
-    console.log(`  Video audio measured: ${videoStats.input_i} LUFS integrated, ${videoStats.input_tp} dBTP`);
+    console.log(`  Measured: ${videoStats.input_i} LUFS integrated, ${videoStats.input_tp} dBTP`);
 
     console.log('  Rendering video output...');
     await this.runVideoOutput(trimPoints, baseFilter, videoStats);
     console.log(`  Video: ${this.outputPath}`);
 
     if (produceAudioFile) {
-      console.log('  Measuring loudness for audio output (-14 LUFS)...');
-      const audioStats = await this.measureLoudness(trimPoints.audioStart, trimPoints.duration, baseFilter, -14, -1);
-      const audioTP = parseFloat(audioStats.input_i) > -14 ? -2 : -1;
-      console.log(`  Audio measured: ${audioStats.input_i} LUFS integrated, ${audioStats.input_tp} dBTP -> using TP=${audioTP} dB`);
+      // Derive the -14 LUFS audio target from the single measurement pass.
+      // target_offset = targetI − input_I; shifting from −16 to −14 adds 2 dB.
+      const audioTP = parseFloat(videoStats.input_i) > -14 ? -2 : -1;
+      const audioStats = { ...videoStats, target_offset: String(parseFloat(videoStats.target_offset) + 2) };
 
       const audioOutputPath = this.outputPath.replace(/\.[^.]+$/, '.wav');
-      console.log('  Rendering audio output...');
+      console.log(`  Rendering audio output (-14 LUFS, TP=${audioTP} dB)...`);
       await this.runAudioOutput(trimPoints, baseFilter, audioStats, audioOutputPath, audioTP);
       console.log(`  Audio: ${audioOutputPath}`);
     }
