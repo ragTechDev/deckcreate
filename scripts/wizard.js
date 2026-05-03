@@ -156,16 +156,15 @@ async function main() {
   // ── Detect existing work ───────────────────────────────────────────────────
   const existing = await detectExistingWork();
 
-  //  resumeStep: 0=fresh  1=audio ready  2=transcribed  3=doc generated  4=edits applied
+  //  resumeStep: 0=fresh  1=audio ready (or sync done)  2=transcribed  3=doc generated  4=edits applied
   let resumeStep = 0;
+  if (existing.syncedVideo)    resumeStep = 1; // sync done → next: extract audio + transcribe
   if (existing.audioInInput)   resumeStep = 1;
   if (existing.rawTranscript)  resumeStep = 2;
   if (existing.transcriptDoc)  resumeStep = 3;
   if (existing.transcriptJson) resumeStep = 4;
 
-  /** When the user picks "redo a specific step", pauses after that step and asks to continue. */
-  let singleStepMode = false;
-  /** ID of the step the user is redoing — controls which blocks run and where singleStep fires. */
+  /** ID of the step the user is redoing — controls which blocks run. */
   let redoStepId = null; // 'sync'|'transcribe'|'align'|'buildDoc'|'mergeDoc'|'camera'|'preview'|'remotion'
 
   if (resumeStep > 0) {
@@ -215,7 +214,6 @@ async function main() {
       if (stepIdx >= 0 && stepIdx < stepDefs.length) {
         const target = stepDefs[stepIdx];
         redoStepId = target.id;
-        singleStepMode = true;
         resumeStep = target.resumeAt;
         console.log(`\n  → Will run: ${target.label}`);
       } else {
@@ -451,20 +449,25 @@ async function main() {
     await optimizeForRemotion(pathsToOptimize);
   }
 
-  if (singleStepMode && redoStepId === 'optimize') {
-    singleStepMode = false;
+  if (redoStepId === 'optimize') {
     redoStepId = null;
-    if (!await confirm('  Continue with the next steps?', false)) {
-      console.log('\n  ✓ Done!\n');
-      rl.close();
-      return;
-    }
   }
 
   // ── STEP: Prepare audio ───────────────────────────────────────────────────
-  if (resumeStep === 0) {
+  // Runs on fresh start (resumeStep=0) OR when sync is done but audio not yet extracted
+  // (resumeStep=1 && !existing.audioInInput — e.g. crash between sync and extract, or manual sync).
+  const needsAudioExtract = resumeStep === 0 || (resumeStep === 1 && !existing.audioInInput);
+  if (needsAudioExtract) {
     console.log('\n  ── Prepare audio for transcription ──────────────────');
     if (mode === 1 || mode === 3) {
+      // When resuming after sync, videoForExtract may be null (fresh-start path wasn't run).
+      // Infer from the existing sync output.
+      if (!videoForExtract && existing.syncedVideo) {
+        const syncDir = path.join(cwd, 'public', 'sync', 'output');
+        const files = await fs.readdir(syncDir).catch(() => []);
+        const primary = files.find(f => f === 'synced-output.mp4' || f === 'synced-output-1.mp4');
+        if (primary) videoForExtract = path.join(syncDir, primary);
+      }
       if (mode === 3) await copyToTranscribeInput(videoFile);
       await extractAudio(videoForExtract);
     } else if (mode === 2) {
@@ -475,15 +478,8 @@ async function main() {
     }
   }
 
-  // Redo sync: stop here (sync + prepare audio both done), then optionally continue
-  if (singleStepMode && redoStepId === 'sync') {
-    singleStepMode = false;
+  if (redoStepId === 'sync') {
     redoStepId = null;
-    if (!await confirm('  Continue with the next steps?', false)) {
-      console.log('\n  ✓ Done!\n');
-      rl.close();
-      return;
-    }
   }
 
   // ── STEP: Choose Whisper model ────────────────────────────────────────────
@@ -603,14 +599,8 @@ async function main() {
     await runStep('npm run transcribe', 'npm', transcribeArgs, rawTranscriptPath);
   }
 
-  if (singleStepMode && redoStepId === 'transcribe') {
-    singleStepMode = false;
+  if (redoStepId === 'transcribe') {
     redoStepId = null;
-    if (!await confirm('  Continue with the next steps?', false)) {
-      console.log('\n  ✓ Done!\n');
-      rl.close();
-      return;
-    }
   }
 
   // ── STEP: Forced alignment (after transcribe, before assignment/editing) ──
@@ -671,108 +661,50 @@ async function main() {
     console.log('  (Already applied — skipping)');
   }
 
-  if (singleStepMode && redoStepId === 'align') {
-    singleStepMode = false;
+  if (redoStepId === 'align') {
     redoStepId = null;
-    if (!await confirm('  Continue with the next steps?', false)) {
-      console.log('\n  ✓ Done!\n');
-      rl.close();
-      return;
-    }
   }
-
-  // ── STEP: Caption alignment test (optional) ──────────────────────────────
-  let timestampOffset = 0;
-  if (!redoStepId) {
-  console.log('');
-  const doAlignTest = await confirm('  Check caption alignment? (recommended for first recording)', false);
-  if (doAlignTest) {
-    console.log('\n  ── Caption alignment test ────────────────────────────');
-    console.log('  Starting local server for caption_test.html...\n');
-
-    const serveProc = spawn('npx', ['serve', 'public/transcribe', '--listen', 'tcp://0.0.0.0:3001', '--no-clipboard'], {
-      cwd,
-      shell: process.platform === 'win32',
-      detached: true,
-      stdio: 'ignore',
-    });
-    serveProc.unref();
-    await new Promise(r => setTimeout(r, 2000));
-
-    openFile('http://localhost:3001/caption_test.html');
-    console.log('  → Opened http://localhost:3001/caption_test.html in your browser');
-    console.log('  Follow the on-screen instructions:');
-    console.log('    1. Scrub audio to exactly when a word starts speaking');
-    console.log('    2. Note the time shown in green');
-    console.log('    3. Enter the word and time in the form');
-    console.log('    4. Repeat with a second word 5+ min later');
-    console.log('    5. The page calculates the offset and shows the fix command\n');
-
-    await ask('  Press Enter when done with the alignment test...');
-
-    try {
-      if (process.platform === 'win32') {
-        spawn('taskkill', ['/pid', String(serveProc.pid), '/f', '/t'], { shell: true, stdio: 'ignore' });
-      } else {
-        process.kill(serveProc.pid, 'SIGTERM');
-      }
-    } catch { /* ignore */ }
-
-    const hasOffset = await confirm('  Did you find a timestamp offset?', false);
-    if (hasOffset) {
-      const offsetStr = (await ask('  Enter offset in seconds (e.g. 0.5): ')).trim();
-      timestampOffset = parseFloat(offsetStr) || 0;
-      if (timestampOffset > 0) {
-        console.log(`  ✓ Will apply --timestamp-offset ${timestampOffset} to edit-transcript`);
-      }
-    }
-  }
-  } // end if (!redoStepId) — caption alignment test
 
   // ── STEP: Assign speakers (multi-speaker only) ────────────────────────────
   const shouldBuildDoc = resumeStep < 3 && (!redoStepId || redoStepId === 'buildDoc');
   if (shouldBuildDoc && multiSpeaker) {
-    let speakersOk = false;
-    while (!speakersOk) {
-      console.log('\n  ── Assign speakers ───────────────────────────────────');
-      const extraFlags = [
-        ...(timestampOffset > 0 ? ['--timestamp-offset', String(timestampOffset)] : []),
-        ...(videoSrcForRemotion ? ['--video-src', videoSrcForRemotion] : []),
-        ...(videoSrcsForRemotion ? ['--video-srcs', videoSrcsForRemotion.join(',')] : []),
-      ];
-      const offsetArgs = extraFlags.length > 0 ? ['--', ...extraFlags] : [];
+    console.log('\n  ── Assign speakers ───────────────────────────────────');
+    const extraFlags = [
+      ...(videoSrcForRemotion ? ['--video-src', videoSrcForRemotion] : []),
+      ...(videoSrcsForRemotion ? ['--video-srcs', videoSrcsForRemotion.join(',')] : []),
+    ];
+    const offsetArgs = extraFlags.length > 0 ? ['--', ...extraFlags] : [];
+    let assignOk = false;
+    while (!assignOk) {
       try {
         await spawnStep('npm', ['run', 'speakers:assign']);
         await spawnStep('npm', ['run', 'transcript:init', ...offsetArgs]);
+        assignOk = true;
       } catch (err) {
         console.error(`  ✗ ${err.message}`);
         const retry = await confirm('  Retry?');
         if (!retry) break;
-        continue;
       }
+    }
 
-      console.log(`  ✓ Done — ${docPath}`);
-      console.log('\n  Open transcript.doc.txt and rename speakers in the SPEAKERS section at the top.');
-      console.log(`  File: ${docPath}\n`);
-      openFile(docPath);
-      await ask('  Press Enter when done renaming speakers...');
+    console.log(`  ✓ Done — ${docPath}`);
+    console.log('\n  Open transcript.doc.txt and rename speakers in the SPEAKERS section at the top.');
+    console.log(`  File: ${docPath}\n`);
+    openFile(docPath);
+    await ask('  Press Enter when done renaming speakers...');
 
-      console.log('  Applying speaker names...');
-      try {
-        await spawnStep('npm', ['run', 'transcript:merge', ...offsetArgs]);
-        // Regenerate doc with real speaker names in segment lines
-        await spawnStep('npm', ['run', 'transcript:init', ...offsetArgs]);
-        console.log('  ✓ Speaker names applied');
-      } catch (err) {
-        console.error(`  ✗ ${err.message}`);
-      }
-
-      speakersOk = await confirm('\n  Happy with the speaker assignments?');
+    console.log('  Applying speaker names...');
+    try {
+      await spawnStep('npm', ['run', 'transcript:merge', ...offsetArgs]);
+      // Regenerate doc with real speaker names in segment lines
+      await spawnStep('npm', ['run', 'transcript:init', ...offsetArgs]);
+      console.log('  ✓ Speaker names applied');
+    } catch (err) {
+      console.error(`  ✗ ${err.message}`);
     }
   } else if (shouldBuildDoc) {
     // Single speaker: just generate the doc
     const singleExtraFlags = [
-      ...(timestampOffset > 0 ? ['--timestamp-offset', String(timestampOffset)] : []),
       ...(videoSrcForRemotion ? ['--video-src', videoSrcForRemotion] : []),
       ...(videoSrcsForRemotion ? ['--video-srcs', videoSrcsForRemotion.join(',')] : []),
     ];
@@ -781,14 +713,8 @@ async function main() {
     await runStep('npm run transcript:init', 'npm', ['run', 'transcript:init', ...offsetArgs], docPath);
   }
 
-  if (singleStepMode && redoStepId === 'buildDoc') {
-    singleStepMode = false;
+  if (redoStepId === 'buildDoc') {
     redoStepId = null;
-    if (!await confirm('  Continue with the next steps?', false)) {
-      console.log('\n  ✓ Done!\n');
-      rl.close();
-      return;
-    }
   }
 
   // ── STEP: Edit transcript ─────────────────────────────────────────────────
@@ -800,7 +726,6 @@ async function main() {
     await ask('  Press Enter when done editing...');
 
     const mergeExtraFlags = [
-      ...(timestampOffset > 0 ? ['--timestamp-offset', String(timestampOffset)] : []),
       ...(videoSrcForRemotion ? ['--video-src', videoSrcForRemotion] : []),
       ...(videoSrcsForRemotion ? ['--video-srcs', videoSrcsForRemotion.join(',')] : []),
     ];
@@ -821,14 +746,8 @@ async function main() {
     }
   }
 
-  if (singleStepMode && redoStepId === 'mergeDoc') {
-    singleStepMode = false;
+  if (redoStepId === 'mergeDoc') {
     redoStepId = null;
-    if (!await confirm('  Continue with the next steps?', false)) {
-      console.log('\n  ✓ Done!\n');
-      rl.close();
-      return;
-    }
   }
 
   // ── STEP: Camera setup (optional — skip for audio-only) ───────────────────
@@ -951,17 +870,8 @@ async function main() {
 
   if (mode !== 4) {
     if (redoStepId === 'camera') {
-      // Direct redo: run camera setup immediately without confirm prompt
       await runCameraSetup();
-      if (singleStepMode) {
-        singleStepMode = false;
-        redoStepId = null;
-        if (!await confirm('  Continue with the next steps?', false)) {
-          console.log('\n  ✓ Done!\n');
-          rl.close();
-          return;
-        }
-      }
+      redoStepId = null;
     } else if (resumeStep < 4) {
       // Fresh run: ask if they want camera setup (defaults to false)
       console.log('');
@@ -1089,15 +999,7 @@ async function main() {
   if (mode !== 4) {
     if (redoStepId === 'thumbnail') {
       await runThumbnailSelection();
-      if (singleStepMode) {
-        singleStepMode = false;
-        redoStepId = null;
-        if (!await confirm('  Continue with the next steps?', false)) {
-          console.log('\n  ✓ Done!\n');
-          rl.close();
-          return;
-        }
-      }
+      redoStepId = null;
     } else if (!redoStepId) {
       console.log('');
       const doThumbnail = await confirm('  Generate thumbnail with frame selection?', false);
@@ -1110,42 +1012,21 @@ async function main() {
   // ── STEP: Cut preview — default review step before Remotion ─────────────
   // Fast ffmpeg export (~2-5 min). Review this before launching Remotion so
   // the full overlay render (30-45 min) only runs on an approved cut.
-  if (mode !== 4) {
+  if (mode !== 4 && (!redoStepId || redoStepId === 'preview')) {
     const previewPath = path.join(cwd, 'public', 'edit', 'preview-cut.mp4');
-    if (redoStepId === 'preview') {
-      // Direct redo: run cut preview immediately
-      console.log('\n  ── Review your edit (cut preview) ───────────────────');
-      await runStep('npm run cut:preview', 'npm', ['run', 'cut:preview'], previewPath);
-      openFile(previewPath);
-      console.log(`  → Opened preview: ${previewPath}`);
-      if (singleStepMode) {
-        singleStepMode = false;
-        redoStepId = null;
-        if (!await confirm('  Continue with the next steps?', false)) {
-          console.log('\n  ✓ Done!\n');
-          rl.close();
-          return;
-        }
-      }
-    } else if (!redoStepId) {
-      console.log('\n  ── Review your edit (cut preview) ───────────────────');
-      console.log('  Fast ffmpeg export (~2-5 min). Review before launching Remotion.');
-      const doPreview = await confirm('  Generate cut preview?', true);
-      if (doPreview) {
-        await runStep('npm run cut:preview', 'npm', ['run', 'cut:preview'], previewPath);
-        openFile(previewPath);
-        console.log(`  → Opened preview: ${previewPath}`);
-        console.log('  Review the cut, then continue to launch Remotion for the final overlay render.');
-      }
-    }
+    console.log('\n  ── Review your edit (cut preview) ───────────────────');
+    await runStep('npm run cut:preview', 'npm', ['run', 'cut:preview'], previewPath);
+    openFile(previewPath);
+    console.log(`  → Opened preview: ${previewPath}`);
+    if (redoStepId === 'preview') redoStepId = null;
   }
 
   // ── STEP: Remotion (optional — skip for audio-only) ──────────────────────
   if (mode !== 4) {
     if (redoStepId === 'remotion') {
-      // Direct redo: launch Remotion immediately
       console.log('\n  Starting Remotion...\n');
       await spawnStep('npm', ['run', 'remotion:studio']);
+      redoStepId = null;
     } else if (!redoStepId) {
       console.log('');
       const doRemotion = await confirm('  Launch Remotion studio for final overlay render?', false);
@@ -1160,7 +1041,6 @@ async function main() {
   {
     const proxyMapPath = path.join(cwd, 'public', 'proxy', 'proxy-map.json');
     if (redoStepId === 'conform') {
-      // Direct redo: run conform immediately without proxy-map existence check
       console.log('\n  ── Export final cut from raw ─────────────────────────');
       await spawnStep('node', [
         'scripts/conform/conform-to-raw.js',
@@ -1168,6 +1048,7 @@ async function main() {
         '--proxy-map', proxyMapPath,
         '--output', path.join(cwd, 'public', 'output', 'final-cut.mov'),
       ]);
+      redoStepId = null;
     } else if (!redoStepId && mode !== 4 && await fs.pathExists(proxyMapPath)) {
       console.log('');
       const doConform = await confirm('  Export final cut from original raw files?', false);
@@ -1181,16 +1062,6 @@ async function main() {
         ]);
         console.log('  ✓ Final cut written to public/output/final-cut.mov');
       }
-    }
-  }
-
-  if (singleStepMode && redoStepId === 'conform') {
-    singleStepMode = false;
-    redoStepId = null;
-    if (!await confirm('  Continue with the next steps?', false)) {
-      console.log('\n  ✓ Done!\n');
-      rl.close();
-      return;
     }
   }
 
