@@ -254,10 +254,25 @@ The block should:
    - Import `transcodeProxies` from `./proxy/transcode-proxy.js`.
    - Call `transcodeProxies([videoFile, ...additionalVideoFiles], path.join(cwd, 'input', 'video-proxy'))`.
    - Replace `videoFile` and each entry in `additionalVideoFiles` with the returned proxy paths.
+   - Set `let usingProxies = true` (declare `let usingProxies = false` just before the proxy
+     prompt so the flag is in scope for all downstream blocks).
    - Print: `✓ Proxies ready. All editing steps will use proxy files.`
    - Print: `  Original raw files are stored in proxy-map.json and will be used at export time.`
 
 3. If no: continue as normal (no changes to `videoFile` / `additionalVideoFiles`).
+
+4. **Skip the keyframe optimise step when proxies are in use.** The sync step
+   (`AudioSyncer`) already outputs H.264 with `-g 60` dense keyframes, so when the source
+   is a proxy (already H.264), running `optimize-for-remotion` on the sync output is a
+   redundant second re-encode. Find the optimize step block (around line 390):
+   ```javascript
+   if (resumeStep === 0 && mode === 1 && (!redoStepId || redoStepId === 'optimize')) {
+   ```
+   Change it to:
+   ```javascript
+   if (resumeStep === 0 && mode === 1 && !usingProxies && (!redoStepId || redoStepId === 'optimize')) {
+   ```
+   No other changes — the block body and the `singleStepMode` cleanup after it are unchanged.
 
 The rest of wizard.js is unchanged — because `videoFile` and `additionalVideoFiles` are
 already the paths passed to all downstream steps (sync, extract audio, etc.), replacing them
