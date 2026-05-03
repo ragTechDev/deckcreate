@@ -44,6 +44,10 @@ next-env.d.ts
 # Never committed — files are 1–10 GB
 /input/
 
+# ── Proxy editing intermediates ───────────────────────────────────────────────
+# input/video-proxy/ is already covered by /input/ above
+public/proxy/             # proxy-map.json (contains absolute paths, machine-specific)
+
 # ── Pipeline intermediates (large/generated media) ────────────────────────────
 public/sync/              # synced video/audio working files
 public/transcribe/input/  # audio extracted for Whisper
