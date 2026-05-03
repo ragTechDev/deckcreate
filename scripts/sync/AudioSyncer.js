@@ -547,7 +547,7 @@ class AudioSyncer {
    * @param {string[]} videoPaths   Paths to each angle's video file.
    * @param {string}   audioPath    Path to the shared audio file.
    * @param {string}   outputDir    Directory to write synced output files into.
-   * @returns {Promise<Array<{outputPath: string, videoSrc: string, sourceWidth: number, sourceHeight: number}>>}
+   * @returns {Promise<Array<{outputPath: string, videoSrc: string, sourceWidth: number, sourceHeight: number, videoStart: number}>>}
    */
   static async syncMultiple(videoPaths, audioPath, outputDir) {
     await this.validateUniqueVideos(videoPaths);
@@ -638,7 +638,7 @@ class AudioSyncer {
       }
 
       const { width: sourceWidth, height: sourceHeight } = await getVideoDimensions(syncer.outputPath);
-      results.push({ outputPath: syncer.outputPath, videoSrc: syncer.outputPath, sourceWidth, sourceHeight });
+      results.push({ outputPath: syncer.outputPath, videoSrc: syncer.outputPath, sourceWidth, sourceHeight, videoStart: videoStarts[i] });
     }
 
     return results;

@@ -311,6 +311,8 @@ async function main() {
 
   // ── File placement (fresh start only) ─────────────────────────────────────
   let videoFile = null, audioFile = null;
+  let usingProxies = false;
+
   if (resumeStep === 0) {
     ({ videoFile, audioFile } = await placeFiles(mode));
 
@@ -329,6 +331,31 @@ async function main() {
           process.exit(1);
         }
         additionalVideoFiles.push(angleFile);
+      }
+    }
+
+    // ── Proxy transcode (optional) ──────────────────────────────────────────
+    // Offer proxy transcoding for raw/large footage (ProRes, BRAW, >10 GB).
+    // All downstream steps (sync, transcribe, Remotion) run on proxies.
+    // The original raw paths are preserved in proxy-map.json for final export.
+    if (mode !== 4) {
+      console.log('');
+      const wantProxy = await confirm(
+        '  Does your video file need proxy transcoding?\n' +
+        '  (Choose this if your footage is raw/ProRes/BRAW or larger than ~10 GB)',
+        false,
+      );
+      if (wantProxy) {
+        console.log('\n  ── Proxy transcode ───────────────────────────────────');
+        const { transcodeProxies } = await import('./proxy/transcode-proxy.js');
+        const allRaw = [videoFile, ...additionalVideoFiles];
+        const proxyDir = path.join(cwd, 'input', 'video-proxy');
+        const proxyPaths = await transcodeProxies(allRaw, proxyDir);
+        videoFile = proxyPaths[0];
+        additionalVideoFiles = proxyPaths.slice(1);
+        usingProxies = true;
+        console.log('  ✓ Proxies ready. All editing steps will use proxy files.');
+        console.log('  Original raw files are stored in proxy-map.json and will be used at export time.');
       }
     }
   }
@@ -373,21 +400,48 @@ async function main() {
       videoSrcsForRemotion = syncResults.map((_, i) => `sync/output/synced-output-${i + 1}.mp4`);
       console.log(`  ✓ Synced ${numAngles} angles:`);
       syncResults.forEach((r, i) => console.log(`    Angle ${i + 1}: ${path.basename(r.outputPath)}`));
+
+      if (usingProxies) {
+        const proxyMapPath = path.join(cwd, 'public', 'proxy', 'proxy-map.json');
+        const proxyMap = await fs.readJson(proxyMapPath);
+        syncResults.forEach((r, i) => { if (proxyMap[i]) proxyMap[i].videoStart = r.videoStart ?? 0; });
+        await fs.writeJson(proxyMapPath, proxyMap, { spaces: 2 });
+      }
     } else {
-      // Single angle: pass paths directly so no intermediate copy is needed
-      await runStep(
-        'npm run sync',
-        'npm', ['run', 'sync', '--', '--video', videoFile, '--audio', audioFile],
-        path.join(syncOutputDir, 'synced-output.mp4'),
-      );
-      videoForExtract = path.join(syncOutputDir, 'synced-output.mp4');
+      if (usingProxies) {
+        // Proxy path: use AudioSyncer directly to capture videoStart for proxy-map.json
+        const { default: AudioSyncer } = await import('./sync/AudioSyncer.js');
+        const outputPath = path.join(syncOutputDir, 'synced-output.mp4');
+        await fs.ensureDir(syncOutputDir);
+        const syncer = new AudioSyncer({ videoPath: videoFile, audioPath: audioFile, outputPath });
+        await syncer.init();
+        const { lagSeconds, snr, isReliable } = await syncer.computeLag();
+        console.log(`  Best lag: ${lagSeconds.toFixed(3)}s  (SNR: ${snr.toFixed(1)}${isReliable ? '' : ' — LOW CONFIDENCE, verify output manually'})`);
+        const trimPoints = await syncer.computeTrimPoints(lagSeconds);
+        await syncer.produceOutput(trimPoints, true);
+        await syncer.close();
+        videoForExtract = outputPath;
+        const proxyMapPath = path.join(cwd, 'public', 'proxy', 'proxy-map.json');
+        const proxyMap = await fs.readJson(proxyMapPath);
+        if (proxyMap[0]) proxyMap[0].videoStart = trimPoints.videoStart;
+        await fs.writeJson(proxyMapPath, proxyMap, { spaces: 2 });
+      } else {
+        // Single angle: pass paths directly so no intermediate copy is needed
+        await runStep(
+          'npm run sync',
+          'npm', ['run', 'sync', '--', '--video', videoFile, '--audio', audioFile],
+          path.join(syncOutputDir, 'synced-output.mp4'),
+        );
+        videoForExtract = path.join(syncOutputDir, 'synced-output.mp4');
+      }
     }
   }
 
   // ── STEP: Keyframe optimisation (post-sync, mode 1 only) ─────────────────
   // Re-encodes synced video with -g 60 -movflags +faststart so Remotion can
   // seek frame-by-frame without decoding back to sparse keyframes (~5h → ~35min).
-  if (resumeStep === 0 && mode === 1 && (!redoStepId || redoStepId === 'optimize')) {
+  // Skipped for proxy files: the sync output is already H.264 with -g 60.
+  if (resumeStep === 0 && mode === 1 && !usingProxies && (!redoStepId || redoStepId === 'optimize')) {
     console.log('\n  ── Optimise video for Remotion (keyframes) ──────────');
     const { optimizeForRemotion } = await import('./optimize/optimize-for-remotion.js');
     const pathsToOptimize = numAngles > 1
