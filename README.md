@@ -68,7 +68,7 @@ Caption alignment test (port 3001) and camera GUI (port 3000) both work in Docke
 ## Quick start
 
 ```bash
-npm run wizard
+npm run video:wizard
 ```
 
 Guides you interactively through every step. Transcription + diarization run in parallel automatically.
