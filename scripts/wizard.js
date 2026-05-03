@@ -204,6 +204,7 @@ async function main() {
         { id: 'camera',     label: 'Camera setup',                          done: existing.cameraProfiles,     resumeAt: 4 },
         { id: 'preview',    label: 'Cut preview (MP4)',                     done: false,                       resumeAt: 4 },
         { id: 'remotion',   label: 'Launch Remotion studio',                done: false,                       resumeAt: 4 },
+        { id: 'conform',    label: 'Export final cut from raw (conform)',    done: false,                       resumeAt: 4 },
       ];
       console.log('\n  Which step would you like to run?');
       stepDefs.forEach((s, i) => {
@@ -1152,6 +1153,44 @@ async function main() {
         console.log('\n  Starting Remotion...\n');
         await spawnStep('npm', ['run', 'remotion:studio']);
       }
+    }
+  }
+
+  // ── STEP: Conform to raw (optional — only when proxy-map.json exists) ─────
+  {
+    const proxyMapPath = path.join(cwd, 'public', 'proxy', 'proxy-map.json');
+    if (redoStepId === 'conform') {
+      // Direct redo: run conform immediately without proxy-map existence check
+      console.log('\n  ── Export final cut from raw ─────────────────────────');
+      await spawnStep('node', [
+        'scripts/conform/conform-to-raw.js',
+        '--transcript', path.join(cwd, 'public', 'edit', 'transcript.json'),
+        '--proxy-map', proxyMapPath,
+        '--output', path.join(cwd, 'public', 'output', 'final-cut.mov'),
+      ]);
+    } else if (!redoStepId && mode !== 4 && await fs.pathExists(proxyMapPath)) {
+      console.log('');
+      const doConform = await confirm('  Export final cut from original raw files?', false);
+      if (doConform) {
+        console.log('\n  ── Export final cut from raw ─────────────────────────');
+        await spawnStep('node', [
+          'scripts/conform/conform-to-raw.js',
+          '--transcript', path.join(cwd, 'public', 'edit', 'transcript.json'),
+          '--proxy-map', proxyMapPath,
+          '--output', path.join(cwd, 'public', 'output', 'final-cut.mov'),
+        ]);
+        console.log('  ✓ Final cut written to public/output/final-cut.mov');
+      }
+    }
+  }
+
+  if (singleStepMode && redoStepId === 'conform') {
+    singleStepMode = false;
+    redoStepId = null;
+    if (!await confirm('  Continue with the next steps?', false)) {
+      console.log('\n  ✓ Done!\n');
+      rl.close();
+      return;
     }
   }
 
