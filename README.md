@@ -2,6 +2,40 @@
 
 Video podcast editing and carousel generation pipeline.
 
+## Local vs Docker
+
+### macOS (Apple Silicon — M-series)
+
+| Step | Local (host) | Docker |
+|------|-------------|--------|
+| **Transcribe** | Metal GPU — ~15 min | CPU only in Linux VM — 2–3 h |
+| **Keyframe optimize** | VideoToolbox hardware encode (~1–2 min/hr) | libx264 software encode (slower) |
+| **Align** | `--device mps` for Metal acceleration | CPU only |
+| **Remotion render** | Native filesystem I/O | Virtualized filesystem adds overhead |
+| **Diarize** | CPU (no MPS path in script) | CPU — same |
+| **Cut preview** | libx264 | libx264 — same |
+| **Sync, edit, merge, camera** | — | — same either way |
+
+**Recommendation:** run transcribe, keyframe optimize, align, and Remotion render on the host. Docker is convenient for onboarding and Linux CI but gives up GPU and hardware encode on macOS.
+
+### Windows (NVIDIA GPU — RTX 50-series)
+
+| Step | Local (host) | Docker |
+|------|-------------|--------|
+| **Transcribe** | CUDA via whisper.cpp (if CUDA build available) | CPU only — current Dockerfile installs CPU-only PyTorch |
+| **Keyframe optimize** | libx264 — `h264_nvenc` path not yet implemented | libx264 — same |
+| **Align** | `--device cuda` with CUDA PyTorch — wizard doesn't pass it automatically | CPU only (Dockerfile uses CPU-only PyTorch) |
+| **Diarize** | CUDA PyTorch possible — no `--device` flag in script yet | CPU only (same limitation) |
+| **Cut preview** | libx264 — `h264_nvenc` path not yet implemented | libx264 — same |
+| **Remotion render** | Native filesystem I/O | WSL2 virtualized filesystem adds some overhead |
+| **Sync, edit, merge, camera** | — | — same either way |
+
+> Unlike macOS, Docker on Windows **can** pass CUDA through to containers via [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html). The current Dockerfile installs CPU-only PyTorch so it won't use the GPU as-is — the Dockerfile would need CUDA PyTorch wheels (`whl/cu128` for RTX 50-series / CUDA 12.8) to take advantage of this.
+
+**Recommendation:** on the host, align can use CUDA today by passing `--device cuda` manually. Keyframe optimize, cut preview, and diarize would need code changes to add NVENC/CUDA paths before they benefit from the GPU.
+
+---
+
 ## Prerequisites
 
 ### Option 1: Local
@@ -22,11 +56,12 @@ All dependencies included.
 
 ```bash
 docker-compose run --rm --service-ports wizard
-docker-compose run --rm app npm run transcribe
 docker-compose run --rm app npm run remotion
 ```
 
 Caption alignment test (port 3001) and camera GUI (port 3000) both work in Docker when using `--service-ports`.
+
+> **Transcription runs best on the host** (not in Docker). Docker on macOS runs in a Linux VM with no Metal or GPU passthrough — transcription falls back to CPU. Run `npm run transcribe` directly on the host to use Metal GPU acceleration on Apple Silicon (~15 min vs 2–3 h).
 
 ---
 
@@ -92,11 +127,15 @@ npm run transcribe -- --model small.en   # faster, less accurate
 npm run transcribe -- --timestamp-offset 0.5
 ```
 
-| Model | Speed (≈36 min, CPU) | Accuracy |
-|-------|----------------------|----------|
-| `tiny.en` | ~5 min | Low |
-| `small.en` | ~20–30 min | Good |
-| `medium.en` (default) | ~60–120 min | High |
+Timings are for a ~36 min episode:
+
+| Model | Host — Metal GPU (M3) | Host — CPU / Docker | Accuracy |
+|-------|----------------------|---------------------|----------|
+| `tiny.en` | ~1–2 min | ~5 min | Low |
+| `small.en` | ~5 min | ~20–30 min | Good |
+| `medium.en` (default) | ~15 min | ~60–120 min | High |
+
+Docker on macOS has no Metal passthrough — it always falls into the CPU column. Run transcription on the host to use Metal GPU acceleration.
 
 Model downloaded automatically on first use, cached in `whisper.cpp/`.
 
