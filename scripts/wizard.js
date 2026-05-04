@@ -720,10 +720,119 @@ async function main() {
   // ── STEP: Edit transcript ─────────────────────────────────────────────────
   if ((!redoStepId && resumeStep < 4) || redoStepId === 'mergeDoc') {
     console.log('\n  ── Edit transcript ───────────────────────────────────');
-    console.log(`  Open and edit: ${docPath}`);
-    console.log('  (See instructions at the top — cut words, fix text, mark segments CUT.)');
+    console.log(`  File: ${docPath}`);
     openFile(docPath);
-    await ask('  Press Enter when done editing...');
+    console.log('\n  Work through each step below. Save the file after each, then press Enter.\n');
+
+    // 1/9 — Speaker names
+    console.log('  ─── 1 / 9  Speaker names ─────────────────────────────');
+    if (multiSpeaker) {
+      console.log('  Review the # SPEAKERS section at the top of the doc.');
+      console.log('  Confirm each label is the correct display name. To rename:');
+      console.log('    SPEAKER_00: Natasha');
+    } else {
+      console.log('  Single speaker — nothing to do here. (skip)');
+    }
+    await ask('  Press Enter to continue...');
+
+    // 2/9 — Segment speaker assignments
+    console.log('\n  ─── 2 / 9  Segment speaker assignments ───────────────');
+    if (multiSpeaker) {
+      console.log('  Scroll through every segment and verify the speaker label.');
+      console.log('  Reassign a whole segment:');
+      console.log('    [10] text...');
+      console.log('    > SPEAKER Alice');
+      console.log('  Split a segment where two people spoke in the same block:');
+      console.log('    [11] I\'m Victoria, solutions engineer.');
+      console.log('    > SPEAKER Victoria  at="I\'m"');
+    } else {
+      console.log('  Single speaker — nothing to do here. (skip)');
+    }
+    await ask('  Press Enter to continue...');
+
+    // 3/9 — Typos and cuts
+    console.log('\n  ─── 3 / 9  Fix typos & cuts ──────────────────────────');
+    console.log('  Edit any misheard or misspelled words directly in the doc.');
+    console.log('  Wrap filler words in {} to cut them:  {um}  {you know}');
+    console.log('  Cut a whole segment by prefixing its ID with -:');
+    console.log('    -[12] this segment will be removed...');
+    await ask('  Press Enter to continue...');
+
+    // 4/9 — START and END
+    console.log('\n  ─── 4 / 9  Trim video  (> START and > END) ──────────');
+    console.log('  Place > START before the first segment to keep,');
+    console.log('  and > END after the last one:');
+    console.log('');
+    console.log('    > START');
+    console.log('    [5] first segment...');
+    console.log('    [42] last segment...');
+    console.log('    > END');
+    console.log('');
+    console.log('  For a phrase-precise trim, add the phrase in quotes:');
+    console.log('    > START "we need"');
+    console.log('    > END   "for today"');
+    await ask('  Press Enter to continue...');
+
+    // 5/9 — NameTitle
+    console.log('\n  ─── 5 / 9  Speaker introductions  (> NameTitle) ─────');
+    console.log('  Add a > NameTitle on the segment where each cohost first');
+    console.log('  says their name. Pin it to the exact word with at=:');
+    console.log('');
+    console.log('    [5] Hi, I\'m Natasha, software engineer.');
+    console.log('    > NameTitle  at="Natasha"  duration=5  name="Natasha"  title="Software Engineer"');
+    console.log('');
+    console.log('  Repeat for each cohost. Skip if no introductions in this recording.');
+    await ask('  Press Enter to continue...');
+
+    // 6/9 — RagtechOverlay
+    console.log('\n  ─── 6 / 9  RAG Tech overlay  (> RagtechOverlay) ─────');
+    console.log('  Find the first mention of "RAG Tech" and add the brand overlay:');
+    console.log('');
+    console.log('    [8] welcome to RAG Tech...');
+    console.log('    > RagtechOverlay  at="RAG"  duration=8');
+    await ask('  Press Enter to continue...');
+
+    // 7/9 — Chapter markers
+    console.log('\n  ─── 7 / 9  Chapter markers ───────────────────────────');
+    console.log('  Mark the start of each major section with > ChapterMarker,');
+    console.log('  and close it with > ChapterMarkerEnd before opening the next:');
+    console.log('');
+    console.log('    [15] Today we\'re diving into...');
+    console.log('    > ChapterMarker  at="Today"  duration=600  chapterTitle="Introduction"  side=right');
+    console.log('    ...');
+    console.log('    [30] Moving to our next topic...');
+    console.log('    > ChapterMarkerEnd  at="Moving"  duration=1');
+    console.log('    > ChapterMarker  at="Moving"  duration=600  chapterTitle="Deep Dive"  side=right');
+    console.log('');
+    console.log('  at=       word that triggers the cue (optional — defaults to segment start)');
+    console.log('  duration= max display time in seconds — ChapterMarkerEnd closes it early if reached');
+    console.log('  side=     left or right (default: right)');
+    await ask('  Press Enter to continue...');
+
+    // 8/9 — Hooks
+    console.log('\n  ─── 8 / 9  Hooks  (> HOOK) ───────────────────────────');
+    console.log('  Mark 2–4 compelling moments as hooks. They play first as a teaser,');
+    console.log('  then again in their natural position. Aim for one hook per speaker.');
+    console.log('');
+    console.log('  Whole segment:');
+    console.log('    [20] That\'s the most important insight...');
+    console.log('    > HOOK');
+    console.log('');
+    console.log('  Specific phrase only:');
+    console.log('    [20] That\'s the most important insight...');
+    console.log('    > HOOK "most important insight"');
+    await ask('  Press Enter to continue...');
+
+    // 9/9 — Image / GIF overlays
+    console.log('\n  ─── 9 / 9  Image / GIF overlays ─────────────────────');
+    console.log('  Add visual overlays for links, diagrams, or memes:');
+    console.log('');
+    console.log('    > ImageWindow  at="word"  duration=8  src="https://..."  title="Title"');
+    console.log('    > GifWindow    at="word"  duration=8  src="https://..."  title="Title"');
+    console.log('');
+    console.log('  src= can be a URL or a /public-relative path.');
+    console.log('  Skip if no overlays are needed.');
+    await ask('  Press Enter when all edits are done...');
 
     const mergeExtraFlags = [
       ...(videoSrcForRemotion ? ['--video-src', videoSrcForRemotion] : []),
@@ -896,9 +1005,23 @@ async function main() {
 
   async function runThumbnailSelection() {
     console.log('\n  ── Thumbnail frame selection ────────────────────────');
-    const thumbnailDir = path.join(cwd, 'public', 'transcribe', 'output', 'thumbnail');
-    const candidatesPath = path.join(thumbnailDir, 'candidates.json');
-    const selectionsPath = path.join(thumbnailDir, 'selections.json');
+    const candidatesDir  = path.join(cwd, 'public', 'thumbnail', 'candidates');
+    const cutoutsDir     = path.join(cwd, 'public', 'thumbnail', 'cutouts');
+    const candidatesPath = path.join(candidatesDir, 'candidates.json');
+    const selectionsPath = path.join(candidatesDir, 'selections.json');
+
+    // Check if rembg is available for background removal
+    const rembgAvailable = await new Promise(resolve => {
+      const proc = spawn('python3', ['-c', 'import rembg'], { stdio: 'ignore', cwd });
+      proc.on('close', code => resolve(code === 0));
+      proc.on('error', () => resolve(false));
+    });
+    if (!rembgAvailable) {
+      console.log('\n  ⚠ rembg not installed — speaker cutouts will include background.');
+      console.log('  To enable background removal, install it first:');
+      console.log('    pip3 install rembg');
+      console.log('  Then re-run the thumbnail step from the wizard jump menu.\n');
+    }
 
     // 1. Extract candidate frames
     console.log('\n  Step 1: Extracting 3 candidate frames per speaker...');
@@ -908,7 +1031,7 @@ async function main() {
       '--transcript', path.join(cwd, 'public', 'edit', 'transcript.json'),
       '--camera-profiles', path.join(cwd, 'public', 'camera', 'camera-profiles.json'),
       '--video', path.join(cwd, 'public', videoPath || 'sync/output/synced-output-1.mp4'),
-      '--output-dir', thumbnailDir,
+      '--output-dir', candidatesDir,
       '--num-candidates', '3',
     ];
     await spawnStep('python3', extractArgs);
@@ -936,11 +1059,8 @@ async function main() {
       console.log(`  Found ${candidates.length} valid candidate(s):\n`);
 
       for (const c of candidates) {
-        console.log(`    [${c.index}] t=${c.timestamp}s`);
-        const previewFullPath = path.join(thumbnailDir, path.basename(c.previewPath));
-        if (await fs.pathExists(previewFullPath)) {
-          openFile(previewFullPath);
-        }
+        const previewFullPath = path.join(candidatesDir, path.basename(c.previewPath));
+        console.log(`    [${c.index}] t=${c.timestamp}s  →  ${previewFullPath}`);
       }
 
       // Get user selection
@@ -973,8 +1093,8 @@ async function main() {
     console.log('\n  Step 3: Generating final cutouts...');
     await spawnStep('node', [
       'scripts/thumbnail/generate-cutouts-from-selection.js',
-      '--selections', selectionsPath,
-      '--output-dir', thumbnailDir,
+      `--selections=${selectionsPath}`,
+      `--output-dir=${cutoutsDir}`,
     ]);
 
     // 4. Generate thumbnail
@@ -985,10 +1105,8 @@ async function main() {
 
     const thumbnailArgs = [
       'scripts/thumbnail/generate-thumbnail.js',
-      '--transcript', 'public/edit/transcript.json',
-      '--camera-profiles', 'public/camera/camera-profiles.json',
-      '--video', videoPath || 'sync/output/synced-output-1.mp4',
-      '--output', 'public/thumbnail/thumbnail.png',
+      '--transcript', 'edit/transcript.json',
+      '--output', path.join(cwd, 'public', 'thumbnail', 'thumbnail.png'),
       '--speakers', ...speakerNames,
     ];
     if (title) thumbnailArgs.push('--title', title);
@@ -1018,20 +1136,41 @@ async function main() {
     await runStep('npm run cut:preview', 'npm', ['run', 'cut:preview'], previewPath);
     openFile(previewPath);
     console.log(`  → Opened preview: ${previewPath}`);
+    console.log('');
+    console.log('  If edits are needed — no need to restart the wizard:');
+    console.log('    1. Edit transcript.doc.txt');
+    console.log('    2. npm run transcript:merge');
+    console.log('    3. npm run cut:preview');
     if (redoStepId === 'preview') redoStepId = null;
   }
 
   // ── STEP: Remotion (optional — skip for audio-only) ──────────────────────
   if (mode !== 4) {
     if (redoStepId === 'remotion') {
-      console.log('\n  Starting Remotion...\n');
+      console.log('\n  ── Remotion studio ───────────────────────────────────');
+      console.log('  Use Preview mode to review the composition with all overlays.');
+      console.log('  When the cut looks good, click Render in Remotion studio to export.');
+      console.log('');
+      console.log('  If you need more edits after previewing — no need to restart the wizard:');
+      console.log('    1. Edit transcript.doc.txt');
+      console.log('    2. npm run transcript:merge');
+      console.log('    3. npm run remotion:studio');
+      console.log('');
       await spawnStep('npm', ['run', 'remotion:studio']);
       redoStepId = null;
     } else if (!redoStepId) {
       console.log('');
       const doRemotion = await confirm('  Launch Remotion studio for final overlay render?', false);
       if (doRemotion) {
-        console.log('\n  Starting Remotion...\n');
+        console.log('\n  ── Remotion studio ───────────────────────────────────');
+        console.log('  Use Preview mode to review the composition with all overlays.');
+        console.log('  When the cut looks good, click Render in Remotion studio to export.');
+        console.log('');
+        console.log('  If you need more edits after previewing — no need to restart the wizard:');
+        console.log('    1. Edit transcript.doc.txt');
+        console.log('    2. npm run transcript:merge');
+        console.log('    3. npm run remotion:studio');
+        console.log('');
         await spawnStep('npm', ['run', 'remotion:studio']);
       }
     }

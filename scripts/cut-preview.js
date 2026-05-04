@@ -2,6 +2,7 @@
 
 import fs from 'fs-extra';
 import path from 'path';
+import os from 'os';
 import { execSync } from 'child_process';
 
 function parseArgs() {
@@ -32,7 +33,7 @@ async function main() {
   const cli = parseArgs();
 
   const transcriptPath = cli.transcriptPath
-    || path.join(cwd, 'public', 'transcribe', 'output', 'edit', 'transcript.json');
+    || path.join(cwd, 'public', 'edit', 'transcript.json');
   const videoExts = ['.mp4', '.mov', '.mkv'];
   async function findVideo(...dirs) {
     for (const dir of dirs) {
@@ -49,7 +50,7 @@ async function main() {
       path.join(cwd, 'public', 'transcribe', 'input'),
     );
   const outputPath = cli.outputPath
-    || path.join(cwd, 'public', 'transcribe', 'output', 'edit', 'preview-cut.mp4');
+    || path.join(cwd, 'public', 'edit', 'preview-cut.mp4');
 
   if (!await fs.pathExists(transcriptPath)) {
     console.error(`❌ Transcript not found: ${transcriptPath}`); process.exit(1);
@@ -83,36 +84,30 @@ async function main() {
 
   console.log(`Building preview from ${clips.length} clip(s)…`);
 
-  // Build ffmpeg filter_complex for video + audio concat
-  const vFilters = clips.map((c, i) =>
-    `[0:v]trim=start=${c.start}:end=${c.end},setpts=PTS-STARTPTS[v${i}]`
-  );
-  const aFilters = clips.map((c, i) =>
-    `[0:a]atrim=start=${c.start}:end=${c.end},asetpts=PTS-STARTPTS[a${i}]`
-  );
-  const concatInputs = clips.map((_, i) => `[v${i}][a${i}]`).join('');
-  const filterComplex = [
-    ...vFilters,
-    ...aFilters,
-    `${concatInputs}concat=n=${clips.length}:v=1:a=1[outv][outa]`,
-  ].join(';');
+  // Use the concat demuxer with a list file — scales to any number of clips
+  // without hitting FFmpeg's filter_complex graph size limits.
+  const concatListPath = path.join(os.tmpdir(), `cut-preview-concat-${Date.now()}.txt`);
+  const safePath = videoPath.replace(/\\/g, '/').replace(/'/g, "\\'");
+  const lines = ['ffconcat version 1.0'];
+  for (const c of clips) {
+    lines.push(`file '${safePath}'`);
+    lines.push(`inpoint ${c.start}`);
+    lines.push(`outpoint ${c.end}`);
+  }
+  await fs.writeFile(concatListPath, lines.join('\n') + '\n');
 
-  const cmd = [
-    'ffmpeg',
-    `-i "${videoPath}"`,
-    `-filter_complex "${filterComplex}"`,
-    `-map "[outv]" -map "[outa]"`,
-    `-c:v libx264 -preset fast -crf 18`,
-    `-c:a aac`,
-    `-y "${outputPath}"`,
-  ].join(' ');
-
-  execSync(cmd, { stdio: 'inherit' });
+  try {
+    execSync(
+      `ffmpeg -loglevel error -f concat -safe 0 -i "${concatListPath}" -c:v libx264 -preset fast -crf 18 -c:a aac -y "${outputPath}"`,
+      { stdio: 'inherit' },
+    );
+  } finally {
+    await fs.remove(concatListPath);
+  }
   console.log(`✓ ${outputPath}`);
   console.log(`  Set src to 'edit/preview-cut.mp4' in Root.tsx to preview smoothly.`);
 }
 
-import { fileURLToPath } from 'url';
 const _argv1 = (process.argv[1] || '').replace(/\\/g, '/');
 if (_argv1.endsWith('/cut-preview.js') || _argv1.endsWith('/cut-preview')) {
   main().catch(err => { console.error('❌ Error:', err.message); process.exit(1); });

@@ -605,7 +605,7 @@ function buildInstructionsBlock() {
     '                    > END "for today"',
     '',
     '  THUMBNAIL       Edit # THUMBNAIL section frontmatter to override thumbnail:',
-    '                    bg="public/assets/background.jpg"',
+    '                    bg="assets/episodes/ep01-bg.jpg"',
     '                    middlespeaker="GuestName"',
     '                    title="Custom **highlighted** title"',
     '                    extendedTitle="Extended title for portrait thumbnail"',
@@ -632,7 +632,7 @@ function buildThumbnailSection(transcript) {
   const thumb = transcript.meta?.thumbnail;
   const lines = ['# THUMBNAIL'];
   // Show placeholders with current values or defaults
-  const bgValue = thumb?.bg?.length ? thumb.bg.join(',') : 'public/assets/background.jpg';
+  const bgValue = thumb?.bg?.length ? thumb.bg.join(',') : '';
   const speakerValue = thumb?.middleSpeakers?.length ? thumb.middleSpeakers.join(',') : 'GuestName';
   const titleValue = thumb?.title ?? 'Custom **highlighted** title';
   const extendedTitleValue = thumb?.extendedTitle ?? 'Extended title for portrait thumbnail';

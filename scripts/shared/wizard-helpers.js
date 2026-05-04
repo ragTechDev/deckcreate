@@ -28,6 +28,17 @@ export function spinner(label) {
 }
 
 export function openFile(filePath) {
+  // Prefer opening in the current code editor window (VS Code or Cursor).
+  // -r / --reuse-window opens in the most recently focused window.
+  for (const editor of ['code', 'cursor']) {
+    try {
+      execSync(`${editor} -r "${filePath}"`, { stdio: 'ignore', shell: true });
+      return;
+    } catch {
+      // editor not in PATH — try next
+    }
+  }
+  // Fall back to system default app
   const cmd = process.platform === 'win32' ? 'start ""'
     : process.platform === 'darwin' ? 'open' : 'xdg-open';
   try {

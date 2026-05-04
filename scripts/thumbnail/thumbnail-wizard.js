@@ -6,7 +6,7 @@
  */
 
 import readline from 'readline';
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import fs from 'fs-extra';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -34,13 +34,17 @@ function spawnStep(cmd, args, opts = {}) {
 }
 
 function openFile(filePath) {
+  for (const editor of ['code', 'cursor']) {
+    try {
+      execSync(`${editor} -r "${filePath}"`, { stdio: 'ignore', shell: true });
+      return;
+    } catch { }
+  }
   const cmd = process.platform === 'win32' ? 'start ""'
     : process.platform === 'darwin' ? 'open' : 'xdg-open';
   try {
     execSync(`${cmd} "${filePath}"`, { stdio: 'ignore', shell: true });
-  } catch {
-    // Silently ignore - image viewer not available (e.g., in Docker)
-  }
+  } catch { }
 }
 
 async function confirm(q, defaultYes = true) {
@@ -102,8 +106,52 @@ async function main() {
     process.exit(1);
   }
 
-  // STEP 0: Define speaker frame boundaries
-  console.log('\n─── STEP 0: Define Speaker Frame Boundaries ───────────────────────');
+  // STEP 0: Set thumbnail metadata
+  console.log('\n─── STEP 0: Set Thumbnail Metadata ────────────────────────');
+  console.log('Edit the # THUMBNAIL section in transcript.doc.txt to set the');
+  console.log('episode title and background image(s) before generating frames.\n');
+
+  const docPath = path.join(cwd, 'public', 'edit', 'transcript.doc.txt');
+
+  if (!await fs.pathExists(docPath)) {
+    console.error(`  ✗ transcript.doc.txt not found: ${docPath}`);
+    console.error('  Run the main wizard first: npm run video:wizard');
+    process.exit(1);
+  }
+
+  console.log(`  File: ${docPath}\n`);
+  console.log('  In the # THUMBNAIL section at the top of the file, set:\n');
+  console.log('    title="Your Episode Title with **highlighted** keyword"');
+  console.log('      Use **text** to accent a word in the brand color.\n');
+  console.log('    bg="path/to/image.jpg"');
+  console.log('      Path relative to /public, or a full https:// URL.');
+  console.log('      Add up to 4 backgrounds (comma-separated) — the layout');
+  console.log('      cycles through them as panels behind the speakers:\n');
+  console.log('        bg="assets/episodes/ep01-bg.jpg"');
+  console.log('        bg="assets/episodes/ep01-bg.jpg,assets/episodes/ep01-bg2.jpg"');
+  console.log('        bg="assets/bg1.jpg,assets/bg2.jpg,assets/bg3.jpg,assets/bg4.jpg"\n');
+  console.log('    extendedTitle="Longer subtitle for portrait/shorts thumbnail"');
+  console.log('    episodeNumber="042"  (renders as a pill badge)\n');
+  console.log('  Save the file, then come back here.\n');
+
+  openFile(docPath);
+  await ask('  Press Enter when you have saved the # THUMBNAIL section...');
+
+  console.log('\n  Applying edits to transcript.json...');
+  try {
+    await spawnStep('node', [
+      'scripts/edit-transcript.js',
+      '--merge-doc', 'public/edit/transcript.doc.txt',
+    ]);
+    console.log('  ✓ transcript.json updated');
+  } catch (err) {
+    console.error(`  ✗ merge-doc failed: ${err.message}`);
+    const cont = await confirm('Continue anyway?', false);
+    if (!cont) quit();
+  }
+
+  // STEP 1: Define speaker frame boundaries
+  console.log('\n─── STEP 1: Define Speaker Frame Boundaries ───────────────────────');
   console.log('Before extracting candidates, verify that each speaker\'s face box is');
   console.log('correctly positioned in the camera GUI. This ensures the right faces');
   console.log('are extracted for each speaker.\n');
@@ -153,8 +201,8 @@ async function main() {
     console.log('  ✓ Frame boundaries configured');
   }
 
-  // STEP 1: Extract candidate frames
-  console.log('\n─── STEP 1: Extract Candidate Frames ───────────────────');
+  // STEP 2: Extract candidate frames
+  console.log('\n─── STEP 2: Extract Candidate Frames ───────────────────');
   console.log('Extract 3 candidate frames per speaker from speaking segments.');
   console.log('Frames with multiple faces are automatically rejected.');
 
@@ -191,8 +239,8 @@ async function main() {
     quit();
   }
 
-  // STEP 2: Select frames
-  console.log('\n─── STEP 2: Select Preferred Frames ──────────────────────');
+  // STEP 3: Select frames
+  console.log('\n─── STEP 3: Select Preferred Frames ──────────────────────');
   console.log('Choose your preferred frame for each speaker.');
   console.log('Open the image files manually to compare, then enter the number.');
 
@@ -289,8 +337,8 @@ async function main() {
     console.log(`\n  ✓ Selections saved (${selections.length} speaker(s))`);
   }
 
-  // STEP 3: Generate cutouts
-  console.log('\n─── STEP 3: Generate Final Cutouts ────────────────────────');
+  // STEP 4: Generate cutouts
+  console.log('\n─── STEP 4: Generate Final Cutouts ────────────────────────');
   console.log('Apply background removal to selected frames.');
 
   let haveCutouts = await fs.pathExists(manifestPath);
@@ -312,8 +360,8 @@ async function main() {
     try {
       await spawnStep('node', [
         'scripts/thumbnail/generate-cutouts-from-selection.js',
-        '--selections', selectionsPath,
-        '--output-dir', cutoutsDir,
+        `--selections=${selectionsPath}`,
+        `--output-dir=${cutoutsDir}`,
       ]);
       console.log('  ✓ Cutouts generated');
     } catch (err) {
@@ -323,8 +371,8 @@ async function main() {
     }
   }
 
-  // STEP 4: Generate thumbnail
-  console.log('\n─── STEP 4: Generate Thumbnail ───────────────────────────');
+  // STEP 5: Generate thumbnail
+  console.log('\n─── STEP 5: Generate Thumbnail ───────────────────────────');
   console.log('Compose the final thumbnail with speaker cutouts.');
 
   let haveThumbnail = await fs.pathExists(outputPath);
@@ -373,8 +421,8 @@ async function main() {
     }
   }
 
-  // STEP 5: Clean up candidate files
-  console.log('\n─── STEP 5: Clean Up Candidate Files ─────────────────────');
+  // STEP 6: Clean up candidate files
+  console.log('\n─── STEP 6: Clean Up Candidate Files ─────────────────────');
 
   const dirsToCheck = [
     { label: 'candidate frames', dir: candidatesDir },

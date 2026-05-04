@@ -138,57 +138,64 @@ async function runPathA(fromLongform = false) {
   await fs.writeFile(clipDocPath, docContent);
   console.log(`  ✓ Copied cleaned doc to public/shorts/${clipId}/transcript.doc.txt`);
 
-  // 4. Show instructions for defining clip range
-  console.log('\n  ── Short-form editing guide ─────────────────────────');
-  console.log('  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('');
-  console.log('  ▶ DEFINE CLIP RANGE with START/END:');
-  console.log('');
-  console.log('    Basic (whole segments):');
-  console.log('      > START');
-  console.log('      [5] First segment to include...');
-  console.log('      [12] Last segment to include...');
-  console.log('      > END');
-  console.log('');
-  console.log('    Precise (specific phrase within a segment):');
-  console.log('      > START at="exact phrase"');
-  console.log('      [5] Some text {before} the exact phrase you want...');
-  console.log('      > END at="ending phrase"');
-  console.log('');
-  console.log('  ▶ ADD A HOOK (teaser that plays before main clip):');
-  console.log('');
-  console.log('    Entire segment as hook:');
-  console.log('      [8] This whole segment becomes the hook...');
-  console.log('      > HOOK');
-  console.log('');
-  console.log('    Specific phrase as hook:');
-  console.log('      [8] This segment has a {great soundbite} here...');
-  console.log('      > HOOK "great soundbite"');
-  console.log('');
-  console.log('    With explicit timing (optional):');
-  console.log('      > HOOK "great soundbite" 45.2-48.5');
-  console.log('');
-  console.log('  ▶ WORD-LEVEL CUTS:');
-  console.log('      [5] Remove these {um} {you know} filler words');
-  console.log('');
-  console.log('  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  openFile(clipDocPath);
-
-  // 5. Edit doc
+  // 4. Sequential editing guide
   console.log('\n  ── Edit clip doc ─────────────────────────────────────');
-  console.log('  The doc is open. Now you:');
-  console.log('    1. Add "> START" before the first segment (or phrase) to include');
-  console.log('    2. Add "> END" after the last segment (or phrase) to include');
-  console.log('    3. Optionally mark "> HOOK" segments for the teaser');
-  console.log('    4. Add {cuts} and correct text as needed');
-  console.log('');
-  console.log('  Remember: Everything OUTSIDE > START .. > END is excluded.');
-  console.log('  The hook(s) play first, then the main clip from START to END.');
+  console.log(`  File: ${clipDocPath}`);
+  openFile(clipDocPath);
+  console.log('\n  Work through each step below. Save the file after each, then press Enter.\n');
 
-  // Validate START/END markers are present before proceeding
+  const multiSpeakerShort = speakers.length > 1;
+
+  // 1/6 — Speaker names
+  console.log('  ─── 1 / 6  Speaker names ─────────────────────────────');
+  if (multiSpeakerShort) {
+    console.log('  Review the # SPEAKERS section at the top of the doc.');
+    console.log('  Confirm each label is the correct display name. To rename:');
+    console.log('    Natasha: Natasha Lum');
+  } else {
+    console.log('  Single speaker — nothing to do here. (skip)');
+  }
+  await ask('  Press Enter to continue...');
+
+  // 2/6 — Segment speaker assignments
+  console.log('\n  ─── 2 / 6  Segment speaker assignments ───────────────');
+  if (multiSpeakerShort) {
+    console.log('  Scroll through every segment and verify the speaker label.');
+    console.log('  Reassign a whole segment:');
+    console.log('    [10] text...');
+    console.log('    > SPEAKER Alice');
+    console.log('  Split a segment where two people spoke:');
+    console.log('    [11] I\'m Victoria, solutions engineer.');
+    console.log('    > SPEAKER Victoria  at="I\'m"');
+  } else {
+    console.log('  Single speaker — nothing to do here. (skip)');
+  }
+  await ask('  Press Enter to continue...');
+
+  // 3/6 — Typos and cuts
+  console.log('\n  ─── 3 / 6  Fix typos & cuts ──────────────────────────');
+  console.log('  Edit any misheard or misspelled words directly in the doc.');
+  console.log('  Wrap filler words in {} to cut them:  {um}  {you know}');
+  console.log('  Cut a whole segment by prefixing its ID with -:');
+  console.log('    -[12] this segment will be removed...');
+  await ask('  Press Enter to continue...');
+
+  // 4/6 — START and END (required — validated below)
+  console.log('\n  ─── 4 / 6  Define clip range  (> START and > END) ───');
+  console.log('  Everything OUTSIDE > START .. > END is excluded from the clip.');
+  console.log('');
+  console.log('    > START');
+  console.log('    [5] First segment to include...');
+  console.log('    [12] Last segment to include...');
+  console.log('    > END');
+  console.log('');
+  console.log('  For a phrase-precise trim, add the phrase in quotes:');
+  console.log('    > START "we need"');
+  console.log('    > END   "for today"');
+
   let hasStartEnd = false;
   while (!hasStartEnd) {
-    await ask('  Press Enter when done editing...');
+    await ask('  Press Enter when > START and > END are placed...');
 
     const editedContent = await fs.readFile(clipDocPath, 'utf-8');
     const hasStart = /^>\s*START\b/im.test(editedContent);
@@ -200,10 +207,37 @@ async function runPathA(fromLongform = false) {
       console.log('\n  ⚠ Missing required markers:');
       if (!hasStart) console.log('    - "> START" not found — add it before the first segment to include');
       if (!hasEnd) console.log('    - "> END" not found — add it after the last segment to include');
-      console.log('  Please edit the doc and add the missing markers.\n');
+      console.log('  Please add the missing markers and save.\n');
       openFile(clipDocPath);
     }
   }
+
+  // 5/6 — HOOK
+  console.log('\n  ─── 5 / 6  Hook teaser  (> HOOK) ────────────────────');
+  console.log('  Mark a compelling moment as the hook — it plays first as a teaser,');
+  console.log('  then again in its natural position within the clip.');
+  console.log('');
+  console.log('  Whole segment:');
+  console.log('    [8] This is the key insight...');
+  console.log('    > HOOK');
+  console.log('');
+  console.log('  Specific phrase only:');
+  console.log('    [8] This is the key insight...');
+  console.log('    > HOOK "key insight"');
+  console.log('');
+  console.log('  Skip if no hook is needed for this clip.');
+  await ask('  Press Enter to continue...');
+
+  // 6/6 — Image / GIF overlays
+  console.log('\n  ─── 6 / 6  Image / GIF overlays ─────────────────────');
+  console.log('  Add visual overlays for links, diagrams, or memes:');
+  console.log('');
+  console.log('    > ImageWindow  at="word"  duration=8  src="https://..."  title="Title"');
+  console.log('    > GifWindow    at="word"  duration=8  src="https://..."  title="Title"');
+  console.log('');
+  console.log('  src= can be a URL or a /public-relative path.');
+  console.log('  Skip if no overlays are needed.');
+  await ask('  Press Enter when all edits are done...');
 
   // 6. Merge doc
   console.log('\n  ── Merge clip doc ────────────────────────────────────');
@@ -237,8 +271,16 @@ async function runPathA(fromLongform = false) {
   // 9. Launch Remotion (optional)
   const doRemotion = await askYesNo('\n  Launch Remotion studio with this short?', false);
   if (doRemotion) {
-    console.log('\n  → Launching Remotion studio...');
+    console.log('\n  ── Remotion studio ───────────────────────────────────');
     console.log('  Select the "ShortFormClip" composition from the dropdown.');
+    console.log('  Use Preview mode to review the composition with all overlays.');
+    console.log('  When the clip looks good, click Render in Remotion studio to export.');
+    console.log('');
+    console.log('  If you need more edits after previewing — no need to restart the wizard:');
+    console.log(`    1. Edit public/shorts/${clipId}/transcript.doc.txt`);
+    console.log(`    2. npm run shorts:merge-doc -- --doc public/shorts/${clipId}/transcript.doc.txt --parent-transcript public/edit/transcript.json --id ${clipId}`);
+    console.log('    3. npm run remotion:studio');
+    console.log('');
     await spawnStep('npm', ['run', 'remotion:studio']);
   }
 

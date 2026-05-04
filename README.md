@@ -24,7 +24,7 @@ Video podcast editing and carousel generation pipeline.
 |------|-------------|--------|
 | **Transcribe** | CUDA via whisper.cpp (if CUDA build available) | CPU only — current Dockerfile installs CPU-only PyTorch |
 | **Keyframe optimize** | libx264 — `h264_nvenc` path not yet implemented | libx264 — same |
-| **Align** | `--device cuda` with CUDA PyTorch — wizard doesn't pass it automatically | CPU only (Dockerfile uses CPU-only PyTorch) |
+| **Align** | Auto-detects CUDA — runs on GPU automatically with CUDA PyTorch installed | CPU only (Dockerfile uses CPU-only PyTorch) |
 | **Diarize** | CUDA PyTorch possible — no `--device` flag in script yet | CPU only (same limitation) |
 | **Cut preview** | libx264 — `h264_nvenc` path not yet implemented | libx264 — same |
 | **Remotion render** | Native filesystem I/O | WSL2 virtualized filesystem adds some overhead |
@@ -32,7 +32,7 @@ Video podcast editing and carousel generation pipeline.
 
 > Unlike macOS, Docker on Windows **can** pass CUDA through to containers via [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html). The current Dockerfile installs CPU-only PyTorch so it won't use the GPU as-is — the Dockerfile would need CUDA PyTorch wheels (`whl/cu128` for RTX 50-series / CUDA 12.8) to take advantage of this.
 
-**Recommendation:** on the host, align can use CUDA today by passing `--device cuda` manually. Keyframe optimize, cut preview, and diarize would need code changes to add NVENC/CUDA paths before they benefit from the GPU.
+**Recommendation:** on the host, `npm run align` auto-detects CUDA and runs on the GPU with no extra flags — provided CUDA PyTorch is installed (see Python setup below). Keyframe optimize, cut preview, and diarize would need code changes to add NVENC/CUDA paths before they benefit from the GPU.
 
 ---
 
@@ -109,6 +109,28 @@ python3 -m pip install -r scripts/diarize/requirements.txt
 ```bash
 python3 -m pip install whisperx faster-whisper
 ```
+```bash
+python3 -m pip install -r scripts/camera/requirements.txt
+```
+```bash
+python3 -m pip install -r scripts/thumbnail/requirements.txt
+```
+
+> **Troubleshooting — `module 'coverage' has no attribute 'types'`:** An outdated `coverage` package conflicts with rembg's dependencies. Fix with `pip3 install --upgrade coverage` (or `pip3 uninstall coverage` if you don't use it for testing). Background removal will silently fall back to a plain copy until this is resolved.
+
+**NVIDIA GPU (RTX 50-series / RTX 5050) — extra step:**
+
+The default `pip install torch` is CPU-only. Replace it with the CUDA 12.8 wheel so `npm run align` can use the GPU:
+```bash
+pip install torch --index-url https://download.pytorch.org/whl/cu128
+```
+
+RTX 5050 is a Blackwell GPU (SM 120) and requires PyTorch 2.7+. Verify after installing:
+```bash
+python3 -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+```
+
+Expected output: `2.7.x  True  NVIDIA GeForce RTX 5050`. If `cuda.is_available()` is `False`, the CUDA wheel wasn't installed — re-run the `pip install torch` command above.
 
 If `python` resolves to `WindowsApps\python` (permission denied), pass the path explicitly:
 ```bash

@@ -138,7 +138,13 @@ async function main() {
     layoutVariant,
     title,
     middleSpeakers,
-    ...(thumb?.bg?.length ? { backgroundSrcs: thumb.bg } : {}),
+    ...(thumb?.bg?.length ? {
+      backgroundSrcs: thumb.bg.filter(src => {
+        if (/^https?:\/\//.test(src)) return true; // always keep external URLs
+        const localPath = src.replace(/^public\//, '');
+        return fs.existsSync(path.join(cwd, 'public', localPath));
+      }),
+    } : {}),
     ...(args.speakers?.length ? { speakerNames: args.speakers } : {}),
   };
 

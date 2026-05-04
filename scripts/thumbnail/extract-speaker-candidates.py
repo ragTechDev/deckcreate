@@ -314,11 +314,21 @@ def process_speaker_angle(
             preview_path = os.path.join(output_dir, preview_filename)
             crop.save(preview_path, 'PNG')
 
+            # Compute previewPath relative to the project's public/ directory
+            import pathlib as _pl
+            _parts = _pl.Path(output_dir).parts
+            try:
+                _pub_idx = list(_parts).index('public')
+                _rel_dir = '/'.join(_parts[_pub_idx + 1:])
+                _preview_path_rel = f'{_rel_dir}/{preview_filename}'
+            except ValueError:
+                _preview_path_rel = f'thumbnail/candidates/{preview_filename}'
+
             candidates.append({
                 'index': global_idx,
                 'timestamp': round(ts, 3),
                 'angle': angle_name,
-                'previewPath': f'thumbnail/candidates/{preview_filename}',
+                'previewPath': _preview_path_rel,
             })
             print(f'    [{global_idx}] {angle_name}: t={ts:.2f}s')
 
