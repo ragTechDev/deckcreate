@@ -238,7 +238,7 @@ async function resolveArgs(cwd) {
   return {
     audioPath,
     rawPath,
-    pythonBin: cli.pythonBin || 'python',
+    pythonBin: cli.pythonBin || 'python3',
     language: cli.language || 'en',
     device: cli.device || 'cpu',
   };

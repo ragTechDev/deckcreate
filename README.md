@@ -47,7 +47,7 @@ Video podcast editing and carousel generation pipeline.
 
 **Verify:**
 ```bash
-ffmpeg -version && python --version && node --version
+ffmpeg -version && python3 --version && node --version
 ```
 
 ### Option 2: Docker
@@ -93,9 +93,9 @@ Python 3.12 required for `diarize` and `align`.
 ```bash
 py -3.12 -m venv .venv
 .\.venv\Scripts\activate
-python -m pip install --upgrade pip setuptools wheel
-python -m pip install -r scripts/diarize/requirements.txt
-python -m pip install whisperx faster-whisper
+python3 -m pip install --upgrade pip setuptools wheel
+python3 -m pip install -r scripts/diarize/requirements.txt
+python3 -m pip install whisperx faster-whisper
 ```
 
 If `python` resolves to `WindowsApps\python` (permission denied), pass the path explicitly:
@@ -206,9 +206,9 @@ Simulates multi-camera by digitally cropping to the speaking speaker's face on a
 
 **Install MediaPipe:**
 ```bash
-pip install mediapipe pillow
+pip3 install mediapipe pillow
 # or:
-pip install -r scripts/camera/requirements.txt
+pip3 install -r scripts/camera/requirements.txt
 ```
 
 **Single angle:**
@@ -238,7 +238,7 @@ Output: `public/transcribe/output/camera/camera-profiles.json`
 ```bash
 npm run setup-camera -- --skip-detect          # skip auto-detection, draw manually
 npm run setup-camera -- --video path/to/v.mp4  # specify video explicitly
-npm run setup-camera -- --python python3        # custom Python path
+npm run setup-camera -- --python python3        # override Python binary
 ```
 
 ### 9. Preview in Remotion

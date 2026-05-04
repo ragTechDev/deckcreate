@@ -55,7 +55,7 @@ class Diarizer {
     this.rawJsonPath = options.rawJsonPath;
     this.diarizationJsonPath = options.diarizationJsonPath;
     this.numSpeakers = options.numSpeakers || null;
-    this.pythonBin = options.pythonBin || 'python';
+    this.pythonBin = options.pythonBin || 'python3';
     this.scriptPath = path.join(__dirname, 'run_diarize.py');
   }
 

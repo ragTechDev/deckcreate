@@ -262,7 +262,7 @@ function runDetectFaces(pythonBin, framePath, numSpeakers) {
 
 async function main() {
   const args = parseArgs();
-  const pythonBin = args.pythonBin || 'python';
+  const pythonBin = args.pythonBin || 'python3';
 
   const transcriptPath = args.transcriptPath
     || path.join(cwd, 'public', 'edit', 'transcript.json');

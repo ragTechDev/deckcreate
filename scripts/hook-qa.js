@@ -18,7 +18,7 @@ function parseArgs() {
     entry: 'remotion/index.ts',
     compositionId: 'ragTechVodcast',
     outputVideo: null,
-    pythonBin: 'python',
+    pythonBin: 'python3',
     device: 'cpu',
     language: 'en',
     driftThresholdMs: DEFAULT_DRIFT_THRESHOLD_MS,
