@@ -240,7 +240,7 @@ async function resolveArgs(cwd) {
     rawPath,
     pythonBin: cli.pythonBin || 'python3',
     language: cli.language || 'en',
-    device: cli.device || 'cpu',
+    device: cli.device || 'auto',
   };
 }
 

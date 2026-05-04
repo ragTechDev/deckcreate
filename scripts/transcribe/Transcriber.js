@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import os from 'os';
 import path from 'path';
 import fs from 'fs-extra';
+import { open as fsOpen } from 'node:fs/promises';
 import { installWhisperCpp, downloadWhisperModel, transcribe } from '@remotion/install-whisper-cpp';
 
 const WHISPER_VERSION = '1.5.5';
@@ -70,7 +71,7 @@ class Transcriber {
     const binaryName = process.platform === 'win32' ? 'main.exe' : 'main';
     const binaryPath = path.join(this.whisperDir, binaryName);
     const dirExists = await fs.pathExists(this.whisperDir);
-    const binaryExists = await fs.pathExists(binaryPath);
+    let binaryExists = await fs.pathExists(binaryPath);
 
     // If the folder exists without the binary it's a broken install — clean it up
     if (dirExists && !binaryExists) {
@@ -82,7 +83,7 @@ class Transcriber {
     // ELF magic: 0x7F 'E' 'L' 'F'. On a non-Linux host an ELF binary cannot run and will
     // not use Metal acceleration even if somehow invoked through a compatibility layer.
     if (binaryExists && process.platform !== 'linux') {
-      const fd = await fs.open(binaryPath, 'r');
+      const fd = await fsOpen(binaryPath, 'r');
       const magic = Buffer.alloc(4);
       await fd.read(magic, 0, 4, 0);
       await fd.close();

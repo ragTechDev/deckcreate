@@ -48,9 +48,18 @@ def main() -> int:
     parser.add_argument('--audio', required=True)
     parser.add_argument('--raw', required=True)
     parser.add_argument('--out', required=True)
-    parser.add_argument('--device', default='cpu')
+    parser.add_argument('--device', default='auto')
     parser.add_argument('--language', default='en')
     args = parser.parse_args()
+
+    device = args.device
+    if device == 'auto':
+        if torch.backends.mps.is_available():
+            device = 'mps'
+        elif torch.cuda.is_available():
+            device = 'cuda'
+        else:
+            device = 'cpu'
 
     audio_path = Path(args.audio)
     raw_path = Path(args.raw)
@@ -117,8 +126,8 @@ def main() -> int:
         audio = whisperx.load_audio(str(audio_path))
         log_memory('after audio load')
 
-        eprint(f'Loading WhisperX align model for language="{args.language}" on {args.device}...')
-        model_a, metadata = whisperx.load_align_model(language_code=args.language, device=args.device)
+        eprint(f'Loading WhisperX align model for language="{args.language}" on {device}...')
+        model_a, metadata = whisperx.load_align_model(language_code=args.language, device=device)
         log_memory('after model load')
 
         # Process ONE segment at a time to isolate crashes
@@ -155,7 +164,7 @@ def main() -> int:
                         model_a,
                         metadata,
                         audio,
-                        args.device,
+                        device,
                         return_char_alignments=False,
                     )
             except Exception as e:
@@ -227,7 +236,7 @@ def main() -> int:
             'segments': output_segments,
             'meta': {
                 'language': args.language,
-                'device': args.device,
+                'device': device,
                 'tool': 'whisperx',
             },
         }

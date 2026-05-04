@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import os from 'os';
 import path from 'path';
 import fs from 'fs-extra';
+import { open as fsOpen } from 'node:fs/promises';
 import wavefileModule from 'wavefile';
 import { detectHDR, HDR_TONEMAP_VF, SDR_FORMAT_VF } from '../shared/hdr-detect.js';
 const { WaveFile } = wavefileModule;
@@ -382,7 +383,7 @@ class AudioSyncer {
   static async getContentFingerprint(filePath) {
     const { createHash } = await import('crypto');
     const hash = createHash('sha256');
-    const fd = await fs.open(filePath, 'r');
+    const fd = await fsOpen(filePath, 'r');
     try {
       const buffer = Buffer.alloc(64 * 1024); // Sample first 64KB
       const { bytesRead } = await fd.read(buffer, 0, buffer.length, 0);

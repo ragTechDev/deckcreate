@@ -90,11 +90,23 @@ Guides you interactively through every step. Transcription + diarization run in 
 
 Python 3.12 required for `diarize` and `align`.
 
+Activate a virtual environment for the specific python version:
 ```bash
 py -3.12 -m venv .venv
+```
+```bash
 .\.venv\Scripts\activate
+```
+
+Install the following list of pip requirements:
+```bash
 python3 -m pip install --upgrade pip setuptools wheel
+# or pip3
+```
+```bash
 python3 -m pip install -r scripts/diarize/requirements.txt
+```
+```bash
 python3 -m pip install whisperx faster-whisper
 ```
 
