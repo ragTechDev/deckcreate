@@ -1,1 +1,15 @@
-npm test -- --testPathPattern=edit-transcript --no-coverage
+# 1. ESLint on staged TS/JS files; JSON syntax check; Python syntax check
+npx lint-staged
+
+# 2. TypeScript type check whenever .ts/.tsx files are staged
+if git diff --cached --name-only | grep -qE '\.(ts|tsx)$'; then
+  echo "▶ tsc --noEmit"
+  npx tsc --noEmit
+fi
+
+# 3. Run Jest only for tests related to staged files (fast, no full suite)
+STAGED_TESTABLE=$(git diff --cached --name-only | grep -E '\.(js|ts|tsx)$' | grep -v 'node_modules' || true)
+if [ -n "$STAGED_TESTABLE" ]; then
+  echo "▶ jest --findRelatedTests"
+  echo "$STAGED_TESTABLE" | xargs npx jest --findRelatedTests --passWithNoTests --no-coverage
+fi
