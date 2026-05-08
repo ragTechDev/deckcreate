@@ -419,6 +419,16 @@ Keep it under 20 lines. Do not repeat code that is already visible in the diff.
 
 If the implementation creates new output directories, build artefacts, temp files, secrets, or generated files that should not be tracked, update `.gitignore` in the same commit that introduces the pattern. Do not leave untracked noise for the developer to clean up.
 
+### npm vulnerabilities
+
+The pre-push hook runs `npm audit --audit-level=moderate` and blocks the push if any installed package has a moderate, high, or critical vulnerability. If a dependency you introduced or updated triggers this:
+
+1. Run `npm audit fix` — applies safe, semver-compatible fixes automatically
+2. If `npm audit fix` cannot resolve it (breaking-change required), pin to the last safe version or find an alternative package
+3. Never use `--no-verify` to bypass this check — a known-vulnerable dependency in remote is worse than a blocked push
+
+Low-severity advisories are informational only and do not block the push.
+
 ### Large files in `public/`
 
 Video editing produces large binary files under `public/` (raw video, synced output, transcription models, audio, rendered MP4s). These **may** be committed to a local feature branch as work-in-progress checkpoints — that is intentional and supported. They must **never** be pushed to the remote.

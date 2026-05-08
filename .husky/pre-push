@@ -63,6 +63,28 @@ if grep -rEn \
   exit 1
 fi
 
+# ── 6. npm audit — no moderate/high/critical vulnerabilities ──────────────────
+# Blocks pushes when installed packages carry known vulnerabilities at moderate
+# severity or above. Low-severity advisories are ignored; they are informational
+# and rarely exploitable in this context.
+#
+# If npm audit cannot reach the registry (offline / VPN), the check is skipped
+# with a warning rather than a hard block — a network failure is not a security
+# failure. Remove the offline bypass if this repo ever enters a stricter security
+# posture.
+echo "▶ npm audit (moderate+)"
+AUDIT_OUTPUT=$(npm audit --audit-level=moderate 2>&1) || {
+  EXIT=$?
+  # npm audit exits 1 for vulnerabilities found, ENOTFOUND/ECONNREFUSED for network errors
+  if echo "$AUDIT_OUTPUT" | grep -qE 'ENOTFOUND|ECONNREFUSED|ETIMEDOUT|network'; then
+    echo "⚠  npm audit skipped — registry unreachable (offline?)"
+  else
+    echo "$AUDIT_OUTPUT"
+    echo "✗ npm audit found moderate or higher vulnerabilities — run 'npm audit fix' or pin to a safe version before pushing."
+    exit $EXIT
+  fi
+}
+
 # ── Phase-gated guards ─────────────────────────────────────────────────────────
 # Uncomment each block after its phase merges to main. These prevent agents from
 # reintroducing patterns that a phase explicitly removed.
