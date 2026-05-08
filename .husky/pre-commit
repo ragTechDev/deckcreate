@@ -1,3 +1,6 @@
+#!/usr/bin/env bash
+set -e
+
 # 1. ESLint on staged TS/JS files; JSON syntax check; Python syntax check
 npx lint-staged
 
@@ -7,8 +10,13 @@ if git diff --cached --name-only | grep -qE '\.(ts|tsx)$'; then
   npx tsc --noEmit
 fi
 
-# 3. Run Jest only for tests related to staged files (fast, no full suite)
-STAGED_TESTABLE=$(git diff --cached --name-only | grep -E '\.(js|ts|tsx)$' | grep -v 'node_modules' || true)
+# 3. Run Jest for staged files across node + react projects (multi-project config)
+#    e2e/ is excluded — Playwright tests require a live server; run in CI or pre-push instead
+STAGED_TESTABLE=$(git diff --cached --name-only \
+  | grep -E '\.(js|ts|tsx)$' \
+  | grep -v 'node_modules' \
+  | grep -v '^e2e/' \
+  || true)
 if [ -n "$STAGED_TESTABLE" ]; then
   echo "▶ jest --findRelatedTests"
   echo "$STAGED_TESTABLE" | xargs npx jest --findRelatedTests --passWithNoTests --no-coverage

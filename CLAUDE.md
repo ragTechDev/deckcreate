@@ -275,6 +275,25 @@ remotion/
 
 ---
 
+## Testing
+
+**Standards doc:** `docs/TESTING_STANDARDS.md` — read before writing any test.
+
+Three test types, three runners:
+
+| Type | Location | Runner | Command |
+|------|----------|--------|---------|
+| Unit (scripts/pipeline) | `scripts/**/*.test.ts` | Jest `node` project | `npm test` |
+| Unit (React components) | `app/**/*.test.tsx`, `remotion/**/*.test.tsx` | Jest `react` project | `npm run test:react` |
+| Integration | `tests/integration/**/*.test.ts` | Jest `node` project | `npm run test:integration` |
+| E2E | `e2e/**/*.test.ts` | Playwright | `npm run test:e2e` |
+
+**First-time Playwright setup:** `npx playwright install chromium`
+
+Every new pure function gets a unit test. Every new React component gets a smoke render test. E2E tests are required for Phase 8 user-facing features. Coverage thresholds are defined per phase in the standards doc.
+
+---
+
 ## Agent Implementation Convention
 
 For any multi-step task:

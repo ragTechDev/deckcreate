@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+set -e
+
+# ── 1. Full Jest test suite ────────────────────────────────────────────────────
+# Pre-commit only runs tests related to staged files. Pre-push runs the full
+# suite to catch cross-file regressions introduced across multiple commits.
+#
+# Four suites are excluded due to pre-existing failures unrelated to agent work
+# — remove each exclusion once the underlying issue is resolved:
+#   transcript-caption.test.js  → needs public/edit/transcript.json (not committed)
+#   CaptionExtractor.test.js    → youtube-transcript ships ESM-only; transform mismatch
+#   CarouselGenerator.test.js   → puppeteer mock missing setRequestInterception
+#   generate-carousel.test.js   → same puppeteer mock issue
+echo "▶ jest (full suite)"
+npx jest --no-coverage \
+  --testPathIgnorePatterns='transcript-caption\.test|CaptionExtractor\.test|CarouselGenerator\.test|generate-carousel\.test'
+
+# ── 2. E2E smoke tests ─────────────────────────────────────────────────────────
+# Playwright starts the dev server automatically (see playwright.config.ts).
+# Agents cannot read CI results, so this is their only feedback loop on E2E.
+echo "▶ playwright test"
+npx playwright test
+
+# ── 3. No debugger statements ──────────────────────────────────────────────────
+# Agents frequently omit cleanup of debugger statements. These are never valid
+# in committed source. e2e/ is excluded as Playwright uses its own debug mode.
+echo "▶ scanning for debugger statements"
+if grep -rn 'debugger' \
+    --include='*.ts' --include='*.tsx' --include='*.js' \
+    --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=coverage \
+    --exclude-dir=e2e \
+    .; then
+  echo "✗ 'debugger' found in source — remove before pushing."
+  exit 1
+fi
+
+# ── 4. No .only() in test files ────────────────────────────────────────────────
+# A focused .only() silently skips all other tests, creating a false green.
+# Playwright's forbidOnly catches this in CI; this check gives agents local
+# feedback before the push reaches CI.
+echo "▶ scanning for .only() in tests"
+if grep -rn '\.\bonly\b\s*(' \
+    --include='*.test.ts' --include='*.test.tsx' --include='*.test.js' \
+    --include='*.spec.ts' --include='*.spec.tsx' --include='*.spec.js' \
+    --exclude-dir=node_modules \
+    .; then
+  echo "✗ .only() found in test file — remove before pushing."
+  exit 1
+fi
+
+# ── 5. No secret tokens in source ─────────────────────────────────────────────
+# Scans for high-confidence token formats (GitHub PAT, AWS access key, Anthropic
+# API key, generic OpenAI-format key). False-positive rate is near zero; these
+# patterns must never appear in committed files.
+echo "▶ scanning for secret tokens"
+if grep -rEn \
+    'ghp_[A-Za-z0-9]{36}|AKIA[0-9A-Z]{16}|sk-ant-[A-Za-z0-9_\-]{90,}|sk-[A-Za-z0-9]{48}' \
+    --include='*.ts' --include='*.tsx' --include='*.js' \
+    --include='*.json' --include='*.py' \
+    --exclude-dir=node_modules --exclude-dir=.next \
+    .; then
+  echo "✗ Secret token detected — remove from source before pushing."
+  exit 1
+fi
+
+# ── Phase-gated guards ─────────────────────────────────────────────────────────
+# Uncomment each block after its phase merges to main. These prevent agents from
+# reintroducing patterns that a phase explicitly removed.
+
+# Phase 5 — hookTiming.ts consolidates all timing constants into one file.
+# After merge, HOOK_TAIL_PAD_UNBOUNDED_SECONDS must exist in exactly one place.
+# COUNT=$(grep -rn 'HOOK_TAIL_PAD_UNBOUNDED_SECONDS\s*=' \
+#     --include='*.ts' --include='*.tsx' --exclude-dir=node_modules . \
+#     | wc -l | tr -d ' ')
+# if [ "$COUNT" -gt 1 ]; then
+#   echo "✗ HOOK_TAIL_PAD_UNBOUNDED_SECONDS declared in $COUNT files — must live only in remotion/lib/constants.ts"
+#   exit 1
+# fi
+
+# Phase 7 — removes DEMO_CREDENTIALS from AuthContext.tsx.
+# After merge, this pattern must never reappear.
+# if grep -rn 'DEMO_CREDENTIALS\|demo_password' \
+#     --include='*.ts' --include='*.tsx' --exclude-dir=node_modules .; then
+#   echo "✗ Hardcoded credential pattern found — must not exist post-Phase 7."
+#   exit 1
+# fi
+
+# Phase 0.5 — brand content moves out of remotion/components/ into brand.json.
+# After merge, host names and brand handles must not appear in remotion/components/.
+# if grep -riE 'natasha|saloni|victoria|techybara|ragtechdev|~/ragtech' \
+#     remotion/components/ 2>/dev/null; then
+#   echo "✗ Hardcoded brand content found in remotion/components/ — must live in brands/ragtech/brand.json post-Phase 0.5."
+#   exit 1
+# fi
