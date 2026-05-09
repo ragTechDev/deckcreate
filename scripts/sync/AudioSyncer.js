@@ -178,18 +178,35 @@ class AudioSyncer {
     return correlation;
   }
 
-  findBestLag(correlation, lenA) {
+  findBestLag(correlation) {
     const N = correlation.length;
     let maxVal = -Infinity;
-    let maxIdx = 0;
+    const candidateIndices = [];
+
+    // First pass: find maximum value and collect all near-maximum candidates
     for (let i = 0; i < N; i++) {
       const v = Math.abs(correlation[i]);
-      if (v > maxVal) { maxVal = v; maxIdx = i; }
+      if (v > maxVal) {
+        maxVal = v;
+        candidateIndices.length = 0; // Clear previous candidates
+        candidateIndices.push(i);
+      } else if (Math.abs(v - maxVal) <= 0.5) {
+        // Within SNR threshold of 0.5 - add as candidate
+        candidateIndices.push(i);
+      }
     }
+
+    // Deterministic tie-break: prefer earliest peak among candidates
+    const maxIdx = candidateIndices[0];
 
     // Convert circular index to signed lag in samples
     const lagSamples = maxIdx <= N / 2 ? maxIdx : maxIdx - N;
-    return lagSamples / this.sampleRate;
+    
+    // Convert to integer frame offset instead of floating-point seconds
+    const frameRate = 30; // Standard video frame rate
+    const lagFrames = Math.round(lagSamples * frameRate / this.sampleRate);
+    
+    return lagFrames / frameRate; // Return as seconds but with frame-exact precision
   }
 
   validatePeak(correlation, lagSeconds) {
@@ -199,7 +216,10 @@ class AudioSyncer {
     const mean = sum / N;
     const std = Math.sqrt(sumSq / N - mean ** 2);
 
-    const lagSamples = Math.round(lagSeconds * this.sampleRate);
+    // Convert frame-based lag back to samples for validation
+    const frameRate = 30;
+    const lagFrames = Math.round(lagSeconds * frameRate);
+    const lagSamples = Math.round(lagFrames * this.sampleRate / frameRate);
     const idx = ((lagSamples % N) + N) % N;
     const snr = std > 0 ? Math.abs(correlation[idx] - mean) / std : 0;
 
@@ -275,6 +295,9 @@ class AudioSyncer {
       let stderr = '';
       proc.stderr.on('data', (d) => { stderr += d.toString(); });
       proc.on('close', (code) => {
+        if (code !== 0) {
+          return reject(new Error(`ffmpeg loudnorm measurement failed with code ${code}\n${stderr}`));
+        }
         // loudnorm prints its JSON block to stderr after processing completes
         const start = stderr.lastIndexOf('{');
         const end = stderr.lastIndexOf('}');
@@ -465,7 +488,7 @@ class AudioSyncer {
 
     console.log('  Step D: Computing cross-correlation via FFT...');
     const correlation = this.computeCrossCorrelation(videoSamples, audioSamples);
-    const lagSeconds = this.findBestLag(correlation, videoSamples.length);
+    const lagSeconds = this.findBestLag(correlation);
     const { snr, isReliable } = this.validatePeak(correlation, lagSeconds);
 
     return { lagSeconds, snr, isReliable };
