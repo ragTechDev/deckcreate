@@ -8,6 +8,13 @@ import { detectHDR, HDR_TONEMAP_VF, SDR_FORMAT_VF } from '../shared/hdr-detect.j
 const { WaveFile } = wavefileModule;
 import FFT from 'fft.js';
 
+// Sync frame rate constant for deterministic lag calculation
+const SYNC_FRAME_RATE = 30;
+
+// SNR and reliability thresholds for deterministic peak selection
+const PEAK_NEARNESS_THRESHOLD = 0.5;
+const RELIABILITY_SNR_THRESHOLD = 3.0;
+
 function nextPowerOfTwo(n) {
   let p = 1;
   while (p < n) p <<= 1;
@@ -190,8 +197,8 @@ class AudioSyncer {
         maxVal = v;
         candidateIndices.length = 0; // Clear previous candidates
         candidateIndices.push(i);
-      } else if (Math.abs(v - maxVal) <= 0.5) {
-        // Within SNR threshold of 0.5 - add as candidate
+      } else if (Math.abs(v - maxVal) <= PEAK_NEARNESS_THRESHOLD) {
+        // Within SNR threshold - add as candidate
         candidateIndices.push(i);
       }
     }
@@ -203,10 +210,9 @@ class AudioSyncer {
     const lagSamples = maxIdx <= N / 2 ? maxIdx : maxIdx - N;
     
     // Convert to integer frame offset instead of floating-point seconds
-    const frameRate = 30; // Standard video frame rate
-    const lagFrames = Math.round(lagSamples * frameRate / this.sampleRate);
+    const lagFrames = Math.round(lagSamples * SYNC_FRAME_RATE / this.sampleRate);
     
-    return lagFrames / frameRate; // Return as seconds but with frame-exact precision
+    return lagFrames / SYNC_FRAME_RATE; // Return as seconds but with frame-exact precision
   }
 
   validatePeak(correlation, lagSeconds) {
@@ -217,13 +223,15 @@ class AudioSyncer {
     const std = Math.sqrt(sumSq / N - mean ** 2);
 
     // Convert frame-based lag back to samples for validation
-    const frameRate = 30;
-    const lagFrames = Math.round(lagSeconds * frameRate);
-    const lagSamples = Math.round(lagFrames * this.sampleRate / frameRate);
+    const lagFrames = Math.round(lagSeconds * SYNC_FRAME_RATE);
+    const lagSamples = Math.round(lagFrames * this.sampleRate / SYNC_FRAME_RATE);
     const idx = ((lagSamples % N) + N) % N;
-    const snr = std > 0 ? Math.abs(correlation[idx] - mean) / std : 0;
+    
+    // Calculate SNR: signal (peak value) vs noise (standard deviation)
+    const signalValue = correlation[idx];
+    const snr = std > 0 ? Math.abs(signalValue - mean) / std : 0;
 
-    return { snr, isReliable: snr >= 3.0 };
+    return { snr, isReliable: snr >= RELIABILITY_SNR_THRESHOLD };
   }
 
   async computeTrimPoints(lagSeconds) {

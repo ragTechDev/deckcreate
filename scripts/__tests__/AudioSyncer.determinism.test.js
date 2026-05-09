@@ -87,6 +87,21 @@ describe('AudioSyncer Determinism Tests', () => {
     expect(firstResult).toBe(expectedLagSeconds);
   });
 
+  test('should prefer global max over near-equal peaks appearing before it', () => {
+    // Peak at index 10 (value 4.8), global max at index 20 (value 5.0)
+    // Index 10 is within 0.5 of global max, but should be cleared when 20 becomes max
+    const correlation = new Float64Array(100);
+    correlation[10] = 4.8; // Near-equal peak before global max
+    correlation[20] = 5.0; // Global maximum appears later
+    
+    const result = syncer.findBestLag(correlation);
+    
+    // Should select index 20 (the global max), not the earlier near-equal peak at index 10
+    const expectedLagFrames = Math.round(20 * 30 / 8000);
+    const expectedLagSeconds = expectedLagFrames / 30;
+    expect(result).toBe(expectedLagSeconds);
+  });
+
   test('should produce frame-exact results across different sample rates', () => {
     // Test with different sample rates to ensure frame rounding is consistent
     const sampleRates = [8000, 16000, 48000];
@@ -101,7 +116,7 @@ describe('AudioSyncer Determinism Tests', () => {
         sampleRate: rate
       });
       
-      return testSyncer.findBestLag(correlation, 50);
+      return testSyncer.findBestLag(correlation);
     });
     
     // Results should be frame-exact (divisible by 1/30)
