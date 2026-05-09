@@ -1,6 +1,4 @@
 // Jest setup file for tests
-import fs from 'fs-extra';
-import path from 'path';
 
 // Mock console methods to reduce noise in tests
 global.console = {
@@ -13,20 +11,6 @@ global.console = {
 
 // Mock fetch globally for YouTube API tests
 global.fetch = jest.fn();
-
-// Setup test directories
-beforeAll(async () => {
-  const testOutputDir = path.join(process.cwd(), 'test-output');
-  await fs.ensureDir(testOutputDir);
-});
-
-// Cleanup after tests
-afterAll(async () => {
-  const testOutputDir = path.join(process.cwd(), 'test-output');
-  if (await fs.pathExists(testOutputDir)) {
-    await fs.remove(testOutputDir);
-  }
-});
 
 // Mock Buffer for image processing tests
 global.Buffer = Buffer;

@@ -676,3 +676,10 @@ _This section is populated automatically by Step 8c as patterns are observed in 
 **Check:** For every directory path written by new code (grep `mkdirSync` or `mkdir` in the diff), verify the directory appears in `.gitignore`. Common offenders: `.ragtech/`, `runs/`, `cache/`, `artifacts/`.
 **Verdict:** BLOCKER
 **First seen:** refactor/s1-artifacts — 2026-05-09
+
+### Lint-staged sweeping out-of-scope files into the commit
+**Category:** QUALITY
+**Trigger:** The diff contains changes to files not mentioned in the PR description or implementation doc — typically cosmetic comment moves or eslint-disable removals in unrelated source files.
+**Check:** Compare `git diff --name-only origin/main...HEAD` against the file list in the PR description. Any file in the diff that is not in the PR's "Files changed" table is a scope violation. Common cause: lint-staged running `eslint --fix` on all staged files during the pre-commit hook, auto-modifying files the developer didn't intend to change.
+**Verdict:** BLOCKER
+**First seen:** fix/pre-existing-failing-test-suites — 2026-05-09

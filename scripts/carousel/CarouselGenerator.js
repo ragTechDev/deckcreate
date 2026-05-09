@@ -65,10 +65,10 @@ class CarouselGenerator {
 
       if (adState.hasSkip) {
         console.log('  Ad — clicking skip...');
-        try { await page.click('.ytp-skip-ad-button, .ytp-ad-skip-button'); } catch (_) {}
+        try { await page.click('.ytp-skip-ad-button, .ytp-ad-skip-button'); } catch {}
         await new Promise(r => setTimeout(r, 1500));
       } else if (adState.hasOverlay) {
-        try { await page.click('.ytp-ad-overlay-close-button'); } catch (_) {}
+        try { await page.click('.ytp-ad-overlay-close-button'); } catch {}
         await new Promise(r => setTimeout(r, 500));
       } else {
         console.log('  Waiting for ad to finish...');
@@ -125,6 +125,11 @@ class CarouselGenerator {
         if (!videoElement) throw new Error('Video element not found');
 
         const elementShot = await videoElement.screenshot({ type: 'png' });
+        if (!elementShot) {
+          console.warn(`  Screenshot attempt ${attempt + 1}: returned null, retrying...`);
+          await new Promise(r => setTimeout(r, 3000));
+          continue;
+        }
         console.log(`  Screenshot attempt ${attempt + 1}: ${elementShot.length} bytes`);
 
         const { data, info } = await sharp(elementShot)
@@ -538,7 +543,7 @@ class CarouselGenerator {
         const thumbBuffer = await fs.readFile(ctaConfig.thumbnailPath);
         imageBase64 = `data:image/png;base64,${thumbBuffer.toString('base64')}`;
         useThumbnail = true;
-      } catch (e) {
+      } catch {
         console.log('  Could not load thumbnail.png, falling back to logo');
       }
     }
@@ -565,7 +570,7 @@ class CarouselGenerator {
       const techybaraPath = path.join(process.cwd(), 'public', 'assets', 'techybara', 'techybara-holding-mic.png');
       const techybaraBuffer = await fs.readFile(techybaraPath);
       techybaraBase64 = `data:image/png;base64,${techybaraBuffer.toString('base64')}`;
-    } catch (e) {
+    } catch {
       console.log('  Could not load Techybara image');
     }
 
@@ -857,7 +862,7 @@ class CarouselGenerator {
         await consentBtn.click();
         await new Promise(r => setTimeout(r, 2000));
       }
-    } catch (e) { /* no banner */ }
+    } catch { /* no banner */ }
 
     await page.waitForSelector('video', { timeout: 15000 });
 
