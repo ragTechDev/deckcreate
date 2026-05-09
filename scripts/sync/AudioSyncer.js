@@ -8,6 +8,13 @@ import { detectHDR, HDR_TONEMAP_VF, SDR_FORMAT_VF } from '../shared/hdr-detect.j
 const { WaveFile } = wavefileModule;
 import FFT from 'fft.js';
 
+// Sync frame rate constant for deterministic lag calculation
+const SYNC_FRAME_RATE = 30;
+
+// SNR and reliability thresholds for deterministic peak selection
+const PEAK_NEARNESS_THRESHOLD = 0.5;
+const RELIABILITY_SNR_THRESHOLD = 3.0;
+
 function nextPowerOfTwo(n) {
   let p = 1;
   while (p < n) p <<= 1;
@@ -178,18 +185,34 @@ class AudioSyncer {
     return correlation;
   }
 
-  findBestLag(correlation, lenA) {
+  findBestLag(correlation) {
     const N = correlation.length;
     let maxVal = -Infinity;
-    let maxIdx = 0;
+    const candidateIndices = [];
+
+    // First pass: find maximum value and collect all near-maximum candidates
     for (let i = 0; i < N; i++) {
       const v = Math.abs(correlation[i]);
-      if (v > maxVal) { maxVal = v; maxIdx = i; }
+      if (v > maxVal) {
+        maxVal = v;
+        candidateIndices.length = 0; // Clear previous candidates
+        candidateIndices.push(i);
+      } else if (Math.abs(v - maxVal) <= PEAK_NEARNESS_THRESHOLD) {
+        // Within SNR threshold - add as candidate
+        candidateIndices.push(i);
+      }
     }
+
+    // Deterministic tie-break: prefer earliest peak among candidates
+    const maxIdx = candidateIndices[0];
 
     // Convert circular index to signed lag in samples
     const lagSamples = maxIdx <= N / 2 ? maxIdx : maxIdx - N;
-    return lagSamples / this.sampleRate;
+    
+    // Convert to integer frame offset instead of floating-point seconds
+    const lagFrames = Math.round(lagSamples * SYNC_FRAME_RATE / this.sampleRate);
+    
+    return lagFrames / SYNC_FRAME_RATE; // Return as seconds but with frame-exact precision
   }
 
   validatePeak(correlation, lagSeconds) {
@@ -199,11 +222,16 @@ class AudioSyncer {
     const mean = sum / N;
     const std = Math.sqrt(sumSq / N - mean ** 2);
 
-    const lagSamples = Math.round(lagSeconds * this.sampleRate);
+    // Convert frame-based lag back to samples for validation
+    const lagFrames = Math.round(lagSeconds * SYNC_FRAME_RATE);
+    const lagSamples = Math.round(lagFrames * this.sampleRate / SYNC_FRAME_RATE);
     const idx = ((lagSamples % N) + N) % N;
-    const snr = std > 0 ? Math.abs(correlation[idx] - mean) / std : 0;
+    
+    // Calculate SNR: signal (peak value) vs noise (standard deviation)
+    const signalValue = correlation[idx];
+    const snr = std > 0 ? Math.abs(signalValue - mean) / std : 0;
 
-    return { snr, isReliable: snr >= 3.0 };
+    return { snr, isReliable: snr >= RELIABILITY_SNR_THRESHOLD };
   }
 
   async computeTrimPoints(lagSeconds) {
@@ -275,6 +303,9 @@ class AudioSyncer {
       let stderr = '';
       proc.stderr.on('data', (d) => { stderr += d.toString(); });
       proc.on('close', (code) => {
+        if (code !== 0) {
+          return reject(new Error(`ffmpeg loudnorm measurement failed with code ${code}\n${stderr}`));
+        }
         // loudnorm prints its JSON block to stderr after processing completes
         const start = stderr.lastIndexOf('{');
         const end = stderr.lastIndexOf('}');
@@ -465,7 +496,7 @@ class AudioSyncer {
 
     console.log('  Step D: Computing cross-correlation via FFT...');
     const correlation = this.computeCrossCorrelation(videoSamples, audioSamples);
-    const lagSeconds = this.findBestLag(correlation, videoSamples.length);
+    const lagSeconds = this.findBestLag(correlation);
     const { snr, isReliable } = this.validatePeak(correlation, lagSeconds);
 
     return { lagSeconds, snr, isReliable };

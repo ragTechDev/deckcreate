@@ -87,9 +87,11 @@ Refactor core services so filesystem and subprocess behavior can be injected for
 Extract transcript-building and merge logic into pure functions with no I/O dependencies.
 
 ### 22. Add deterministic FFT tie-breaking in audio sync
+✅ Done — `refactor/s1-audiosync-determinism` — deterministic peak selection with earliest tie-break, frame-exact lag offsets
 Fix non-deterministic FFT peak selection so sync chooses a stable result when multiple peaks are near-equivalent.
 
 ### 23. Store lag as integer frame offset
+✅ Done — `refactor/s1-audiosync-determinism` — implemented frame-exact integer lag offsets at 30fps
 Normalize sync lag to frame-exact integer offsets instead of floating-point seconds.
 
 ---

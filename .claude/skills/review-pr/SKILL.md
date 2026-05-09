@@ -683,3 +683,10 @@ _This section is populated automatically by Step 8c as patterns are observed in 
 **Check:** Compare `git diff --name-only origin/main...HEAD` against the file list in the PR description. Any file in the diff that is not in the PR's "Files changed" table is a scope violation. Common cause: lint-staged running `eslint --fix` on all staged files during the pre-commit hook, auto-modifying files the developer didn't intend to change.
 **Verdict:** BLOCKER
 **First seen:** fix/pre-existing-failing-test-suites — 2026-05-09
+
+### Non-deterministic test setup using Math.random()
+**Category:** COVERAGE
+**Trigger:** A test file uses `Math.random()` (or `Date.now()`, `crypto.randomUUID()`, or any other non-seeded random source) inside a `test()` or `it()` block to construct input data for the function under test.
+**Check:** `grep -n "Math\.random\|Date\.now\|crypto\.random" scripts/**/*.test.{js,ts} app/**/*.test.{ts,tsx} remotion/**/*.test.{ts,tsx}` — any match inside a test body (not a mock implementation) is a candidate. Then verify whether the assertions check specific output values; if assertions are only type-level (`typeof`, `toHaveProperty`, `toBeDefined`), flag as BLOCKER.
+**Verdict:** BLOCKER
+**First seen:** refactor/s1-audiosync-determinism — 2026-05-09
