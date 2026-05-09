@@ -91,7 +91,8 @@ async function main() {
 // Check if running as main module (both for CommonJS and ES modules)
 if (typeof require !== 'undefined' && require.main === module) {
   main();
-} else if (typeof import.meta !== 'undefined' && import.meta.url === `file://${process.argv[1]}`) {
+} else if (typeof require === 'undefined' && import.meta.url === `file://${process.argv[1]}`) {
+  // Native ESM: only run when invoked directly, not when imported
   main();
 }
 

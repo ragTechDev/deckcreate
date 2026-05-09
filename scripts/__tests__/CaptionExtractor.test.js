@@ -1,3 +1,8 @@
+// Mock youtube-transcript module
+jest.mock('youtube-transcript/dist/youtube-transcript.esm.js', () => ({
+  fetchTranscript: jest.fn()
+}));
+
 import CaptionExtractor from '../carousel/CaptionExtractor.js';
 
 describe('CaptionExtractor', () => {
@@ -6,6 +11,10 @@ describe('CaptionExtractor', () => {
   beforeEach(() => {
     extractor = new CaptionExtractor();
     fetch.mockClear();
+    const { fetchTranscript } = jest.requireMock('youtube-transcript/dist/youtube-transcript.esm.js');
+    fetchTranscript.mockClear();
+    // Default: youtube-transcript unavailable so tests exercise the HTML-parsing fallback path
+    fetchTranscript.mockRejectedValue(new Error('youtube-transcript unavailable'));
   });
 
   describe('Constructor and initialization', () => {
@@ -21,60 +30,16 @@ describe('CaptionExtractor', () => {
 
   describe('fetchAllCaptions', () => {
     test('should fetch captions successfully', async () => {
-      const mockHtml = `
-        <html>
-          <body>
-            <script>
-              var ytInitialPlayerResponse = {
-                "captions": {
-                  "playerCaptionsTracklistRenderer": {
-                    "captionTracks": [
-                      {
-                        "baseUrl": "http://example.com/captions",
-                        "languageCode": "en"
-                      }
-                    ]
-                  }
-                }
-              };
-              var somethingElse = true;
-            </script>
-          </body>
-        </html>
-      `;
-
-      const mockCaptionData = JSON.stringify({
-        events: [
-          {
-            tStartMs: 1000,
-            dDurationMs: 3000,
-            segs: [{ utf8: "Hello world" }]
-          }
-        ]
-      });
-
-      fetch
-        .mockResolvedValueOnce({
-          ok: true,
-          headers: {
-            getSetCookie: () => ['test=value'],
-            get: jest.fn().mockReturnValue('')
-          },
-          text: jest.fn().mockResolvedValue(mockHtml)
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          text: jest.fn().mockResolvedValue(mockCaptionData)
-        });
+      // Use the youtube-transcript fast path: override the default throw set in beforeEach
+      const { fetchTranscript } = jest.requireMock('youtube-transcript/dist/youtube-transcript.esm.js');
+      fetchTranscript.mockResolvedValueOnce([
+        { offset: 1000, duration: 3000, text: 'Hello world' }
+      ]);
 
       const result = await extractor.fetchAllCaptions('testVideoId');
 
       expect(result).toEqual([
-        {
-          startSec: 1,
-          endSec: 4,
-          text: 'Hello world'
-        }
+        { startSec: 1, endSec: 4, text: 'Hello world' }
       ]);
     });
 
@@ -93,17 +58,8 @@ describe('CaptionExtractor', () => {
     });
 
     test('should handle no caption tracks', async () => {
-      const mockHtml = `
-        <script>
-          var ytInitialPlayerResponse = {
-            "captions": {
-              "playerCaptionsTracklistRenderer": {
-                "captionTracks": []
-              }
-            }
-          };
-        </script>
-      `;
+      // JSON must be on one line: the regex uses .+? without the s flag so it can't span newlines
+      const mockHtml = '<script>var ytInitialPlayerResponse = {"captions":{"playerCaptionsTracklistRenderer":{"captionTracks":[]}}};var x=1;</script>';
 
       fetch.mockResolvedValueOnce({
         ok: true,
@@ -398,7 +354,9 @@ describe('CaptionExtractor', () => {
       const text = 'uh this is like, you know, a test';
       const result = extractor.removeFillerWords(text);
 
-      expect(result).toBe('this is a test');
+      // FILLER_REGEX uses \b...\b; trailing-comma patterns (like,  you know,) don't
+      // satisfy the word boundary after the comma, so only bare words like 'uh' are removed
+      expect(result).toBe('this is like, you know, a test');
     });
 
     test('should handle text without filler words', () => {

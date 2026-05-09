@@ -1,0 +1,54 @@
+{
+  "segments": [
+    {
+      "id": 60,
+      "start": 100,
+      "end": 110,
+      "text": "This is a test segment with relevant content",
+      "hook": true,
+      "cut": false,
+      "tokens": [
+        {"text": "This", "t_dtw": 100},
+        {"text": " is", "t_dtw": 101},
+        {"text": " a", "t_dtw": 102},
+        {"text": " test", "t_dtw": 103},
+        {"text": " segment", "t_dtw": 104},
+        {"text": " with", "t_dtw": 105},
+        {"text": " relevant", "t_dtw": 106},
+        {"text": " content", "t_dtw": 107}
+      ]
+    },
+    {
+      "id": 61,
+      "start": 110,
+      "end": 120,
+      "text": "The quick test words",
+      "hook": true,
+      "cut": false,
+      "tokens": [
+        {"text": "The", "t_dtw": 110},
+        {"text": " quick", "t_dtw": 111},
+        {"text": " test", "t_dtw": 112},
+        {"text": " words", "t_dtw": 113}
+      ]
+    },
+    {
+      "id": 62,
+      "start": 120,
+      "end": 130,
+      "text": "Hook phrase test with programmers",
+      "hook": true,
+      "cut": false,
+      "hookPhrase": "programmers",
+      "hookFrom": 125,
+      "hookTo": 128,
+      "tokens": [
+        {"text": "Hook", "t_dtw": 120},
+        {"text": " phrase", "t_dtw": 121},
+        {"text": " test", "t_dtw": 122},
+        {"text": " with", "t_dtw": 123},
+        {"text": " programmers", "t_dtw": 127}
+      ]
+    }
+  ]
+}

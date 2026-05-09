@@ -5,9 +5,9 @@ import { ShortFormClip, calculateShortMetadata } from './ShortFormClip';
 import { OverlayGalleryComposition, GALLERY_TOTAL_FRAMES } from './components/OverlayGallery';
 
 // require.context is a webpack API — scans public/shorts/ at bundle time
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const SHORT_IDS: string[] = (() => {
   try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (require as any)
       .context('../public/shorts', true, /\/transcript\.json$/)
       .keys()

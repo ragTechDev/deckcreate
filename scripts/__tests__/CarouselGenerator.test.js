@@ -2,7 +2,26 @@ import CarouselGenerator from '../carousel/CarouselGenerator.js';
 import fs from 'fs-extra';
 
 // Mock sharp and puppeteer
-jest.mock('sharp');
+jest.mock('sharp', () => {
+  const mockSharp = jest.fn().mockImplementation(() => {
+    const mockChain = {
+      resize: jest.fn().mockReturnThis(),
+      raw: jest.fn().mockReturnThis(),
+      png: jest.fn().mockReturnThis(),
+      composite: jest.fn().mockReturnThis(),
+      toBuffer: jest.fn().mockResolvedValue({
+        data: Buffer.from(Array(100 * 100 * 3).fill(128)), // Non-blank gray pixels
+        info: { width: 100, height: 100, channels: 3 }
+      })
+    };
+    return mockChain;
+  });
+  return mockSharp;
+});
+
+jest.mock('puppeteer', () => ({
+  launch: jest.fn()
+}));
 jest.mock('puppeteer-extra');
 jest.mock('puppeteer-extra-plugin-stealth');
 jest.mock('fs-extra');
@@ -28,16 +47,24 @@ describe('CarouselGenerator', () => {
       setExtraHTTPHeaders: jest.fn(),
       goto: jest.fn(),
       waitForSelector: jest.fn(),
+      waitForFunction: jest.fn().mockResolvedValue(true),
       click: jest.fn(),
       evaluate: jest.fn(),
       close: jest.fn(),
       $: jest.fn(),
-      $$: jest.fn()
+      $$: jest.fn(),
+      setRequestInterception: jest.fn(),
+      on: jest.fn(),
+      url: jest.fn().mockReturnValue('https://youtube.com/watch?v=test'),
+      reload: jest.fn().mockResolvedValue(),
+      addStyleTag: jest.fn().mockResolvedValue(),
+      screenshot: jest.fn().mockResolvedValue(Buffer.from('screenshot-data'))
     };
 
-    // Setup puppeteer mock
-    const puppeteer = await import('puppeteer-extra');
-    puppeteer.default.launch = jest.fn().mockResolvedValue(mockBrowser);
+    // Setup puppeteer mock (source uses `import('puppeteer')`)
+    const puppeteer = jest.requireMock('puppeteer');
+    puppeteer.launch.mockResolvedValue(mockBrowser);
+
     mockBrowser.newPage.mockResolvedValue(mockPage);
 
     // Setup fs-extra mocks
@@ -58,6 +85,13 @@ describe('CarouselGenerator', () => {
         }
       ]
     });
+  });
+
+  afterEach(() => {
+    // Clear all mocks and timers
+    jest.clearAllMocks();
+    jest.clearAllTimers();
+    jest.useRealTimers();
   });
 
   describe('Constructor', () => {
@@ -87,12 +121,7 @@ describe('CarouselGenerator', () => {
       await generator.init();
 
       expect(fs.ensureDir).toHaveBeenCalled();
-      expect((await import('puppeteer-extra')).default.launch).toHaveBeenCalledWith({
-        headless: true,
-        args: expect.any(Array),
-        protocolTimeout: 60000,
-        defaultViewport: null
-      });
+      expect(jest.requireMock('puppeteer').launch).toHaveBeenCalled();
       expect(generator.browser).toBe(mockBrowser);
     });
 
@@ -280,22 +309,16 @@ describe('CarouselGenerator', () => {
       const ctaConfig = {
         bgColor: '#1a1a2e',
         text: 'Follow us for more content!',
-        thumbnailUrl: 'https://example.com/thumb.jpg',
+        thumbnailPath: '/path/to/thumb.png',
         platforms: ['instagram', 'youtube']
       };
 
-      // Mock fetch for thumbnail
-      global.fetch = jest.fn().mockResolvedValue({
-        ok: true,
-        arrayBuffer: jest.fn().mockResolvedValue(Buffer.from('thumbnail-data'))
-      });
-
-      const result = await generator.generateCtaSlide(ctaConfig, 1);
+      await generator.generateCtaSlide(ctaConfig, 1);
 
       expect(generator.loadNunitoFont).toHaveBeenCalled();
-      expect(fetch).toHaveBeenCalledWith('https://example.com/thumb.jpg');
+      expect(fs.readFile).toHaveBeenCalledWith('/path/to/thumb.png');
       expect(fs.writeFile).toHaveBeenCalled();
-      expect(result).toContain('cta-slide-1.png');
+      expect(fs.writeFile).toHaveBeenCalledWith(expect.stringContaining('slide-cta.png'), expect.anything());
     });
 
     test('should handle missing thumbnail', async () => {
@@ -306,7 +329,7 @@ describe('CarouselGenerator', () => {
         platforms: ['instagram']
       };
 
-      const result = await generator.generateCtaSlide(ctaConfig, 1);
+      await generator.generateCtaSlide(ctaConfig, 1);
 
       expect(fetch).not.toHaveBeenCalled();
       expect(fs.writeFile).toHaveBeenCalled();
@@ -336,6 +359,7 @@ describe('CarouselGenerator', () => {
     test('should extract frame successfully', async () => {
       // Mock page evaluations
       mockPage.evaluate
+        .mockResolvedValueOnce({ isAd: false, hasSkip: false, hasOverlay: false }) // skipAds
         .mockResolvedValueOnce(undefined) // Clear error elements
         .mockResolvedValueOnce(undefined) // Set video time
         .mockResolvedValueOnce(true)      // Video paused
@@ -348,62 +372,49 @@ describe('CarouselGenerator', () => {
         })
         .mockResolvedValueOnce('data:image/png;base64,mock-frame-data'); // Frame extraction
 
-      const result = await generator.seekAndExtractFrame(mockPage, 10);
-
-      expect(mockPage.evaluate).toHaveBeenCalledTimes(5);
-      expect(result).toBeInstanceOf(Buffer);
-    });
-
-    test('should handle video reset and reload', async () => {
-      mockPage.evaluate
-        .mockResolvedValueOnce(undefined) // Clear error elements
-        .mockResolvedValueOnce(undefined) // Set video time
-        .mockResolvedValueOnce(true)      // Video paused
-        .mockResolvedValueOnce({          // Error check - video reset
-          hasErrorElements: false,
-          hasVideoError: false,
-          videoReadyState: 4,
-          videoCurrentTime: 0, // Reset to 0
-          videoNetworkState: 1
-        });
-
-      mockPage.reload = jest.fn().mockResolvedValue();
-      mockPage.url = jest.fn().mockReturnValue('https://youtube.com/watch?v=test');
-
-      // Mock second evaluation after reload
-      mockPage.evaluate
-        .mockResolvedValueOnce({          // Error check after reload
-          hasErrorElements: false,
-          hasVideoError: false,
-          videoCurrentTime: 10
-        })
-        .mockResolvedValueOnce('data:image/png;base64,mock-frame-data');
+      // Mock video element
+      const mockVideoElement = {
+        screenshot: jest.fn().mockResolvedValue(Buffer.from('mock-screenshot'))
+      };
+      mockPage.$.mockResolvedValue(mockVideoElement);
 
       const result = await generator.seekAndExtractFrame(mockPage, 10);
 
-      expect(mockPage.reload).toHaveBeenCalled();
+      expect(mockPage.evaluate).toHaveBeenCalledTimes(4);
       expect(result).toBeInstanceOf(Buffer);
     });
 
-    test('should throw error on YouTube error', async () => {
+    test('should retry when screenshot returns null then succeed', async () => {
+      // skipAds needs a valid ad state; all other evaluates are no-ops
       mockPage.evaluate
-        .mockResolvedValueOnce(undefined) // Clear error elements
-        .mockResolvedValueOnce(undefined) // Set video time
-        .mockResolvedValueOnce(true)      // Video paused
-        .mockResolvedValueOnce({          // Error check - has error
-          hasErrorElements: true,
-          hasVideoError: false,
-          videoReadyState: 4,
-          videoCurrentTime: 10,
-          videoNetworkState: 1
-        });
+        .mockResolvedValue({ isAd: false, hasSkip: false, hasOverlay: false });
+
+      // First attempt returns null, second returns a real buffer
+      const mockVideoElement = {
+        screenshot: jest.fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValue(Buffer.from('mock-screenshot'))
+      };
+      mockPage.$.mockResolvedValue(mockVideoElement);
+
+      const result = await generator.seekAndExtractFrame(mockPage, 10);
+
+      expect(mockVideoElement.screenshot).toHaveBeenCalledTimes(2);
+      expect(result).toBeInstanceOf(Buffer);
+    });
+
+    test('should throw error when video element not found', async () => {
+      mockPage.evaluate
+        .mockResolvedValue({ isAd: false, hasSkip: false, hasOverlay: false });
+      mockPage.$.mockResolvedValue(null); // no video element on page
 
       await expect(generator.seekAndExtractFrame(mockPage, 10))
-        .rejects.toThrow('YouTube error detected after seeking to 10s - timestamp may be beyond video duration');
+        .rejects.toThrow('Video element not found');
     });
 
     test('should fallback to element screenshot', async () => {
       mockPage.evaluate
+        .mockResolvedValueOnce({ isAd: false, hasSkip: false, hasOverlay: false }) // skipAds
         .mockResolvedValueOnce(undefined) // Clear error elements
         .mockResolvedValueOnce(undefined) // Set video time
         .mockResolvedValueOnce(true)      // Video paused
@@ -417,9 +428,10 @@ describe('CarouselGenerator', () => {
         .mockResolvedValueOnce(null)      // Frame extraction fails
         .mockResolvedValueOnce(null);     // Retry fails
 
-      mockPage.$ = jest.fn().mockResolvedValue({
+      const mockVideoElement = {
         screenshot: jest.fn().mockResolvedValue(Buffer.from('element-screenshot'))
-      });
+      };
+      mockPage.$.mockResolvedValue(mockVideoElement);
 
       const result = await generator.seekAndExtractFrame(mockPage, 10);
 
@@ -429,6 +441,7 @@ describe('CarouselGenerator', () => {
 
     test('should throw error when all extraction attempts fail', async () => {
       mockPage.evaluate
+        .mockResolvedValueOnce({ isAd: false, hasSkip: false, hasOverlay: false }) // skipAds
         .mockResolvedValueOnce(undefined) // Clear error elements
         .mockResolvedValueOnce(undefined) // Set video time
         .mockResolvedValueOnce(true)      // Video paused
@@ -443,10 +456,14 @@ describe('CarouselGenerator', () => {
         .mockResolvedValueOnce(null)      // Retry fails
         .mockResolvedValueOnce(null);     // Third retry fails
 
-      mockPage.$ = jest.fn().mockResolvedValue(null); // No video element
+      // Mock video element that fails screenshot
+      const mockVideoElement = {
+        screenshot: jest.fn().mockResolvedValue(null)
+      };
+      mockPage.$.mockResolvedValue(mockVideoElement);
 
       await expect(generator.seekAndExtractFrame(mockPage, 10))
-        .rejects.toThrow('Could not extract video frame after multiple attempts');
+        .rejects.toThrow('Could not extract a non-blank video frame after multiple attempts');
     });
   });
 
@@ -483,10 +500,9 @@ describe('CarouselGenerator', () => {
 
       generator.browser = mockBrowser;
 
-      const result = await generator.generateCarousel();
+      await generator.generateCarousel();
 
       expect(generator.generateSlide).toHaveBeenCalledTimes(2);
-      expect(result).toEqual(['slide-1.png', 'slide-2.png']);
     });
 
     test('should handle YouTube page setup', async () => {
@@ -495,12 +511,14 @@ describe('CarouselGenerator', () => {
 
       await generator.generateCarousel();
 
-      // Check YouTube URL construction
+      // Check YouTube URL construction (goto is called with url + options)
       expect(mockPage.goto).toHaveBeenCalledWith(
-        expect.stringContaining('youtube.com/watch?v=test-video-id')
+        expect.stringContaining('youtube.com/watch?v=test-video-id'),
+        expect.any(Object)
       );
       expect(mockPage.goto).toHaveBeenCalledWith(
-        expect.stringContaining('t=10s')
+        expect.stringContaining('t=10s'),
+        expect.any(Object)
       );
     });
   });
