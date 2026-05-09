@@ -7,33 +7,38 @@ export const ARTIFACTS_DIR = '.ragtech/artifacts';
 /**
  * Stores content as an artifact and returns the hash.
  * @param content - The content to store (string or Buffer)
- * @returns The SHA-256 hash (first 12 characters) as the artifact identifier
+ * @param ext - Optional file extension (e.g., '.mp4', '.txt')
+ * @param baseDir - Base directory for artifacts (defaults to process.cwd())
+ * @returns The full SHA-256 hash as the artifact identifier
  */
-export function storeArtifact(content: string | Buffer): string {
+export function storeArtifact(content: string | Buffer, ext?: string, baseDir: string = process.cwd()): string {
   // Compute SHA-256 hash
   const hash = crypto.createHash('sha256').update(content).digest('hex');
-  const shortHash = hash.substring(0, 12);
   
   // Create artifacts directory if it doesn't exist
-  const artifactsDir = path.join(process.cwd(), ARTIFACTS_DIR);
+  const artifactsDir = path.join(baseDir, ARTIFACTS_DIR);
   if (!fs.existsSync(artifactsDir)) {
     fs.mkdirSync(artifactsDir, { recursive: true });
   }
   
   // Write artifact file if it doesn't already exist
-  const artifactPath = path.join(artifactsDir, shortHash);
+  const filename = ext ? `${hash}${ext}` : hash;
+  const artifactPath = path.join(artifactsDir, filename);
   if (!fs.existsSync(artifactPath)) {
     fs.writeFileSync(artifactPath, content);
   }
   
-  return shortHash;
+  return hash;
 }
 
 /**
  * Resolves the full path to an artifact file.
- * @param hash - The artifact hash (first 12 characters)
+ * @param hash - The artifact hash
+ * @param ext - Optional file extension
+ * @param baseDir - Base directory for artifacts (defaults to process.cwd())
  * @returns The full path to the artifact file
  */
-export function resolveArtifactPath(hash: string): string {
-  return path.join(process.cwd(), ARTIFACTS_DIR, hash);
+export function resolveArtifactPath(hash: string, ext?: string, baseDir: string = process.cwd()): string {
+  const filename = ext ? `${hash}${ext}` : hash;
+  return path.join(baseDir, ARTIFACTS_DIR, filename);
 }
