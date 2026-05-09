@@ -91,5 +91,9 @@ scripts/diarize/__pycache__/
 *.py[codz]
 *$py.class
 
+# ── Runtime directories ───────────────────────────────────────────────────────
+# .ragtech/ contains episode metadata, artifact store, and run logs
+.ragtech/
+
 # Editor
 .vscode/settings.json

@@ -669,3 +669,10 @@ _This section is populated automatically by Step 8c as patterns are observed in 
 **Check:** `grep -rn "mkdtemp\|os\.tmpdir\|fs\.mkdtempSync" scripts/**/*.test.ts` — any match means the test uses real I/O and must live in `tests/integration/` not next to the source file.
 **Verdict:** BLOCKER
 **First seen:** refactor/s1-project-file — 2026-05-09
+
+### Runtime directory not added to .gitignore
+**Category:** QUALITY
+**Trigger:** A new module creates a directory under `process.cwd()` (or the project root) that is intended to hold generated/runtime files (artifacts, run logs, cache) rather than source code.
+**Check:** For every directory path written by new code (grep `mkdirSync` or `mkdir` in the diff), verify the directory appears in `.gitignore`. Common offenders: `.ragtech/`, `runs/`, `cache/`, `artifacts/`.
+**Verdict:** BLOCKER
+**First seen:** refactor/s1-artifacts — 2026-05-09
