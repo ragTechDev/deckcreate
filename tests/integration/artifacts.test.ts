@@ -151,5 +151,32 @@ describe('Artifact Storage Integration', () => {
       expect(fs.existsSync(path.join(testArtifactsDir, `${hash1}.txt`))).toBe(true);
       expect(fs.existsSync(path.join(testArtifactsDir, `${hash2}.mp4`))).toBe(true);
     });
+
+    test('should normalize extension without leading dot', () => {
+      const content = 'Extension normalization test';
+      const hash1 = storeArtifact(content, '.txt', tempDir);
+      const hash2 = storeArtifact(content, 'txt', tempDir);
+      
+      // Same hash regardless of leading dot
+      expect(hash1).toBe(hash2);
+      
+      // Both should create .txt files
+      expect(fs.existsSync(path.join(testArtifactsDir, `${hash1}.txt`))).toBe(true);
+      expect(fs.existsSync(path.join(testArtifactsDir, `${hash2}.txt`))).toBe(true);
+      
+      // Should not create file without extension
+      expect(fs.existsSync(path.join(testArtifactsDir, hash1))).toBe(false);
+    });
+
+    test('should resolve paths with normalized extensions', () => {
+      const hash = 'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890';
+      
+      const path1 = resolveArtifactPath(hash, '.txt', tempDir);
+      const path2 = resolveArtifactPath(hash, 'txt', tempDir);
+      
+      // Both should resolve to same path with .txt extension
+      expect(path1).toBe(path2);
+      expect(path1).toBe(path.join(testArtifactsDir, `${hash}.txt`));
+    });
   });
 });
