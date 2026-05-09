@@ -50,6 +50,7 @@ export function readProject(cwd: string = process.cwd()): ProjectFile {
   if (!fs.existsSync(filePath)) {
     throw new ProjectNotFoundError(filePath);
   }
+  // TODO(Phase 0): validate parsed object against ProjectFile schema before cast
   return JSON.parse(fs.readFileSync(filePath, 'utf-8')) as ProjectFile;
 }
 

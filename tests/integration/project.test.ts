@@ -1,8 +1,8 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { readProject, writeProject, ProjectNotFoundError, PROJECT_DIR, PROJECT_FILENAME } from './project';
-import type { ProjectFile } from './project';
+import { readProject, writeProject, ProjectNotFoundError, PROJECT_DIR, PROJECT_FILENAME } from '../../scripts/config/project';
+import type { ProjectFile } from '../../scripts/config/project';
 
 const SAMPLE: ProjectFile = {
   version: '1.0.0',
