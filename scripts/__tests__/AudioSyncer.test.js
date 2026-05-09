@@ -111,14 +111,15 @@ describe('AudioSyncer', () => {
 
   describe('validatePeak', () => {
     test('should validate peak correctly with frame-based lag', () => {
+      // lagSeconds=0.033 maps to index 67 (not 50); peak at 50 is intentionally off-lag
+      // to verify that a mismatch between lag and peak location yields isReliable=false.
       const correlation = new Float64Array(100);
-      // Create correlation with clear peak at index 50, low noise elsewhere
       for (let i = 0; i < 100; i++) {
         correlation[i] = 0.01; // Very low noise floor
       }
-      correlation[50] = 5.0; // Clear peak at index 50
-      
-      const lagSeconds = 0.033; // ~1 frame at 30fps, maps to index 50
+      correlation[50] = 5.0; // Peak at index 50; lag maps to index 67
+
+      const lagSeconds = 0.033; // 1 frame at 30fps → index 67 in a length-100 array
       const result = syncer.validatePeak(correlation, lagSeconds);
       
             
@@ -131,6 +132,24 @@ describe('AudioSyncer', () => {
       expect(result.snr).toBeGreaterThan(0);
       expect(typeof result.snr).toBe('number');
       expect(result.isReliable).toBe(false); // With this setup, SNR should be below 3.0 threshold
+    });
+
+    test('should validate peak correctly when lag lands on peak', () => {
+      // lagSeconds=0.033 at sampleRate=8000:
+      //   lagFrames  = round(0.033 × 30)      = 1
+      //   lagSamples = round(1 × 8000 / 30)   = 267
+      //   idx        = (267 % 100 + 100) % 100 = 67
+      const correlation = new Float64Array(100);
+      for (let i = 0; i < 100; i++) {
+        correlation[i] = 0.01; // Low noise floor
+      }
+      correlation[67] = 5.0; // Peak at the index validatePeak will look up for lagSeconds=0.033
+
+      const lagSeconds = 0.033; // 1 frame at 30fps → maps to index 67
+      const result = syncer.validatePeak(correlation, lagSeconds);
+
+      expect(result.snr).toBeGreaterThan(3.0);
+      expect(result.isReliable).toBe(true);
     });
 
     test('should handle zero standard deviation', () => {
@@ -150,26 +169,26 @@ describe('AudioSyncer', () => {
 
   describe('frame rounding behavior', () => {
     test('should round sample offsets to nearest frame', () => {
-      const correlation = new Float64Array(100);
-      
-      // Test various sample positions
+      // Array must be large enough to hold all test indices.
+      // samples=267 and samples=-150 (→ idx=850) require size ≥ 1000.
+      const N = 1000;
+      const correlation = new Float64Array(N);
+
       const testCases = [
         { samples: 100, expectedFrames: Math.round(100 * 30 / 8000) },
         { samples: 267, expectedFrames: Math.round(267 * 30 / 8000) },
         { samples: -150, expectedFrames: Math.round(-150 * 30 / 8000) }
       ];
-      
+
       testCases.forEach(({ samples, expectedFrames }) => {
         correlation.fill(0);
-        const idx = samples >= 0 ? samples : 100 + samples; // Handle negative indices
-        if (idx >= 0 && idx < 100) {
-          correlation[idx] = 5.0;
-          
-          const result = syncer.findBestLag(correlation);
-          const actualFrames = Math.round(result * 30);
-          
-          expect(actualFrames).toBe(expectedFrames);
-        }
+        const idx = samples >= 0 ? samples : N + samples; // circular: negative lag lives in upper half
+        correlation[idx] = 5.0;
+
+        const result = syncer.findBestLag(correlation);
+        const actualFrames = Math.round(result * 30);
+
+        expect(actualFrames).toBe(expectedFrames);
       });
     });
   });
