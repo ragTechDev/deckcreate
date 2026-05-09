@@ -293,6 +293,8 @@ Three test types, three runners:
 
 Every new pure function gets a unit test. Every new React component gets a smoke render test. E2E tests are required for Phase 8 user-facing features. Coverage thresholds are defined per phase in the standards doc.
 
+**Key placement rule:** If a test uses `os.tmpdir()`, `fs.mkdtempSync`, real file reads/writes, or spawns a process, it is an **integration test** — place it in `tests/integration/`, not next to the source file in `scripts/`. Unit tests in `scripts/**/*.test.ts` must have no real I/O.
+
 ---
 
 ## Agent Implementation Convention
