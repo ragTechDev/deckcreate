@@ -196,6 +196,7 @@ ty    = (0.5 - vp.cy) × 100%
 | `remotion/types/transcript.ts` | `Segment`, `Token`, `TimeCut`, `Transcript` | Will import from `scripts/types/` (Phase 6) |
 | `remotion/types/camera.ts` | `CameraProfiles`, `CameraShot`, `CropViewport` | Will import from `scripts/types/` (Phase 6) |
 | `remotion/types/brand.ts` | Brand design tokens only | Extend with identity/hosts/mascot/audio (Phase 0.5) |
+| `scripts/config/project.ts` | `ProjectFile` type, `readProject`/`writeProject`, `ProjectNotFoundError` | Sprint 1 Issue #1 |
 | `scripts/edit-transcript.js` | Sentence merging, `deriveCuts`, doc generation | Migrate to .ts (Phase 3) |
 | `scripts/sync/AudioSyncer.js` | FFT sync, `syncMultiple` | Add FFT tie-breaking (Phase 0) |
 | `scripts/wizard.js` | Interactive pipeline runner (60KB) | Replace with DAG runner (Phase 2) |
@@ -291,6 +292,8 @@ Three test types, three runners:
 **First-time Playwright setup:** `npx playwright install chromium`
 
 Every new pure function gets a unit test. Every new React component gets a smoke render test. E2E tests are required for Phase 8 user-facing features. Coverage thresholds are defined per phase in the standards doc.
+
+**Key placement rule:** If a test uses `os.tmpdir()`, `fs.mkdtempSync`, real file reads/writes, or spawns a process, it is an **integration test** — place it in `tests/integration/`, not next to the source file in `scripts/`. Unit tests in `scripts/**/*.test.ts` must have no real I/O.
 
 ---
 

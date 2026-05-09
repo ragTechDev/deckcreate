@@ -662,3 +662,10 @@ No blockers — branch is ready to merge.
 _This section is populated automatically by Step 8c as patterns are observed in real reviews. Do not edit manually._
 
 <!-- Entries are appended here by the skill -->
+
+### Integration test placed in scripts/ instead of tests/integration/
+**Category:** CONVENTION
+**Trigger:** A new test file in `scripts/` uses `os.tmpdir()`, `fs.mkdtempSync`, or any real filesystem read/write in its test body or setup.
+**Check:** `grep -rn "mkdtemp\|os\.tmpdir\|fs\.mkdtempSync" scripts/**/*.test.ts` — any match means the test uses real I/O and must live in `tests/integration/` not next to the source file.
+**Verdict:** BLOCKER
+**First seen:** refactor/s1-project-file — 2026-05-09
