@@ -250,6 +250,8 @@ Phases 0–4 (scripts) and 5–6 (Remotion) can proceed on separate branches in 
 
 ### Target directory additions (post-refactor)
 
+**`.gitignore` rule:** Every directory under `.ragtech/` (and any other runtime-generated directory such as `runs/`, `cache/`, output artifact dirs) must be listed in `.gitignore`. These hold generated/binary data, not source code, and must never be committed.
+
 ```
 .ragtech/
   project.json            episode metadata, tool versions, run parameters
