@@ -3,6 +3,7 @@
 ## Sprint 1 — Deterministic Foundation
 
 ### 1. Create project file configuration layer
+✅ Done — `refactor/s1-project-file` — `ProjectFile` type, `readProject`/`writeProject` helpers, `ProjectNotFoundError`
 Create the `.ragtech/project.json` foundation and typed helpers for reading/writing project state. This becomes the single source of truth for pipeline parameters, tool versions, and deterministic run metadata.
 
 ### 2. Implement content-addressed artifact storage
