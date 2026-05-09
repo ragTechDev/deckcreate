@@ -356,12 +356,10 @@ const SectionGroupPlayer: React.FC<{
         volume={muted ? 0 : effectiveVolume}
         style={{ opacity: groupFade }}
         onError={(err) => {
-           
           console.error('[OffthreadVideo] Playback error:', err);
           // Remotion error objects have errorCode for media errors
           const errorCode = (err as { errorCode?: number }).errorCode;
           if (errorCode === 4) {
-             
             console.error(
               `[OffthreadVideo] MEDIA_ERR_SRC_NOT_SUPPORTED for "${src}". ` +
               'This may be due:\n' +
