@@ -319,3 +319,4 @@ For any multi-step task:
 4. Scope discipline — only files listed in the implementation doc touched
 5. No new hardcoded paths in `scripts/`; no new duplicated timing constants in `remotion/`
 6. *(Remotion phases)* — `remotion studio` launches; frame comparison against `docs/render-baselines/`
+7. **Type shapes match spec** — if a type is defined in `docs/PRODUCTION_REFACTOR_PLAN.md`, the implementation must use the exact field names, types, and required/optional status from the spec. Downstream phase steps depend on specific field names by reference. If the spec must change, update it first and get agreement before diverging in code.
