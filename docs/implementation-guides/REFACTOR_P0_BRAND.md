@@ -4,7 +4,7 @@ description: Phase 0.5 — Brand Abstraction Layer Implementation Guide
 
 # Phase 0.5 — Brand Abstraction Layer
 
-**Branch:** `refactor/p0-brand`
+**Branch:** `refactor/s1-brand-types`
 **Goal:** All brand content out of code into config. Adding a new brand = creating files only + VSCode extension improvements.
 
 ---
@@ -22,6 +22,8 @@ description: Phase 0.5 — Brand Abstraction Layer Implementation Guide
 tsc --noEmit
 ```
 
+> ⚠️ **Sequencing Guard:** Steps 6 and 7 MUST NOT be started before Step 2 is complete. The `Brand` type requires `identity`, `hosts`, `mascot`, `audio`, and `background`, but `public/brand.json` does not yet have these fields. Runtime access before migration will throw.
+
 ### Step 2: Create brand structure and migrate config
 **Status:** ⏳ PENDING
 - [ ] Create `brands/ragtech/` directory
@@ -30,7 +32,7 @@ tsc --noEmit
 
 **Status check:**
 ```bash
-node -e "console.log('Brand loading not yet implemented')"
+ls brands/ragtech/brand.json
 ```
 
 ### Step 3: Move keyword overlays to brand structure
@@ -60,7 +62,7 @@ ls -la brands/ragtech/components/ | wc -l  # Should show 11 overlay files + inde
 
 **Status check:**
 ```bash
-node -e "console.log('Brand registry not yet implemented')"
+ls remotion/lib/brandRegistry.ts
 ```
 
 ### Step 5: Update OverlayRenderer
