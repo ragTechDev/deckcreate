@@ -85,6 +85,14 @@ AUDIT_OUTPUT=$(npm audit --audit-level=moderate 2>&1) || {
   fi
 }
 
+# ── 7. Runtime directories in .gitignore ───────────────────────────────────────
+# New code that creates directories at runtime must reference paths covered by
+# .gitignore. Without this, generated content lands in committed files on the
+# next `git add .`. The check only inspects simple string literals — template
+# literals and variable-based paths are skipped to avoid false positives.
+echo "▶ checking new runtime directory creation against .gitignore"
+node .husky/check-runtime-dirs.cjs
+
 # ── Phase-gated guards ─────────────────────────────────────────────────────────
 # Uncomment each block after its phase merges to main. These prevent agents from
 # reintroducing patterns that a phase explicitly removed.

@@ -229,7 +229,58 @@ EOF
 )"
 ```
 
-### 4c — Run the full test suite
+### 4b-2 — Scope verification (lint-staged side effects)
+
+After test gaps are resolved, verify that no files outside the PR's intended scope were silently added to the diff by lint-staged auto-fixes during pre-commit hooks.
+
+```bash
+git diff --name-only origin/main...HEAD
+```
+
+Compare this list against the file scope described in the PR body (from Step 0). Any file in the diff that is not mentioned in the PR's scope is a candidate for an unintended lint-staged modification. For each unexpected file:
+
+1. Confirm whether the change is cosmetic (whitespace, comment, trailing comma) — if yes, it was likely auto-fixed by lint-staged during a prior commit.
+2. If cosmetic and out-of-scope, record:
+
+```
+[QUALITY] Out-of-scope file in diff (lint-staged side effect)
+  File:    <path>
+  Change:  <describe the cosmetic change>
+  Verdict: WARNING — squash or drop this change; it obscures the PR's actual diff.
+```
+
+### 4c — Type specification check
+
+For each new or modified `type` or `interface` in the diff, verify it matches `docs/PRODUCTION_REFACTOR_PLAN.md` exactly. Downstream phase steps reference type field names by name — divergence breaks future phases silently.
+
+```bash
+# Find new or changed type/interface declarations in the diff
+git diff origin/main...HEAD -- '*.ts' '*.tsx' | grep '^\+' | grep -E '^\+\s*(export\s+)?(type|interface)\s+' | grep -v '^+++'
+```
+
+For each type name found, search the refactor plan:
+
+```bash
+grep -n "<TypeName>" docs/PRODUCTION_REFACTOR_PLAN.md
+```
+
+Compare field by field:
+- Field names (exact match — `videoSrc` ≠ `src`)
+- Required vs optional (`field:` vs `field?:`)
+- Field types
+
+If the implementation diverges from the spec **without a corresponding spec update in this same diff**, record:
+
+```
+[QUALITY] Type diverges from PRODUCTION_REFACTOR_PLAN.md spec
+  Type:     <TypeName>
+  File:     <implementation file>
+  Spec:     docs/PRODUCTION_REFACTOR_PLAN.md:<line>
+  Divergence: <field name / type / optionality that differs>
+  Verdict: BLOCKER — update the spec first, then align the implementation.
+```
+
+### 4d — Run the full test suite
 
 ```bash
 npm test

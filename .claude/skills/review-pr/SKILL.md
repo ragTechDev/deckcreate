@@ -663,30 +663,18 @@ _This section is populated automatically by Step 8c as patterns are observed in 
 
 <!-- Entries are appended here by the skill -->
 
-### Integration test placed in scripts/ instead of tests/integration/
-**Category:** CONVENTION
-**Trigger:** A new test file in `scripts/` uses `os.tmpdir()`, `fs.mkdtempSync`, or any real filesystem read/write in its test body or setup.
-**Check:** `grep -rn "mkdtemp\|os\.tmpdir\|fs\.mkdtempSync" scripts/**/*.test.ts` — any match means the test uses real I/O and must live in `tests/integration/` not next to the source file.
-**Verdict:** BLOCKER
-**First seen:** refactor/s1-project-file — 2026-05-09
+<!-- NOTE: Four patterns observed in earlier reviews are now enforced upstream and
+     do not need to be rechecked here:
+     • Integration test in scripts/ → pre-commit hook blocks (real I/O grep)
+     • Runtime directory not in .gitignore → pre-push hook blocks (check-runtime-dirs.js)
+     • Lint-staged out-of-scope files → implement-issue Step 5e + pre-push-audit Step 4b-2
+     • Non-deterministic test inputs → pre-commit hook blocks (Math.random grep)
+     If any of these somehow reach review (--no-verify bypass), the existing Step 4/5
+     checks will surface them as ordinary findings. -->
 
-### Runtime directory not added to .gitignore
+### Implementation diverges from documented spec without updating the spec
 **Category:** QUALITY
-**Trigger:** A new module creates a directory under `process.cwd()` (or the project root) that is intended to hold generated/runtime files (artifacts, run logs, cache) rather than source code.
-**Check:** For every directory path written by new code (grep `mkdirSync` or `mkdir` in the diff), verify the directory appears in `.gitignore`. Common offenders: `.ragtech/`, `runs/`, `cache/`, `artifacts/`.
+**Trigger:** A PR adds or modifies a type, interface, function signature, or data shape that is already defined in `docs/PRODUCTION_REFACTOR_PLAN.md` (or another spec doc), but the implementation uses different field names, different optionality, or omits required fields — without a corresponding update to the spec.
+**Check:** For each new or changed type in the diff, search `docs/PRODUCTION_REFACTOR_PLAN.md` for the type name or relevant phase section. Compare field names, types, and required/optional status between the spec and the implementation. Pay special attention to fields that downstream phase steps reference by name (grep the phase steps for `.fieldName` usage).
 **Verdict:** BLOCKER
-**First seen:** refactor/s1-artifacts — 2026-05-09
-
-### Lint-staged sweeping out-of-scope files into the commit
-**Category:** QUALITY
-**Trigger:** The diff contains changes to files not mentioned in the PR description or implementation doc — typically cosmetic comment moves or eslint-disable removals in unrelated source files.
-**Check:** Compare `git diff --name-only origin/main...HEAD` against the file list in the PR description. Any file in the diff that is not in the PR's "Files changed" table is a scope violation. Common cause: lint-staged running `eslint --fix` on all staged files during the pre-commit hook, auto-modifying files the developer didn't intend to change.
-**Verdict:** BLOCKER
-**First seen:** fix/pre-existing-failing-test-suites — 2026-05-09
-
-### Non-deterministic test setup using Math.random()
-**Category:** COVERAGE
-**Trigger:** A test file uses `Math.random()` (or `Date.now()`, `crypto.randomUUID()`, or any other non-seeded random source) inside a `test()` or `it()` block to construct input data for the function under test.
-**Check:** `grep -n "Math\.random\|Date\.now\|crypto\.random" scripts/**/*.test.{js,ts} app/**/*.test.{ts,tsx} remotion/**/*.test.{ts,tsx}` — any match inside a test body (not a mock implementation) is a candidate. Then verify whether the assertions check specific output values; if assertions are only type-level (`typeof`, `toHaveProperty`, `toBeDefined`), flag as BLOCKER.
-**Verdict:** BLOCKER
-**First seen:** refactor/s1-audiosync-determinism — 2026-05-09
+**First seen:** refactor/s1-brand-types — 2026-05-10

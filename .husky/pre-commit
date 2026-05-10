@@ -21,3 +21,41 @@ if [ -n "$STAGED_TESTABLE" ]; then
   echo "▶ jest --findRelatedTests"
   echo "$STAGED_TESTABLE" | xargs npx jest --findRelatedTests --passWithNoTests --no-coverage
 fi
+
+# ── 4. Integration test placement ──────────────────────────────────────────────
+# Test files under scripts/ must be pure (no real filesystem I/O). A test that
+# calls os.tmpdir(), fs.mkdtempSync(), or mkdtemp() is an integration test and
+# must live in tests/integration/ — not next to the source file in scripts/.
+STAGED_SCRIPT_TESTS=$(git diff --cached --name-only | grep -E '^scripts/.*\.test\.(ts|js)$' || true)
+if [ -n "$STAGED_SCRIPT_TESTS" ]; then
+  echo "▶ checking scripts/ test files for real I/O"
+  BAD_TESTS=""
+  while IFS= read -r f; do
+    if git show ":$f" 2>/dev/null | grep -qE 'os\.tmpdir|fs\.mkdtempSync|mkdtemp'; then
+      BAD_TESTS="${BAD_TESTS}  ${f}\n"
+    fi
+  done <<< "$STAGED_SCRIPT_TESTS"
+  if [ -n "$BAD_TESTS" ]; then
+    printf "✗ Real I/O in scripts/ test file(s) — move to tests/integration/ instead:\n%s" "$BAD_TESTS"
+    exit 1
+  fi
+fi
+
+# ── 5. Non-deterministic test inputs ──────────────────────────────────────────
+# Test files must not use non-seeded random sources. Math.random(), Date.now(),
+# and crypto random APIs produce flaky tests whose failures are timing-dependent
+# and hard to reproduce. Use fixed seeds or static data instead.
+STAGED_TESTS=$(git diff --cached --name-only | grep -E '\.test\.(ts|tsx|js)$' || true)
+if [ -n "$STAGED_TESTS" ]; then
+  echo "▶ checking test files for non-deterministic random sources"
+  BAD_RANDOM=""
+  while IFS= read -r f; do
+    if git show ":$f" 2>/dev/null | grep -qE 'Math\.random\(\)|Date\.now\(\)|crypto\.randomUUID\(\)|crypto\.getRandomValues'; then
+      BAD_RANDOM="${BAD_RANDOM}  ${f}\n"
+    fi
+  done <<< "$STAGED_TESTS"
+  if [ -n "$BAD_RANDOM" ]; then
+    printf "✗ Non-deterministic random source in test file(s) — use fixed seeds or static data:\n%s" "$BAD_RANDOM"
+    exit 1
+  fi
+fi
