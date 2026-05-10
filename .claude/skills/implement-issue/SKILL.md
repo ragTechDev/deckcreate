@@ -231,7 +231,22 @@ npx tsc --noEmit
 
 Fix all type errors before committing.
 
+**Type specification check:** If this commit adds or modifies any TypeScript `type` or `interface`, search `docs/PRODUCTION_REFACTOR_PLAN.md` for the same type name and compare field by field:
+- Field names must match exactly (the spec uses specific names that downstream phase steps reference by name)
+- Required vs. optional status must match (`field:` vs `field?:`)
+- Field types must match
+
+If the spec must change, update it first in a separate commit (`docs(refactor-plan): ...`) and get agreement before the implementation commit. Diverging silently breaks future phases.
+
 ### 5e. Commit
+
+**Before staging:** run `git diff --cached --name-only` after staging your intended files. lint-staged may auto-fix and silently re-stage files outside this commit's scope. Remove any out-of-scope files before committing:
+
+```bash
+git restore --staged <unintended-file>
+```
+
+Only files listed in this commit's plan should appear in `git diff --cached --name-only`.
 
 ```bash
 git add <specific-files>   # never git add -A
