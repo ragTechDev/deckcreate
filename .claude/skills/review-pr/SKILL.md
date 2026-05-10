@@ -690,3 +690,10 @@ _This section is populated automatically by Step 8c as patterns are observed in 
 **Check:** `grep -n "Math\.random\|Date\.now\|crypto\.random" scripts/**/*.test.{js,ts} app/**/*.test.{ts,tsx} remotion/**/*.test.{ts,tsx}` — any match inside a test body (not a mock implementation) is a candidate. Then verify whether the assertions check specific output values; if assertions are only type-level (`typeof`, `toHaveProperty`, `toBeDefined`), flag as BLOCKER.
 **Verdict:** BLOCKER
 **First seen:** refactor/s1-audiosync-determinism — 2026-05-09
+
+### Implementation diverges from documented spec without updating the spec
+**Category:** QUALITY
+**Trigger:** A PR adds or modifies a type, interface, function signature, or data shape that is already defined in `docs/PRODUCTION_REFACTOR_PLAN.md` (or another spec doc), but the implementation uses different field names, different optionality, or omits required fields — without a corresponding update to the spec.
+**Check:** For each new or changed type in the diff, search `docs/PRODUCTION_REFACTOR_PLAN.md` for the type name or relevant phase section. Compare field names, types, and required/optional status between the spec and the implementation. Pay special attention to fields that downstream phase steps reference by name (grep the phase steps for `.fieldName` usage).
+**Verdict:** BLOCKER
+**First seen:** refactor/s1-brand-types — 2026-05-10

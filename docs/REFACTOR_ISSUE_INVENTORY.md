@@ -7,7 +7,6 @@
 Create the `.ragtech/project.json` foundation and typed helpers for reading/writing project state. This becomes the single source of truth for pipeline parameters, tool versions, and deterministic run metadata.
 
 ### 2. Implement content-addressed artifact storage
-✅ Done — implemented content-addressed artifact storage using SHA-256-derived filenames in `.ragtech/artifacts/`
 Create the artifact storage system that writes outputs into `.ragtech/artifacts/` using SHA-256-derived filenames. Identical content must resolve to identical artifact IDs.
 
 ### 3. Persist pipeline parameters in project file

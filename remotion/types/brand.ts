@@ -27,19 +27,23 @@ export type BrandTypography = {
 
 export type BrandHost = {
   name: string;
-  avatar?: string;
-  bio?: string;
-  social?: {
-    twitter?: string;
-    linkedin?: string;
-    website?: string;
-  };
+  role: string;
+  imgSrc: string;       // relative to brands/{brandId}/
+  nameBgColor: string;
 };
 
 export type BrandMascot = {
+  enabled: boolean;
   name: string;
-  image?: string;
-  description?: string;
+  assets: {
+    holdingMic?: string;
+    teacher?: string;
+    raisingHand?: string;
+    holdingLaptop?: string;
+    holdingLaptop2?: string;
+    sparkleEyes?: string;
+    [key: string]: string | undefined;
+  };
 };
 
 export type Brand = {
@@ -50,21 +54,27 @@ export type Brand = {
     borderRadius:      number;
     borderRadiusSmall: number;
   };
-  identity?: {
-    name?: string;
-    tagline?: string;
-    description?: string;
+
+  // NEW: Identity
+  identity: {
+    name: string;            // 'RAG Tech'
+    terminalPath: string;    // '~/ragtech'
+    socialHandle: string;    // '@ragtechdev'
+    website?: string;
   };
-  hosts?: BrandHost[];
-  mascot?: BrandMascot;
-  audio?: {
-    theme?: string;
-    stinger?: string;
-    background?: string;
+
+  // NEW: Team
+  hosts: BrandHost[];
+
+  // NEW: Mascot
+  mascot: BrandMascot;
+
+  // NEW: Media
+  audio: {
+    introOutroMusic: string;
+    backgroundMusic: string;
   };
-  background?: {
-    image?: string;
-    video?: string;
-    pattern?: string;
+  background: {
+    episodeGridAssets: string[];
   };
 };
