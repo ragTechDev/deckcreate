@@ -22,5 +22,10 @@ jest.mock('next/navigation', () => ({
 // Mock next/image — factory must not reference document (hoisted before jsdom)
 jest.mock('next/image', () => ({
   __esModule: true,
-  default: jest.fn(),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  default: jest.fn(({ src, alt, ...rest }: any) => ({
+    src,
+    alt,
+    ...rest,
+  })),
 }));
