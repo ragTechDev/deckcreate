@@ -30,6 +30,8 @@ type ShortFormClipProps = {
   transcriptSrc?: string;
   cameraProfilesSrc?: string;
   brandSrc?: string;
+  /** Brand ID to load from brands/{brandId}/brand.json. Takes precedence over brandSrc if provided. */
+  brandId?: string;
   hookMusicSrc?: string;
   hookMusicDurationSecs?: number;
 };
@@ -274,12 +276,16 @@ export const ShortFormClip = ({
   transcriptSrc,
   cameraProfilesSrc,
   brandSrc = 'brand.json',
+  brandId,
   hookMusicSrc = 'sounds/hook-music.mp3',
   hookMusicDurationSecs = 0,
 }: ShortFormClipProps) => {
   const { fps } = useVideoConfig();
   const audioStartFromFrames = Math.max(0, Math.round(audioStartFrom * fps));
   const resolvedSrc = staticFile(normalizeStaticPath(src));
+
+  // Resolve brand source: brandId takes precedence over brandSrc
+  const resolvedBrandSrc = brandId ? `brands/${brandId}/brand.json` : brandSrc;
 
   const [transcript, setTranscript] = useState<Transcript | null>(null);
   const [cameraProfiles, setCameraProfiles] = useState<CameraProfiles | null>(null);
@@ -288,7 +294,7 @@ export const ShortFormClip = ({
 
   const [transcriptHandle] = useState(() => transcriptSrc ? delayRender('Loading transcript') : null);
   const [cameraHandle] = useState(() => cameraProfilesSrc ? delayRender('Loading camera profiles') : null);
-  const [brandHandle] = useState(() => brandSrc ? delayRender('Loading brand') : null);
+  const [brandHandle] = useState(() => resolvedBrandSrc ? delayRender('Loading brand') : null);
   const [fontHandle] = useState(() => delayRender('Loading Nunito font'));
 
   useEffect(() => {
@@ -307,11 +313,11 @@ export const ShortFormClip = ({
   }, [cameraProfilesSrc, cameraHandle]);
 
   useEffect(() => {
-    if (!brandSrc || !brandHandle) return;
-    fetchJson<Brand>(brandSrc)
+    if (!resolvedBrandSrc || !brandHandle) return;
+    fetchJson<Brand>(resolvedBrandSrc)
       .then(data => { setBrand(data); continueRender(brandHandle!); })
       .catch(err => { console.warn('Brand not loaded:', err.message); continueRender(brandHandle!); });
-  }, [brandSrc, brandHandle]);
+  }, [resolvedBrandSrc, brandHandle]);
 
   useEffect(() => {
     loadNunito().finally(() => continueRender(fontHandle));

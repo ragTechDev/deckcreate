@@ -57,7 +57,7 @@ export const RemotionRoot: React.FC = () => {
               src: 'sync/output/synced-output-1.mp4',
               transcriptSrc: `shorts/${shortId}/transcript.json`,
               cameraProfilesSrc: 'shorts/camera-profiles.json',
-              brandSrc: 'brand.json',
+              brandId: 'ragtech',
               hookMusicSrc: 'sounds/hook-music.mp3',
             }}
             calculateMetadata={calculateShortMetadata}
