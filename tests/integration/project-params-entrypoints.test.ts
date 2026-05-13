@@ -122,3 +122,70 @@ describe('transcribe-audio.js reads timestamp_offset from project file', () => {
     expect(result.stdout).toContain('Offset:     -1.2s');
   });
 });
+
+describe('edit-transcript.js reads timestamp_offset from project file', () => {
+  let tmpDir: string;
+
+  const MINIMAL_RAW = {
+    meta: { fps: 60, duration: 5 },
+    segments: [{
+      id: 1, start: 1.0, end: 3.0,
+      speaker: 'SPEAKER_01', text: 'Hello world.',
+      cut: false, cutReason: null,
+      tokens: [
+        { t_dtw: 1.0, text: 'Hello', cut: false, cutReason: null },
+        { t_dtw: 2.0, text: 'world.', cut: false, cutReason: null },
+      ],
+    }],
+  };
+
+  function writeRawTranscript(dir: string): void {
+    const rawDir = path.join(dir, 'public', 'transcribe', 'output', 'raw');
+    fs.mkdirSync(rawDir, { recursive: true });
+    fs.writeFileSync(path.join(rawDir, 'transcript.raw.json'), JSON.stringify(MINIMAL_RAW), 'utf-8');
+  }
+
+  beforeEach(() => { tmpDir = mkTmpDir(); });
+  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+
+  it('logs offset from project file when --timestamp-offset is absent', () => {
+    writeProjectJson(tmpDir, { timestamp_offset: 0.5 });
+    writeRawTranscript(tmpDir);
+
+    const result = spawnSync(
+      process.execPath,
+      [path.join(REPO_ROOT, 'scripts/edit-transcript.js')],
+      { cwd: tmpDir, encoding: 'utf-8', timeout: 15_000 },
+    );
+
+    expect(result.stdout).toContain('Applied timestamp offset: -0.5s');
+  });
+
+  it('does not apply offset when project file is absent', () => {
+    writeRawTranscript(tmpDir);
+
+    const result = spawnSync(
+      process.execPath,
+      [path.join(REPO_ROOT, 'scripts/edit-transcript.js')],
+      { cwd: tmpDir, encoding: 'utf-8', timeout: 15_000 },
+    );
+
+    expect(result.stdout).not.toContain('Applied timestamp offset');
+  });
+
+  it('CLI --timestamp-offset overrides project file value', () => {
+    writeProjectJson(tmpDir, { timestamp_offset: 0.5 });
+    writeRawTranscript(tmpDir);
+
+    const result = spawnSync(
+      process.execPath,
+      [
+        path.join(REPO_ROOT, 'scripts/edit-transcript.js'),
+        '--timestamp-offset', '1.2',
+      ],
+      { cwd: tmpDir, encoding: 'utf-8', timeout: 15_000 },
+    );
+
+    expect(result.stdout).toContain('Applied timestamp offset: -1.2s');
+  });
+});

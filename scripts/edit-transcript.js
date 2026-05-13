@@ -20,6 +20,8 @@ function parseArgs() {
   return result;
 }
 
+// Inline copy of project-file reading — mirrors PROJECT_DIR/PROJECT_FILENAME in scripts/config/project.ts.
+// Consolidate into a shared helper during Phase 3 (.js → .ts migration).
 function readProjectParams(cwd) {
   const projectPath = path.join(cwd, '.ragtech', 'project.json');
   try {
