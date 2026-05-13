@@ -44,7 +44,18 @@ const config = {
         '<rootDir>/tests/react/**/*.test.{ts,tsx}',
       ],
       transform: {
-        '^.+\\.[jt]sx?$': 'babel-jest',
+        // next/babel injects `import React` after the CJS transform; bypass it
+        // entirely for jest by disabling .babelrc and using an explicit config.
+        '^.+\\.[jt]sx?$': ['babel-jest', {
+          babelrc: false,
+          configFile: false,
+          presets: [
+            ['@babel/preset-env', { targets: { node: 'current' }, modules: 'commonjs' }],
+            ['@babel/preset-react', { runtime: 'automatic' }],
+            '@babel/preset-typescript',
+          ],
+          plugins: ['babel-plugin-transform-import-meta'],
+        }],
       },
       transformIgnorePatterns: ['node_modules/'],
       setupFilesAfterEnv: ['<rootDir>/tests/setup.react.ts'],
