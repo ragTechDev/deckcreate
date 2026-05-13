@@ -30,6 +30,8 @@ type ShortFormClipProps = {
   transcriptSrc?: string;
   cameraProfilesSrc?: string;
   brandSrc?: string;
+  /** Brand ID to load from brands/{brandId}/brand.json. Takes precedence over brandSrc if provided. */
+  brandId?: string;
   hookMusicSrc?: string;
   hookMusicDurationSecs?: number;
 };
@@ -121,11 +123,17 @@ export const calculateShortMetadata: CalculateMetadataFunction<ShortFormClipProp
     let overrideProps: ShortFormClipProps = transcript.meta.videoSrc
       ? { ...props, src: transcript.meta.videoSrc }
       : { ...props };
-    if (props.hookMusicSrc) {
+    let hookMusicSrc = props.hookMusicSrc;
+    if (!hookMusicSrc && (props.brandId || props.brandSrc)) {
+      const brandPath = props.brandId ? `brands/${props.brandId}/brand.json` : props.brandSrc!;
+      const brand = await fetchJson<Brand>(brandPath).catch(() => null);
+      hookMusicSrc = brand?.audio?.hookMusic;
+    }
+    if (hookMusicSrc) {
       const hookMusicDurationSecs = await getAudioDurationInSeconds(
-        staticFile(normalizeStaticPath(props.hookMusicSrc)),
+        staticFile(normalizeStaticPath(hookMusicSrc)),
       ).catch(() => 0);
-      overrideProps = { ...overrideProps, hookMusicDurationSecs };
+      overrideProps = { ...overrideProps, hookMusicSrc, hookMusicDurationSecs };
     }
     return { durationInFrames, fps, width: 1080, height: 1920, props: overrideProps };
   } catch {
@@ -274,12 +282,16 @@ export const ShortFormClip = ({
   transcriptSrc,
   cameraProfilesSrc,
   brandSrc = 'brand.json',
-  hookMusicSrc = 'sounds/hook-music.mp3',
+  brandId,
+  hookMusicSrc,
   hookMusicDurationSecs = 0,
 }: ShortFormClipProps) => {
   const { fps } = useVideoConfig();
   const audioStartFromFrames = Math.max(0, Math.round(audioStartFrom * fps));
   const resolvedSrc = staticFile(normalizeStaticPath(src));
+
+  // Resolve brand source: brandId takes precedence over brandSrc
+  const resolvedBrandSrc = brandId ? `brands/${brandId}/brand.json` : brandSrc;
 
   const [transcript, setTranscript] = useState<Transcript | null>(null);
   const [cameraProfiles, setCameraProfiles] = useState<CameraProfiles | null>(null);
@@ -288,7 +300,7 @@ export const ShortFormClip = ({
 
   const [transcriptHandle] = useState(() => transcriptSrc ? delayRender('Loading transcript') : null);
   const [cameraHandle] = useState(() => cameraProfilesSrc ? delayRender('Loading camera profiles') : null);
-  const [brandHandle] = useState(() => brandSrc ? delayRender('Loading brand') : null);
+  const [brandHandle] = useState(() => resolvedBrandSrc ? delayRender('Loading brand') : null);
   const [fontHandle] = useState(() => delayRender('Loading Nunito font'));
 
   useEffect(() => {
@@ -307,11 +319,11 @@ export const ShortFormClip = ({
   }, [cameraProfilesSrc, cameraHandle]);
 
   useEffect(() => {
-    if (!brandSrc || !brandHandle) return;
-    fetchJson<Brand>(brandSrc)
+    if (!resolvedBrandSrc || !brandHandle) return;
+    fetchJson<Brand>(resolvedBrandSrc)
       .then(data => { setBrand(data); continueRender(brandHandle!); })
       .catch(err => { console.warn('Brand not loaded:', err.message); continueRender(brandHandle!); });
-  }, [brandSrc, brandHandle]);
+  }, [resolvedBrandSrc, brandHandle]);
 
   useEffect(() => {
     loadNunito().finally(() => continueRender(fontHandle));

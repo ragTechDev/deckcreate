@@ -1,9 +1,14 @@
 {
-  "presets": ["next/babel"],
   "env": {
+    "development": {
+      "presets": ["next/babel"]
+    },
+    "production": {
+      "presets": ["next/babel"]
+    },
     "test": {
       "presets": [
-        ["@babel/preset-env", { "targets": { "node": "current" } }],
+        ["@babel/preset-env", { "targets": { "node": "current" }, "modules": "commonjs" }],
         ["@babel/preset-react", { "runtime": "automatic" }],
         "@babel/preset-typescript"
       ],

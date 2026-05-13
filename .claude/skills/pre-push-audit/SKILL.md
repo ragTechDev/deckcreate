@@ -511,7 +511,6 @@ Print the full PR body so the agent or developer can copy it:
 ## Test plan
 <checklist from 8c>
 
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
 ------- (end of template) -------
 ```
 

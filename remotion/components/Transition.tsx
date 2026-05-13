@@ -1,6 +1,7 @@
 import React from 'react';
-import { useCurrentFrame, useVideoConfig, interpolate, AbsoluteFill, staticFile, Audio, Sequence } from 'remotion';
-import { whoosh } from '@remotion/sfx';
+import { useCurrentFrame, interpolate, AbsoluteFill, staticFile, Audio, Sequence } from 'remotion';
+
+const whoosh = staticFile('sounds/whoosh.wav');
 
 interface TransitionProps {
   /** Frame at which the transition starts (end of hooks, start of main) */
@@ -13,7 +14,6 @@ export const Transition: React.FC<TransitionProps> = ({
   startFrame,
   durationInFrames = 30,
 }) => {
-  const { fps } = useVideoConfig();
   const frame = useCurrentFrame();
 
   // Only render Sequence during transition window for better performance
