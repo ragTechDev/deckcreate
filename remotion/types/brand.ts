@@ -47,6 +47,7 @@ export type BrandMascot = {
 };
 
 export type Brand = {
+  id:         string;
   colors:     BrandColors;
   typography: BrandTypography;
   logo:       string;
