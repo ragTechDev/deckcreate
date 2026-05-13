@@ -3,6 +3,7 @@ import { useVideoConfig, useCurrentFrame, Sequence } from 'remotion';
 import type { Segment, GraphicsCue } from '../types/transcript';
 import type { Brand } from '../types/brand';
 import type { Section } from './SegmentPlayer';
+import { getBrandOverlays } from '../lib/brandRegistry';
 
 // Core / general editing overlays
 import { ConceptExplainer, NameTitle, ChapterMarker } from './overlays/lower-thirds';
@@ -10,19 +11,6 @@ import { ConceptExplainerShort } from './overlays/lower-thirds/ConceptExplainer.
 import { NameTitleShort } from './overlays/lower-thirds/NameTitle.short';
 import { ImageWindowOverlay } from './overlays/ImageWindowOverlay';
 import { GifWindowOverlay } from './overlays/GifWindowOverlay';
-
-// Keyword-triggered overlays
-import {
-  AwardsOverlay,
-  CodingOverlay, EngineeringOverlay,
-  AIOverlay,
-  InfrastructureOverlay,
-  PracticeOverlay,
-  RoleOverlay,
-  LanguageOverlay, FrameworkOverlay,
-  EducationOverlay,
-  RagtechOverlay,
-} from './overlays/keywords';
 
 interface OverlayRendererProps {
   segments: Segment[];
@@ -37,18 +25,8 @@ interface OverlayRendererProps {
   isShortForm?: boolean;
 }
 
-const LONGFORM_COMPONENT_MAP: Record<string, React.FC<any>> = {
-  AwardsOverlay,
-  CodingOverlay,
-  EngineeringOverlay,
-  AIOverlay,
-  InfrastructureOverlay,
-  PracticeOverlay,
-  RoleOverlay,
-  LanguageOverlay,
-  FrameworkOverlay,
-  EducationOverlay,
-  RagtechOverlay,
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const CORE_TEMPLATE_MAP: Record<string, React.FC<any>> = {
   ConceptExplainer,
   NameTitle,
   ChapterMarker,
@@ -56,8 +34,8 @@ const LONGFORM_COMPONENT_MAP: Record<string, React.FC<any>> = {
   GifWindow: GifWindowOverlay,
 };
 
-const SHORTFORM_COMPONENT_MAP: Record<string, React.FC<any>> = {
-  ...LONGFORM_COMPONENT_MAP,
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const SHORTFORM_OVERRIDES: Record<string, React.FC<any>> = {
   ConceptExplainer: ConceptExplainerShort,
   NameTitle: NameTitleShort,
 };
@@ -97,7 +75,12 @@ export const OverlayRenderer: React.FC<OverlayRendererProps> = ({
   mainStartFrame,
   isShortForm = false,
 }) => {
-  const componentMap = isShortForm ? SHORTFORM_COMPONENT_MAP : LONGFORM_COMPONENT_MAP;
+  // SHORTFORM_OVERRIDES spreads last so shortform variants always beat brand overlays.
+  const componentMap = useMemo(() => ({
+    ...CORE_TEMPLATE_MAP,
+    ...getBrandOverlays(brand.id),
+    ...(isShortForm ? SHORTFORM_OVERRIDES : {}),
+  }), [brand.id, isShortForm]);
   const { fps } = useVideoConfig();
   const currentFrame = useCurrentFrame();
 
@@ -213,8 +196,6 @@ export const OverlayRenderer: React.FC<OverlayRendererProps> = ({
           }
         }
         // Previous marker fades out as next one starts - no gap
-        // Fade-out is 60 frames, so marker ends exactly when next starts
-        const FADE_OUT_FRAMES = 60;
         const requestedDuration = cue.durationInFrames;
         const availableDuration = nextMarkerStartFrame - cue.startFrame;
         // Cap duration so fade-out completes exactly when next marker starts
@@ -267,7 +248,9 @@ export const OverlayRenderer: React.FC<OverlayRendererProps> = ({
         }
 
         // Pass brand, durationInFrames, and other props (excluding brand string from transcript)
-        const { brand: _, ...otherProps } = cue.props || {};
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { brand: _brand, ...otherProps } = cue.props || {};
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const props: any = {
           ...otherProps,
           brand,

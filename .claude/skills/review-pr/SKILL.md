@@ -678,3 +678,24 @@ _This section is populated automatically by Step 8c as patterns are observed in 
 **Check:** For each new or changed type in the diff, search `docs/PRODUCTION_REFACTOR_PLAN.md` for the type name or relevant phase section. Compare field names, types, and required/optional status between the spec and the implementation. Pay special attention to fields that downstream phase steps reference by name (grep the phase steps for `.fieldName` usage).
 **Verdict:** BLOCKER
 **First seen:** refactor/s1-brand-types — 2026-05-10
+
+### Underscore placeholder renamed to descriptive name, introducing a vacuous lint-disable
+**Category:** QUALITY
+**Trigger:** A PR renames a `_` (or `__`) destructuring placeholder to a more descriptive `_foo` name and adds an `eslint-disable-next-line @typescript-eslint/no-unused-vars` comment.
+**Check:** `git diff origin/main...HEAD | grep '_brand\|_result\|_value' | grep 'eslint-disable'` — look for any renamed placeholder that now has a suppress comment. Verify whether the original `_` idiom was already suppression-free.
+**Verdict:** BLOCKER — revert to `_` (no comment needed); if a descriptive name is wanted, use a type-only assertion or a comment instead.
+**First seen:** refactor/s1-brand-registry — 2026-05-13
+
+### eslint-disable comments added for rules not active in the project ESLint config
+**Category:** QUALITY
+**Trigger:** A PR adds `eslint-disable` / `eslint-disable-next-line` comments citing a rule (e.g. `@typescript-eslint/no-explicit-any`) that is not present in `.eslintrc`, `eslint.config.*`, or any extended preset in the project config.
+**Check:** After collecting `eslint-disable` findings in Step 4a, read the project `.eslintrc` (or `eslint.config.*`) and verify the cited rule is actually enabled. If the rule is not in the config, the comment is vacuous noise.
+**Verdict:** WARNING — vacuous suppress comments add clutter without benefit; remove them or add the rule to the config if it should be enforced.
+**First seen:** refactor/s1-brand-registry — 2026-05-13
+
+### Module-level constant references replaced by per-render object construction in a Remotion component
+**Category:** QUALITY
+**Trigger:** A Remotion component's render function (or function body) constructs a new object via spread (`{ ...A, ...B, ...fn() }`) in place of a previously-used module-level constant reference or ternary between two pre-built constants.
+**Check:** Search the diff for `const [a-zA-Z]+ = {` lines inside component function bodies in `remotion/components/*.tsx`. Verify whether the original code used a pre-built constant (no per-frame allocation) and whether the replacement creates a new object on every frame.
+**Verdict:** WARNING — wrap in `useMemo` with appropriate dependencies to avoid per-frame object churn at 60 fps.
+**First seen:** refactor/s1-brand-registry — 2026-05-13

@@ -57,8 +57,7 @@ ls -la brands/ragtech/components/ | wc -l  # Should show 11 overlay files + inde
 ```
 
 ### Step 4: Create brand registry
-**Status:** ⏳ PENDING
-- [ ] Create `remotion/lib/brandRegistry.ts` with `getBrandOverlays(brandId)` static switch
+**Status:** ✅ DONE — `refactor/s1-brand-registry` — `getBrandOverlays(brandId)` static switch; ragtech overlays imported from current paths pending file migration (Step 3)
 
 **Status check:**
 ```bash
@@ -66,9 +65,7 @@ ls remotion/lib/brandRegistry.ts
 ```
 
 ### Step 5: Update OverlayRenderer
-**Status:** ⏳ PENDING
-- [ ] Update `OverlayRenderer`: remove hardcoded keyword imports
-- [ ] Use `{ ...CORE_TEMPLATE_MAP, ...getBrandOverlays(brand.id) }`
+**Status:** ✅ DONE — `refactor/s1-brand-registry` — `CORE_TEMPLATE_MAP` + `SHORTFORM_OVERRIDES` + `getBrandOverlays(brand.id)` replace monolithic maps; `Brand.id` field added
 
 **Status check:**
 ```bash

@@ -294,6 +294,8 @@ export type BrandMascot = {
 };
 
 export type Brand = {
+  id: string;          // brand registry key (e.g. 'ragtech')
+
   // Existing (keep)
   colors: BrandColors;
   typography: BrandTypography;
