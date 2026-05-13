@@ -75,11 +75,12 @@ export const OverlayRenderer: React.FC<OverlayRendererProps> = ({
   mainStartFrame,
   isShortForm = false,
 }) => {
-  const componentMap = {
+  // SHORTFORM_OVERRIDES spreads last so shortform variants always beat brand overlays.
+  const componentMap = useMemo(() => ({
     ...CORE_TEMPLATE_MAP,
-    ...(isShortForm ? SHORTFORM_OVERRIDES : {}),
     ...getBrandOverlays(brand.id),
-  };
+    ...(isShortForm ? SHORTFORM_OVERRIDES : {}),
+  }), [brand.id, isShortForm]);
   const { fps } = useVideoConfig();
   const currentFrame = useCurrentFrame();
 
