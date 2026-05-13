@@ -19,11 +19,8 @@ jest.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
-// Mock next/image so components render without Next.js image optimisation
+// Mock next/image — factory must not reference document (hoisted before jsdom)
 jest.mock('next/image', () => ({
   __esModule: true,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  default: ({ src, alt, ...rest }: any) =>
-    // biome-ignore lint: test mock intentionally uses img
-    Object.assign(document.createElement('img'), { src, alt, ...rest }),
+  default: jest.fn(),
 }));
