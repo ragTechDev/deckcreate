@@ -16,6 +16,16 @@ function parseArgs() {
   return result;
 }
 
+function readProjectParams(cwd) {
+  const projectPath = path.join(cwd, '.ragtech', 'project.json');
+  try {
+    const raw = fs.readFileSync(projectPath, 'utf-8');
+    return JSON.parse(raw)?.params ?? {};
+  } catch {
+    return {};
+  }
+}
+
 async function autoDetectFile(dir, extensions) {
   if (!await fs.pathExists(dir)) return null;
   const files = await fs.readdir(dir);
@@ -25,6 +35,7 @@ async function autoDetectFile(dir, extensions) {
 
 async function resolveArgs(cwd) {
   const cli = parseArgs();
+  const projectParams = readProjectParams(cwd);
 
   const audioPath = cli.audioPath
     || await autoDetectFile(path.join(cwd, 'public', 'transcribe', 'input'), ['.mp3', '.aac', '.wav', '.m4a']);
@@ -35,7 +46,10 @@ async function resolveArgs(cwd) {
     process.exit(1);
   }
 
-  return { audioPath, outputDir, model: cli.model, timestampOffset: cli.timestampOffset || 0 };
+  // CLI flag takes precedence; project file is the persisted default.
+  const timestampOffset = cli.timestampOffset ?? projectParams.timestamp_offset ?? 0;
+
+  return { audioPath, outputDir, model: cli.model, timestampOffset };
 }
 
 async function main() {
