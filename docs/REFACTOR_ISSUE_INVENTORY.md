@@ -14,6 +14,7 @@ Create the artifact storage system that writes outputs into `.ragtech/artifacts/
 Move runtime parameters such as diarization seed, timestamp offset, and number of speakers out of CLI flags and into the project file so pipeline runs are reproducible.
 
 ### 4. Add deterministic metadata to generated artifacts
+✅ Done — `refactor/s2-artifact-metadata` — `stampMetadata()` helper in `scripts/config/metadata.js`; stamps `schema_version` + `tool_versions` on `transcript.raw.json`, `diarization.json`, `transcript.json`
 Ensure every JSON artifact includes schema version and tool version metadata so outputs can be traced to exact execution conditions.
 
 ---
