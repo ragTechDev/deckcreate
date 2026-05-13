@@ -57,9 +57,11 @@ public/transcribe/output/ # raw Whisper JSON + VTT
 public/thumbnail/         # candidate frames, cutouts, manifest
 public/renders/           # final rendered .mp4 files
 public/output/            # carousel exports
+public/shorts/
+public/sync/output
 
 # ── Editable pipeline outputs (text/JSON) ─────────────────────────────────────
-# public/edit/   → transcript.doc.txt, transcript.json, SRT exports
+public/edit/   → transcript.doc.txt, transcript.json, SRT exports
 public/camera/ → camera-profiles.json, frame snapshots, detections
 #
 # These are committed by default so collaborators (and coding agents) can read
