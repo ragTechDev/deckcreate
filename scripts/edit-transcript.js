@@ -20,6 +20,16 @@ function parseArgs() {
   return result;
 }
 
+function readProjectParams(cwd) {
+  const projectPath = path.join(cwd, '.ragtech', 'project.json');
+  try {
+    const raw = fs.readFileSync(projectPath, 'utf-8');
+    return JSON.parse(raw)?.params ?? {};
+  } catch {
+    return {};
+  }
+}
+
 // ─── Text helpers ─────────────────────────────────────────────────────────────
 
 // Strip leading/trailing punctuation, keep apostrophes for contractions
@@ -1548,7 +1558,7 @@ function buildSentencesSrt(segments, meta = {}) {
 
 // Must match remotion/components/PodcastIntro.tsx and PodcastOutro.tsx
 const INTRO_DURATION_SECS = 7;  // 420 frames @ 60fps
-const OUTRO_DURATION_SECS = 7;  // 420 frames @ 60fps
+// OUTRO_DURATION_SECS mirrors INTRO_DURATION_SECS but is not yet consumed here.
 const HOOK_TAIL_PAD_UNBOUNDED = 0.16;
 const HOOK_TAIL_PAD_BOUNDED = 0.02;
 const HOOK_BRIDGE_MAX_GAP = 1.0;
@@ -1643,8 +1653,6 @@ function buildYouTubeSubtitles(transcript) {
 
     // Ensure we account for any bridging/extension time
     if (nextStart) {
-      const actualEnd = getHookEffectiveEnd(seg, nextStart);
-      const baseStart = seg.hookFrom ?? seg.start;
       currentOffset = Math.max(currentOffset, hookEndTime);
     }
   }
@@ -1817,6 +1825,9 @@ function buildPrevTokensByTdtw(tokens) {
 async function main() {
   const cwd = process.cwd();
   const cli = parseArgs();
+  const projectParams = readProjectParams(cwd);
+  // CLI flag takes precedence; project file is the persisted default.
+  const timestampOffset = cli.timestampOffset ?? projectParams.timestamp_offset ?? 0;
 
   const rawPath = cli.rawPath || path.join(cwd, 'public', 'transcribe', 'output', 'raw', 'transcript.raw.json');
   const outputPath = cli.outputPath || path.join(cwd, 'public', 'edit', 'transcript.json');
@@ -1967,8 +1978,8 @@ async function main() {
   }
 
   // Apply timestamp offset to all t_dtw values and segment boundaries
-  if (cli.timestampOffset > 0) {
-    const off = cli.timestampOffset;
+  if (timestampOffset > 0) {
+    const off = timestampOffset;
     transcript = {
       ...transcript,
       segments: transcript.segments.map(seg => ({
