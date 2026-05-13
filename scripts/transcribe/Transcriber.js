@@ -4,6 +4,7 @@ import path from 'path';
 import fs from 'fs-extra';
 import { open as fsOpen } from 'node:fs/promises';
 import { installWhisperCpp, downloadWhisperModel, transcribe } from '@remotion/install-whisper-cpp';
+import { stampMetadata } from '../config/metadata.js';
 
 const WHISPER_VERSION = '1.5.5';
 const DEFAULT_MODEL = 'medium.en';
@@ -248,7 +249,7 @@ class Transcriber {
     const jsonPath = path.join(this.outputDir, 'transcript.raw.json');
 
     await fs.writeFile(vttPath, this.buildVtt(transcription), 'utf8');
-    await fs.writeJson(jsonPath, this.buildJson(transcription), { spaces: 2 });
+    await fs.writeJson(jsonPath, stampMetadata(this.buildJson(transcription)), { spaces: 2 });
 
     console.log(`  VTT:  ${vttPath}`);
     console.log(`  JSON: ${jsonPath}`);

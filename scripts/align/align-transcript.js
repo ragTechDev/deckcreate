@@ -5,6 +5,7 @@ import fs from 'fs-extra';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { stampMetadata } from '../config/metadata.js';
 
 const ALIGN_SCRIPT_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'run_whisperx_align.py');
 
@@ -272,7 +273,7 @@ async function main() {
 
     const { updated, appliedSegments } = applyAlignment(raw, aligned);
 
-    await fs.writeJson(rawPath, updated, { spaces: 2 });
+    await fs.writeJson(rawPath, stampMetadata(updated), { spaces: 2 });
 
     console.log(`\n  ✓ Alignment applied to ${appliedSegments} segment(s).`);
     console.log(`  ✓ Updated transcript: ${rawPath}`);
