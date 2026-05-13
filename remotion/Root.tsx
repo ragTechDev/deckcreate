@@ -58,7 +58,6 @@ export const RemotionRoot: React.FC = () => {
               transcriptSrc: `shorts/${shortId}/transcript.json`,
               cameraProfilesSrc: 'shorts/camera-profiles.json',
               brandId: 'ragtech',
-              hookMusicSrc: 'sounds/hook-music.mp3',
             }}
             calculateMetadata={calculateShortMetadata}
           />

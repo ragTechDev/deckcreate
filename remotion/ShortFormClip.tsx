@@ -277,7 +277,7 @@ export const ShortFormClip = ({
   cameraProfilesSrc,
   brandSrc = 'brand.json',
   brandId,
-  hookMusicSrc = 'sounds/hook-music.mp3',
+  hookMusicSrc,
   hookMusicDurationSecs = 0,
 }: ShortFormClipProps) => {
   const { fps } = useVideoConfig();

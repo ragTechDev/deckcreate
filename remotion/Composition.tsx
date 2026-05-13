@@ -268,7 +268,7 @@ export const MyComposition = ({
   cameraProfilesSrc,
   brandSrc = 'brand.json',
   brandId,
-  hookMusicSrc = 'sounds/hook-music.mp3',
+  hookMusicSrc,
   hookMusicDurationSecs = 0,
 }: MyCompositionProps) => {
   const { fps } = useVideoConfig();
