@@ -38,14 +38,20 @@
   "hosts": [
     {
       "name": "Natasha",
-      "role": "Host",
-      "imgSrc": "/assets/team/natasha.png",
+      "role": "Software Engineer",
+      "imgSrc": "/assets/team/natasha.PNG",
       "nameBgColor": "#eebf89"
     },
     {
+      "name": "Saloni",
+      "role": "Software Developer",
+      "imgSrc": "/assets/team/saloni.PNG",
+      "nameBgColor": "#ffa3a6"
+    },
+    {
       "name": "Victoria",
-      "role": "Host",
-      "imgSrc": "/assets/team/victoria.png",
+      "role": "Solutions Engineer",
+      "imgSrc": "/assets/team/victoria.PNG",
       "nameBgColor": "#9cd2d0"
     }
   ],
@@ -63,7 +69,7 @@
   },
   "audio": {
     "introOutroMusic": "/sounds/intro-outro-music.mp3",
-    "backgroundMusic": "/sounds/background-music.mp3",
+    "backgroundMusic": "/sounds/jazz-cafe-music.mp3",
     "hookMusic": "/sounds/jazz-cafe-music.mp3"
   },
   "background": {
