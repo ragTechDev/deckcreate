@@ -9,7 +9,12 @@ const SAMPLE: ProjectFile = {
   episode: { id: 'ep-01', title: 'Pilot', number: 1 },
   brandId: 'ragtech',
   tools: { node: '20.0.0', ffmpeg: '6.0' },
-  params: { seed: 42 },
+  params: {
+    timestamp_offset: 0,
+    diarization_seed: 42,
+    num_speakers: 3,
+    sync_window_seconds: null,
+  },
   artifacts: {},
 };
 
@@ -68,5 +73,23 @@ describe('readProject', () => {
     expect(result.tools).toEqual(SAMPLE.tools);
     expect(result.params).toEqual(SAMPLE.params);
     expect(result.artifacts).toEqual(SAMPLE.artifacts);
+  });
+
+  it('roundtrip preserves all deterministic pipeline params', () => {
+    writeProject(SAMPLE, tmpDir);
+    const result = readProject(tmpDir);
+    expect(result.params.timestamp_offset).toBe(0);
+    expect(result.params.diarization_seed).toBe(42);
+    expect(result.params.num_speakers).toBe(3);
+    expect(result.params.sync_window_seconds).toBeNull();
+  });
+
+  it('roundtrip with partial params preserves only set fields', () => {
+    const partial: ProjectFile = { ...SAMPLE, params: { num_speakers: 2 } };
+    writeProject(partial, tmpDir);
+    const result = readProject(tmpDir);
+    expect(result.params.num_speakers).toBe(2);
+    expect(result.params.timestamp_offset).toBeUndefined();
+    expect(result.params.diarization_seed).toBeUndefined();
   });
 });
