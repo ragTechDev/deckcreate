@@ -34,11 +34,7 @@ type MyCompositionProps = {
   brandSrc?: string;
   /** Brand ID to load from brands/{brandId}/brand.json. Takes precedence over brandSrc if provided. */
   brandId?: string;
-  /**
-   * Path to hook intro music relative to /public. Defaults to "sounds/hook-music.mp3".
-   * Place your audio file there (e.g. the "Euphoric" track from Remotion's asset library).
-   * Set to empty string "" to disable hook music.
-   */
+  /** Path to hook music relative to /public. Falls back to brand.audio.hookMusic when omitted. */
   hookMusicSrc?: string;
   /** Duration of the hook music track in seconds — set by calculateMetadata for looping. */
   hookMusicDurationSecs?: number;
@@ -131,11 +127,17 @@ export const calculateMetadata: CalculateMetadataFunction<MyCompositionProps> = 
     let overrideProps: MyCompositionProps = transcript.meta.videoSrc
       ? { ...props, src: transcript.meta.videoSrc }
       : { ...props };
-    if (props.hookMusicSrc) {
+    let hookMusicSrc = props.hookMusicSrc;
+    if (!hookMusicSrc && (props.brandId || props.brandSrc)) {
+      const brandPath = props.brandId ? `brands/${props.brandId}/brand.json` : props.brandSrc!;
+      const brand = await fetchJson<Brand>(brandPath).catch(() => null);
+      hookMusicSrc = brand?.audio?.hookMusic;
+    }
+    if (hookMusicSrc) {
       const hookMusicDurationSecs = await getAudioDurationInSeconds(
-        staticFile(normalizeStaticPath(props.hookMusicSrc)),
+        staticFile(normalizeStaticPath(hookMusicSrc)),
       ).catch(() => 0);
-      overrideProps = { ...overrideProps, hookMusicDurationSecs };
+      overrideProps = { ...overrideProps, hookMusicSrc, hookMusicDurationSecs };
     }
     return { durationInFrames, fps, width: 1920, height: 1080, props: overrideProps };
   } catch {

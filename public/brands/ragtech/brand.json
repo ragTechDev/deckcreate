@@ -63,7 +63,8 @@
   },
   "audio": {
     "introOutroMusic": "/sounds/intro-outro-music.mp3",
-    "backgroundMusic": "/sounds/background-music.mp3"
+    "backgroundMusic": "/sounds/background-music.mp3",
+    "hookMusic": "/sounds/jazz-cafe-music.mp3"
   },
   "background": {
     "episodeGridAssets": [

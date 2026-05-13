@@ -123,11 +123,17 @@ export const calculateShortMetadata: CalculateMetadataFunction<ShortFormClipProp
     let overrideProps: ShortFormClipProps = transcript.meta.videoSrc
       ? { ...props, src: transcript.meta.videoSrc }
       : { ...props };
-    if (props.hookMusicSrc) {
+    let hookMusicSrc = props.hookMusicSrc;
+    if (!hookMusicSrc && (props.brandId || props.brandSrc)) {
+      const brandPath = props.brandId ? `brands/${props.brandId}/brand.json` : props.brandSrc!;
+      const brand = await fetchJson<Brand>(brandPath).catch(() => null);
+      hookMusicSrc = brand?.audio?.hookMusic;
+    }
+    if (hookMusicSrc) {
       const hookMusicDurationSecs = await getAudioDurationInSeconds(
-        staticFile(normalizeStaticPath(props.hookMusicSrc)),
+        staticFile(normalizeStaticPath(hookMusicSrc)),
       ).catch(() => 0);
-      overrideProps = { ...overrideProps, hookMusicDurationSecs };
+      overrideProps = { ...overrideProps, hookMusicSrc, hookMusicDurationSecs };
     }
     return { durationInFrames, fps, width: 1080, height: 1920, props: overrideProps };
   } catch {

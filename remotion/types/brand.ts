@@ -74,6 +74,7 @@ export type Brand = {
   audio: {
     introOutroMusic: string;
     backgroundMusic: string;
+    hookMusic?: string;
   };
   background: {
     episodeGridAssets: string[];
