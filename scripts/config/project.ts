@@ -18,7 +18,10 @@ export interface ToolVersions {
 }
 
 export interface PipelineParams {
-  [key: string]: unknown;
+  timestamp_offset?: number;
+  diarization_seed?: number;
+  num_speakers?: number;
+  sync_window_seconds?: number | null;
 }
 
 export interface ArtifactRefs {

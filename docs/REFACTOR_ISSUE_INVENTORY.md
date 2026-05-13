@@ -10,6 +10,7 @@ Create the `.ragtech/project.json` foundation and typed helpers for reading/writ
 Create the artifact storage system that writes outputs into `.ragtech/artifacts/` using SHA-256-derived filenames. Identical content must resolve to identical artifact IDs.
 
 ### 3. Persist pipeline parameters in project file
+✅ Done — `refactor/s2-project-params` — typed `PipelineParams` interface; `readProjectParams()` in `diarize-audio.js`, `transcribe-audio.js`, `edit-transcript.js` reads from project file with CLI fallback
 Move runtime parameters such as diarization seed, timestamp offset, and number of speakers out of CLI flags and into the project file so pipeline runs are reproducible.
 
 ### 4. Add deterministic metadata to generated artifacts

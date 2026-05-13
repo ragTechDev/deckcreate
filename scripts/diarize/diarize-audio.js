@@ -17,6 +17,18 @@ function parseArgs() {
   return result;
 }
 
+// Inline copy of project-file reading — mirrors PROJECT_DIR/PROJECT_FILENAME in scripts/config/project.ts.
+// Consolidate into a shared helper during Phase 3 (.js → .ts migration).
+function readProjectParams(cwd) {
+  const projectPath = path.join(cwd, '.ragtech', 'project.json');
+  try {
+    const raw = fs.readFileSync(projectPath, 'utf-8');
+    return JSON.parse(raw)?.params ?? {};
+  } catch {
+    return {};
+  }
+}
+
 async function autoDetectFile(dir, extensions) {
   if (!await fs.pathExists(dir)) return null;
   const files = await fs.readdir(dir);
@@ -26,6 +38,7 @@ async function autoDetectFile(dir, extensions) {
 
 async function resolveArgs(cwd) {
   const cli = parseArgs();
+  const projectParams = readProjectParams(cwd);
 
   const audioPath = cli.audioPath
     || await autoDetectFile(path.join(cwd, 'public', 'transcribe', 'input'), ['.mp3', '.aac', '.wav', '.m4a']);
@@ -37,15 +50,18 @@ async function resolveArgs(cwd) {
     process.exit(1);
   }
 
-  if (!cli.numSpeakers) {
-    console.error('❌ --num-speakers is required. Example: npm run diarize -- --num-speakers 2');
+  // CLI flag takes precedence; project file is the persisted default.
+  const numSpeakers = cli.numSpeakers ?? projectParams.num_speakers ?? null;
+
+  if (!numSpeakers) {
+    console.error('❌ num_speakers not set. Run the wizard or pass --num-speakers 2');
     process.exit(1);
   }
 
   return {
     audioPath,
     diarizationJsonPath,
-    numSpeakers: cli.numSpeakers,
+    numSpeakers,
     pythonBin: cli.pythonBin,
   };
 }
