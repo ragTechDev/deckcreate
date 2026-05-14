@@ -2,6 +2,7 @@ import os from 'os';
 import path from 'path';
 import fse from 'fs-extra';
 import Diarizer from '../../scripts/diarize/Diarizer.js';
+import { ARTIFACT_SCHEMA_VERSION } from '../../scripts/config/metadata.js';
 
 const SAMPLE_TRANSCRIPT = {
   meta: { fps: 60 },
@@ -46,7 +47,7 @@ describe('Diarizer.runAssignment — diarization.json format compatibility', () 
   it('reads new object format { turns: [...] } and assigns speakers', async () => {
     await fse.writeJson(
       diarizationPath,
-      { schema_version: '1', tool_versions: { node: process.version }, turns: SAMPLE_TURNS },
+      { schema_version: ARTIFACT_SCHEMA_VERSION, tool_versions: { node: process.version }, turns: SAMPLE_TURNS },
       { spaces: 2 },
     );
     const result = await makeDiarizer().runAssignment();
@@ -65,7 +66,7 @@ describe('Diarizer.runAssignment — diarization.json format compatibility', () 
     await fse.writeJson(diarizationPath, SAMPLE_TURNS, { spaces: 2 });
     await makeDiarizer().runAssignment();
     const written = await fse.readJson(transcriptPath);
-    expect(written.schema_version).toBeDefined();
-    expect(typeof written.tool_versions).toBe('object');
+    expect(written.schema_version).toBe(ARTIFACT_SCHEMA_VERSION);
+    expect(written.tool_versions.node).toBe(process.version);
   });
 });
