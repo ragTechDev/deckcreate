@@ -699,3 +699,17 @@ _This section is populated automatically by Step 8c as patterns are observed in 
 **Check:** Search the diff for `const [a-zA-Z]+ = {` lines inside component function bodies in `remotion/components/*.tsx`. Verify whether the original code used a pre-built constant (no per-frame allocation) and whether the replacement creates a new object on every frame.
 **Verdict:** WARNING — wrap in `useMemo` with appropriate dependencies to avoid per-frame object churn at 60 fps.
 **First seen:** refactor/s1-brand-registry — 2026-05-13
+
+### Integration test fixture uses hardcoded magic literal for an exported constant
+**Category:** QUALITY
+**Trigger:** An integration test fixture (or `expect` assertion) hardcodes a string or numeric literal that is already exported as a named constant from the module under test (e.g., a `schema_version` value or a version string).
+**Check:** For each new value literal appearing in integration test fixtures or assertions, grep the source module for a matching exported constant: `grep -n "export const" <source-module>`. If the literal matches a constant's value, the test should import and use the constant instead.
+**Verdict:** WARNING — if the constant's value ever changes, the hardcoded fixture will silently test the wrong precondition; use the imported constant to keep the test coupled to the implementation.
+**First seen:** refactor/s2-artifact-metadata — 2026-05-14
+
+### Trivially passing assertions that do not verify specific stamped values
+**Category:** COVERAGE
+**Trigger:** A test for metadata stamping or data enrichment uses `toBeDefined()` or `typeof x toBe('object')` instead of asserting the specific value (e.g., the exact schema version string or the node version).
+**Check:** In any test that exercises a stamping/enrichment function, grep for `toBeDefined\|typeof.*toBe` and verify whether the assertion would still pass if the stamped value were wrong (e.g., a different version string or an empty object).
+**Verdict:** WARNING — replace with an equality assertion against the specific expected value so the test fails if the stamped content regresses.
+**First seen:** refactor/s2-artifact-metadata — 2026-05-14
