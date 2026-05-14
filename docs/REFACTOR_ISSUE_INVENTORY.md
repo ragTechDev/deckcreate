@@ -22,6 +22,7 @@ Ensure every JSON artifact includes schema version and tool version metadata so 
 ## Sprint 2 — Hardware Abstraction
 
 ### 5. Implement hardware detection layer
+✅ Done — `refactor/s3-hardware-detect` — `HardwareProfile` type + `detectHardware()` in `scripts/config/hardware.ts`; 21 unit tests; darwin→videotoolbox, linux/x64→nvenc, fallback→libx264 > Unblocks: #6
 Create a centralized hardware detection module that identifies available execution environments (Apple Silicon / NVIDIA / CPU-only) and exposes a typed hardware profile.
 
 ### 6. Build typed FFmpeg command abstraction
