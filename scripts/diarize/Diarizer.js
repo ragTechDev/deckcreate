@@ -3,6 +3,7 @@ import path from 'path';
 import os from 'os';
 import fs from 'fs-extra';
 import { fileURLToPath } from 'url';
+import { stampMetadata } from '../config/metadata.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -123,7 +124,7 @@ class Diarizer {
     const speakerCount = new Set(turns.map((t) => t.speaker)).size;
     console.log(`  ${speakerCount} speaker(s), ${turns.length} turns.`);
 
-    await fs.writeJson(this.diarizationJsonPath, turns, { spaces: 2 });
+    await fs.writeJson(this.diarizationJsonPath, stampMetadata({ turns }), { spaces: 2 });
     console.log(`  Saved: ${this.diarizationJsonPath}`);
 
     return turns;
@@ -162,7 +163,9 @@ class Diarizer {
 
   async runAssignment() {
     console.log(`Reading diarization output: ${this.diarizationJsonPath}`);
-    const turns = await fs.readJson(this.diarizationJsonPath);
+    const raw = await fs.readJson(this.diarizationJsonPath);
+    // Support both legacy array format and current object format { turns: [...] }
+    const turns = Array.isArray(raw) ? raw : (raw.turns ?? []);
     console.log(`  ${new Set(turns.map((t) => t.speaker)).size} speaker(s), ${turns.length} turns.`);
 
     console.log(`Reading transcript: ${this.rawJsonPath}`);
@@ -170,7 +173,7 @@ class Diarizer {
 
     console.log('Assigning speaker labels...');
     const updated = this.assignSpeakers(transcript, turns);
-    await fs.writeJson(this.rawJsonPath, updated, { spaces: 2 });
+    await fs.writeJson(this.rawJsonPath, stampMetadata(updated), { spaces: 2 });
 
     const speakers = [...new Set(updated.segments.map((s) => s.speaker).filter(Boolean))];
     console.log(`  Labels assigned: ${speakers.join(', ') || '(none — check diarization.json timestamps overlap with transcript)'}`);

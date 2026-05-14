@@ -3,6 +3,7 @@
 import fs from 'fs-extra';
 import path from 'path';
 import { convertVttToSrt } from './shared/vtt-to-srt.js';
+import { stampMetadata } from './config/metadata.js';
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -2011,7 +2012,7 @@ async function main() {
   const chaptersPath = outputPath.replace(/\.json$/, '.chapters.txt');
 
   await fs.ensureDir(path.dirname(outputPath));
-  await fs.writeJson(outputPath, transcript, { spaces: 2 });
+  await fs.writeJson(outputPath, stampMetadata(transcript), { spaces: 2 });
   await fs.writeFile(sentencesSrtPath, buildSentencesSrt(transcript.segments, transcript.meta), 'utf8');
   await fs.writeFile(docPath, buildDoc(transcript), 'utf8');
   await fs.writeFile(youtubeSrtPath, buildYouTubeSubtitles(transcript), 'utf8');

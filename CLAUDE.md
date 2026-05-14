@@ -198,6 +198,7 @@ ty    = (0.5 - vp.cy) × 100%
 | `remotion/types/camera.ts` | `CameraProfiles`, `CameraShot`, `CropViewport` | Will import from `scripts/types/` (Phase 6) |
 | `remotion/types/brand.ts` | Brand design tokens + extended identity/hosts/mascot/audio; `id: string` field required by registry | Move overlays + parameterize (Phase 0.5 Steps 3, 6–7) |
 | `scripts/config/project.ts` | `ProjectFile` type, `readProject`/`writeProject`, `ProjectNotFoundError`; typed `PipelineParams` (`timestamp_offset`, `diarization_seed`, `num_speakers`, `sync_window_seconds`) | Sprint 1 Issues #1, #3 |
+| `scripts/config/metadata.js` | `stampMetadata(artifact, cwd?)` — prepends `schema_version` + `tool_versions` to any JSON artifact; reads tool versions from `.ragtech/project.json` if present | Sprint 1 Issue #4 |
 | `scripts/edit-transcript.js` | Sentence merging, `deriveCuts`, doc generation | Migrate to .ts (Phase 3) |
 | `scripts/sync/AudioSyncer.js` | FFT sync, `syncMultiple` | Add FFT tie-breaking (Phase 0) |
 | `scripts/wizard.js` | Interactive pipeline runner (60KB) | Replace with DAG runner (Phase 2) |
