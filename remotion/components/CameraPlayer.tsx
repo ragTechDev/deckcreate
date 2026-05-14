@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { AbsoluteFill, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
 import { SegmentPlayer, getEffectiveDuration, Section } from './SegmentPlayer';
+import { hookClipEnd } from '../lib/hookTiming';
 import type { Segment } from '../types/transcript';
 import type { CameraProfiles, CameraShot, CropViewport, AngleConfig, SpeakerProfile } from '../types/camera';
 
@@ -44,9 +45,6 @@ function sourceToOutputFrame(sourceSec: number, mainSections: Section[], fps: nu
 const MIN_WIDE_S      = 1.5;   // minimum wide-shot duration before cutting to closeup
 const MAX_CLOSEUP_S   = 10.0;  // force return to wide after this long in closeup (10s cycle)
 const PERIODIC_WIDE_S = 45.0;  // insert a wide every ~45 s of total closeup time
-const HOOK_TAIL_PAD_UNBOUNDED_SECONDS = 0.16;
-const HOOK_TAIL_PAD_BOUNDED_SECONDS = 0.02;
-const HOOK_BRIDGE_MAX_GAP_SECONDS = 1.0;
 
 // ── Transform helpers ─────────────────────────────────────────────────────────
 
@@ -131,54 +129,15 @@ function getSpeakerProfile(
 
 /**
  * The duration a segment contributes to the output timeline.
- * For phrase hooks this is the hook clip window, not the full segment duration.
- * Must match the clip length that buildSections emits for the same segment.
+ * For hook segments this is the hook clip window (via shared hookClipEnd),
+ * not the full segment duration. Must match the clip length that buildSections
+ * emits for the same segment.
  */
 function getOutputDuration(seg: Segment, nextHookStart?: number): number {
   if (seg.hook) {
-    // Phrase-bounded hooks play exactly their defined window (no extension).
-    if (seg.hookFrom !== undefined && seg.hookTo !== undefined) {
-      const sourceStart = seg.hookFrom;
-      let sourceEnd = seg.hookTo;
-      const hasSpokenTokenAfterEnd = seg.tokens.some(
-        (t) => !/_[A-Z]+_/.test(t.text.trim())
-          && t.text.trim() !== ''
-          && t.t_dtw > sourceEnd + 0.02,
-      );
-      const endsAtSegmentTail = !hasSpokenTokenAfterEnd;
-      const canBridgeToNextHook = nextHookStart !== undefined
-        && nextHookStart > sourceEnd
-        && nextHookStart - sourceEnd <= HOOK_BRIDGE_MAX_GAP_SECONDS;
-      if (endsAtSegmentTail && canBridgeToNextHook) {
-        sourceEnd = nextHookStart;
-      }
-      return (sourceEnd + HOOK_TAIL_PAD_BOUNDED_SECONDS) - sourceStart;
-    }
-    // Unbounded hooks play the full raw segment, extended when spoken tokens
-    // drift past seg.end — must match getHookSubClips in SegmentPlayer.
-    const baseEnd = seg.end;
-    const latestSpokenToken = seg.tokens
-      .filter(t => !/_[A-Z]+_/.test(t.text.trim()) && t.text.trim() !== '')
-      .reduce((max, t) => Math.max(max, t.t_dtw), -Infinity);
-    let sourceEnd = baseEnd;
-    if (latestSpokenToken > baseEnd) {
-      const drift = latestSpokenToken - baseEnd;
-      const extension = Math.min(1.5, drift + 0.4);
-      sourceEnd = baseEnd + extension;
-    }
-    const hasSpokenTokenAfterEnd = seg.tokens.some(
-      (t) => !/_[A-Z]+_/.test(t.text.trim())
-        && t.text.trim() !== ''
-        && t.t_dtw > sourceEnd + 0.02,
-    );
-    const endsAtSegmentTail = !hasSpokenTokenAfterEnd;
-    const canBridgeToNextHook = nextHookStart !== undefined
-      && nextHookStart > sourceEnd
-      && nextHookStart - sourceEnd <= HOOK_BRIDGE_MAX_GAP_SECONDS;
-    if (endsAtSegmentTail && canBridgeToNextHook) {
-      sourceEnd = nextHookStart;
-    }
-    return (sourceEnd + HOOK_TAIL_PAD_UNBOUNDED_SECONDS) - seg.start;
+    const sourceStart = seg.hookFrom ?? seg.start;
+    const sourceEnd = hookClipEnd(seg, nextHookStart);
+    return sourceEnd - sourceStart;
   }
   return getEffectiveDuration(seg);
 }

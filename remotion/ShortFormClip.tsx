@@ -11,6 +11,7 @@ import {
 import { getAudioDurationInSeconds } from '@remotion/media-utils';
 import React, { useState, useEffect, useMemo } from 'react';
 import { SegmentPlayer, buildSections, buildMainSubClips } from './components/SegmentPlayer';
+import { hookClipEnd } from './lib/hookTiming';
 import { CameraPlayer } from './components/CameraPlayer';
 import { CaptionOverlay } from './components/CaptionOverlay';
 import { OverlayRenderer } from './components/OverlayRenderer';
@@ -54,45 +55,6 @@ function getActiveSegments(transcript: Transcript) {
   });
 }
 
-const HOOK_TAIL_PAD_UNBOUNDED_SECONDS = 0.16;
-const HOOK_TAIL_PAD_BOUNDED_SECONDS = 0.02;
-const HOOK_BRIDGE_MAX_GAP_SECONDS = 1.0;
-
-/** Returns the effective end time for a hook clip, extending by 0.5 s when
- *  spoken tokens drift past the segment boundary. */
-function hookClipEnd(s: Segment, nextHookStart?: number): number {
-  const baseEnd = s.hookTo ?? s.end;
-  const isBoundedHook = s.hookTo !== undefined && s.hookTo !== null;
-  let sourceEnd = baseEnd;
-
-  if (s.hookTo === undefined || s.hookTo === null) {
-    const latestSpokenToken = s.tokens
-      .filter(t => !/_[A-Z]+_/.test(t.text.trim()) && t.text.trim() !== '')
-      .reduce((max, t) => Math.max(max, t.t_dtw), -Infinity);
-    if (latestSpokenToken > baseEnd) {
-      const drift = latestSpokenToken - baseEnd;
-      const extension = Math.min(1.5, drift + 0.4);
-      sourceEnd = baseEnd + extension;
-    }
-  }
-
-  const hasSpokenTokenAfterEnd = s.tokens.some(
-    (t) => !/_[A-Z]+_/.test(t.text.trim())
-      && t.text.trim() !== ''
-      && t.t_dtw > sourceEnd + 0.02,
-  );
-  const endsAtSegmentTail = !hasSpokenTokenAfterEnd;
-  const canBridgeToNextHook = nextHookStart !== undefined
-    && nextHookStart > sourceEnd
-    && nextHookStart - sourceEnd <= HOOK_BRIDGE_MAX_GAP_SECONDS;
-
-  if (endsAtSegmentTail && canBridgeToNextHook) {
-    sourceEnd = nextHookStart;
-  }
-
-  const withPad = sourceEnd + (isBoundedHook ? HOOK_TAIL_PAD_BOUNDED_SECONDS : HOOK_TAIL_PAD_UNBOUNDED_SECONDS);
-  return nextHookStart !== undefined ? Math.min(withPad, nextHookStart) : withPad;
-}
 
 function computeEffectiveDuration(transcript: Transcript): number {
   const hooks = transcript.segments.filter(s => s.hook && !s.cut);
