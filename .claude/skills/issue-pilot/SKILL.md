@@ -45,7 +45,7 @@ If `$ARGUMENTS` contains a specific issue number, use that. Otherwise:
 
 ```bash
 # List open issues with no assignee, sorted oldest first
-gh issue list --state open --assignee "" --json number,title,labels,createdAt \
+gh issue list --state open --assignee "" --limit 100 --json number,title,labels,createdAt \
   --jq 'sort_by(.createdAt) | .[] | select(.labels | map(.name) | inside(["needs-human","blocked","wontfix"]) | not) | [.number, .title] | @tsv'
 ```
 
