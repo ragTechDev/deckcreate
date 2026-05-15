@@ -713,3 +713,10 @@ _This section is populated automatically by Step 8c as patterns are observed in 
 **Check:** In any test that exercises a stamping/enrichment function, grep for `toBeDefined\|typeof.*toBe` and verify whether the assertion would still pass if the stamped value were wrong (e.g., a different version string or an empty object).
 **Verdict:** WARNING — replace with an equality assertion against the specific expected value so the test fails if the stamped content regresses.
 **First seen:** refactor/s2-artifact-metadata — 2026-05-14
+
+### Conditional guard wrapping a de-overlap or ordering assertion
+**Category:** COVERAGE
+**Trigger:** A test that verifies a de-overlap pass, ordering invariant, or non-empty output wraps its core assertion in `if (result.length >= N)` rather than first asserting the expected length unconditionally. If a regression causes the collection to collapse (fewer elements than expected), the assertion is silently skipped.
+**Check:** `grep -n "if (.*\.length" <test-file>` — for each hit, verify whether the body contains the only assertion for that scenario, and whether an unconditional length assertion precedes it.
+**Verdict:** WARNING — add an unconditional `expect(result).toHaveLength(N)` before the conditional, or remove the conditional entirely by making the assertion unconditional.
+**First seen:** refactor/s2-hook-timing — 2026-05-15
