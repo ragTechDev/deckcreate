@@ -12,6 +12,7 @@ import {
   HOOK_TAIL_PAD_UNBOUNDED_SECONDS,
   HOOK_TAIL_PAD_BOUNDED_SECONDS,
   HOOK_BRIDGE_MAX_GAP_SECONDS,
+  SEGMENT_TAIL_EPSILON_SECONDS,
 } from './hookTiming';
 import type { Segment } from '../types/transcript';
 
@@ -109,6 +110,19 @@ describe('hookClipEnd', () => {
       const result = hookClipEnd(seg, 15.6);
       // hasSpokenTokenAfterEnd = true → endsAtSegmentTail = false → no bridge
       expect(result).toBeCloseTo(15 + HOOK_TAIL_PAD_UNBOUNDED_SECONDS);
+    });
+
+    it('SEGMENT_TAIL_EPSILON_SECONDS: token at exactly sourceEnd+epsilon does not suppress bridging', () => {
+      const seg = makeSegment({
+        start: 10,
+        end: 15,
+        tokens: [makeToken(' hello', 15 + SEGMENT_TAIL_EPSILON_SECONDS)],
+        // token is at exactly the epsilon threshold — NOT past it, so still "at tail"
+      });
+      // gap = 15.4 - 15 = 0.4 s → within bridge window
+      const result = hookClipEnd(seg, 15.4);
+      // endsAtSegmentTail = true (token is not > sourceEnd + epsilon) → bridge fires
+      expect(result).toBeCloseTo(15.4);
     });
   });
 
@@ -260,9 +274,8 @@ describe('buildHookSections', () => {
     const seg2 = makeSegment({ id: 2, start: 11, end: 16, tokens: [] });
     const sections = buildHookSections([seg1, seg2], FPS);
     // Even if there's overlap in raw sections, de-overlap pass fixes it
-    if (sections.length >= 2) {
-      expect(sections[1].trimBefore).toBeGreaterThanOrEqual(sections[0].trimAfter);
-    }
+    expect(sections).toHaveLength(2);
+    expect(sections[1].trimBefore).toBeGreaterThanOrEqual(sections[0].trimAfter);
   });
 
   it('section trimAfter is always at least trimBefore + 1', () => {

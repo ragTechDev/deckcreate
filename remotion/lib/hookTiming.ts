@@ -20,6 +20,10 @@ export const HOOK_TAIL_PAD_BOUNDED_SECONDS = 0.02;
 /** Max gap (seconds) between hook end and next hook start for bridging. */
 export const HOOK_BRIDGE_MAX_GAP_SECONDS = 1.0;
 
+/** Tolerance (seconds) used to detect whether a spoken token falls past sourceEnd,
+ *  determining if the hook ends at the segment tail (bridging eligibility). */
+export const SEGMENT_TAIL_EPSILON_SECONDS = 0.02;
+
 // ── Core timing function ──────────────────────────────────────────────────────
 
 /**
@@ -62,7 +66,7 @@ export function hookClipEnd(segment: Segment, nextHookStart?: number): number {
 
   // Bridge to the next hook when the gap is small and this hook ends at the segment tail
   const hasSpokenTokenAfterEnd = segment.tokens.some(
-    t => isSpokenToken(t) && t.t_dtw > sourceEnd + 0.02,
+    t => isSpokenToken(t) && t.t_dtw > sourceEnd + SEGMENT_TAIL_EPSILON_SECONDS,
   );
   const endsAtSegmentTail = !hasSpokenTokenAfterEnd;
   const canBridge = nextHookStart !== undefined
