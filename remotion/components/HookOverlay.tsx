@@ -8,6 +8,7 @@ import { createTikTokStyleCaptions } from '@remotion/captions';
 import type { Caption } from '@remotion/captions';
 import { whip } from '@remotion/sfx';
 import type { Segment, Token } from '../types/transcript';
+import { hookClipEnd } from '../lib/hookTiming';
 import { isSpokenToken } from '../lib/tokens';
 import type { Brand } from '../types/brand';
 import { ChapterMarker } from './overlays/lower-thirds';
@@ -146,9 +147,6 @@ function buildCaptions(
 // ── Per-hook segment timing ────────────────────────────────────────────────────
 
 type Page = ReturnType<typeof createTikTokStyleCaptions>['pages'][number];
-const HOOK_TAIL_PAD_UNBOUNDED_SECONDS = 0.16;
-const HOOK_TAIL_PAD_BOUNDED_SECONDS = 0.02;
-const HOOK_BRIDGE_MAX_GAP_SECONDS = 1.0;
 
 type HookTiming = {
   seg: Segment;
@@ -167,47 +165,13 @@ function buildHookTimings(segments: Segment[], fps: number): HookTiming[] {
     if (!seg.hook || seg.cut) continue;
 
     const sourceStart = seg.hookFrom ?? seg.start;
-    const baseEnd = seg.hookTo ?? seg.end;
     const isBoundedHook = seg.hookTo !== undefined && seg.hookTo !== null;
-
-    let sourceEnd = baseEnd;
-    // Extend to cover the last spoken token's audio tail (both bounded and unbounded hooks)
-    const lastSpokenToken = seg.tokens
-      .filter(t => isSpokenToken(t) && t.t_dtw >= sourceStart && t.t_dtw <= baseEnd)
-      .sort((a, b) => (b.t_end ?? 0) - (a.t_end ?? 0))[0];
 
     const nextHookSeg = segments.slice(i + 1).find(s => s.hook && !s.cut);
     const nextHookStart = nextHookSeg ? (nextHookSeg.hookFrom ?? nextHookSeg.start) : undefined;
 
-    if (lastSpokenToken?.t_end) {
-      const tEnd = nextHookStart !== undefined
-        ? Math.min(lastSpokenToken.t_end, nextHookStart)
-        : lastSpokenToken.t_end;
-      sourceEnd = Math.max(sourceEnd, tEnd);
-    }
-
-    // Bridge to the next hook when the gap is small and this hook ends at the
-    // segment tail — must match SegmentPlayer.getHookSubClips / CameraPlayer.
-    const hasSpokenTokenAfterEnd = seg.tokens.some(
-      t => isSpokenToken(t) && t.t_dtw > sourceEnd + 0.02,
-    );
-    const endsAtSegmentTail = !hasSpokenTokenAfterEnd;
-    const canBridge = nextHookStart !== undefined
-      && nextHookStart > sourceEnd
-      && nextHookStart - sourceEnd <= HOOK_BRIDGE_MAX_GAP_SECONDS;
-    if (endsAtSegmentTail && canBridge) {
-      sourceEnd = nextHookStart;
-    }
-
-    // Add a small tail pad to avoid cutting off the audio abruptly
-    sourceEnd += isBoundedHook
-      ? HOOK_TAIL_PAD_BOUNDED_SECONDS
-      : HOOK_TAIL_PAD_UNBOUNDED_SECONDS;
-
-    // Hard cap: never extend into the next hook's source window (must match getHookSubClips).
-    if (nextHookStart !== undefined) {
-      sourceEnd = Math.min(sourceEnd, nextHookStart);
-    }
+    // Delegate to shared hook timing lib — single source of truth.
+    const sourceEnd = hookClipEnd(seg, nextHookStart);
 
     const captions = buildCaptions(seg.tokens, sourceStart, sourceEnd, isBoundedHook);
 
