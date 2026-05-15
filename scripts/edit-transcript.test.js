@@ -6,19 +6,14 @@ import {
   deriveCuts,
   cleanCaptionText,
   buildSentencesVtt,
-  buildSentencesSrt,
   buildYouTubeSubtitles,
-  getSubClips,
-  getHookClips,
   resolvePhraseToTimeRange,
-  resolvePhraseToFirstTokenIndex,
   autoCutPauses,
   autoCutDisfluencies,
   rebalanceBoundaryTokens,
   buildPrevTokensByTdtw,
   WORD_DURATION_ESTIMATE,
   CUT_START_BIAS,
-  CUT_END_BIAS,
   isSpecialToken,
   isDisfluencyToken,
 } from './edit-transcript.js';
@@ -384,7 +379,6 @@ describe('applyTextPartsToTokens', () => {
   test('ignores colon-reason syntax from old docs (backwards compat)', () => {
     // Old format {um:filler} — reason is stripped, word still gets cut
     const tokens = [tok(' um', 0.1), tok(' Hello', 0.2)];
-    const result = applyTextPartsToTokens('{um:filler} Hello', tokens);
     // "um:filler" is treated as the full span — won't match token "um"
     // This is acceptable: old docs with reasons just won't cut those tokens
     // (the important thing is it doesn't crash)
@@ -1296,6 +1290,18 @@ describe('> SPEAKER split', () => {
     const result = mergeDocIntoTranscript(makeSplitTranscript(), doc);
     const synth = result.segments.find(s => s.id !== 1 && s.id !== 2 && s.speaker === 'Natasha' && s.start < 20);
     expect(synth.text).toMatch(/^Right/i);
+  });
+
+  test('> SPEAKER split marks the created segment with synthetic: true', () => {
+    const result = mergeDocIntoTranscript(makeSplitTranscript(), doc);
+    const synth = result.segments.find(s => s.id !== 1 && s.id !== 2 && s.speaker === 'Natasha' && s.start < 20);
+    expect(synth.synthetic).toBe(true);
+  });
+
+  test('real segments do not carry synthetic: true', () => {
+    const result = mergeDocIntoTranscript(makeSplitTranscript(), doc);
+    const real = result.segments.filter(s => s.id === 1 || s.id === 2);
+    for (const s of real) expect(s.synthetic).toBeFalsy();
   });
 
   test('no segment overlaps in output', () => {

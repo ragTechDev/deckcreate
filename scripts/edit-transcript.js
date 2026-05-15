@@ -1222,6 +1222,7 @@ function mergeDocIntoTranscript(transcript, docContent) {
       const synthSeg = {
         ...parentSeg,
         id: synthId,
+        synthetic: true,
         speaker: newSpeaker,
         tokens: tokensB,
         start: splitTime,
@@ -1927,7 +1928,10 @@ async function main() {
 
     // Re-inject synthetic segments (created by > SPEAKER splits) that were never
     // matched by findPrev — these have no corresponding raw sentence.
-    const syntheticSegs = existing.segments.filter(s => !matchedExistingIds.has(s.id));
+    // Only segments explicitly marked synthetic are re-injected; unmarked unmatched
+    // segments are real sentences from a previous run whose timestamps no longer
+    // align after a fresh transcription/alignment pass.
+    const syntheticSegs = existing.segments.filter(s => s.synthetic && !matchedExistingIds.has(s.id));
     if (syntheticSegs.length > 0) {
       const syntheticStarts = new Set(syntheticSegs.map(s => s.start));
       const merged = [...transcript.segments, ...syntheticSegs].sort((a, b) => a.start - b.start);
