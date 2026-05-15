@@ -6,19 +6,15 @@ import {
   deriveCuts,
   cleanCaptionText,
   buildSentencesVtt,
-  buildSentencesSrt,
   buildYouTubeSubtitles,
-  getSubClips,
-  getHookClips,
   resolvePhraseToTimeRange,
-  resolvePhraseToFirstTokenIndex,
   autoCutPauses,
   autoCutDisfluencies,
   rebalanceBoundaryTokens,
   buildPrevTokensByTdtw,
+  reInjectSyntheticSegments,
   WORD_DURATION_ESTIMATE,
   CUT_START_BIAS,
-  CUT_END_BIAS,
   isSpecialToken,
   isDisfluencyToken,
 } from './edit-transcript.js';
@@ -384,7 +380,6 @@ describe('applyTextPartsToTokens', () => {
   test('ignores colon-reason syntax from old docs (backwards compat)', () => {
     // Old format {um:filler} — reason is stripped, word still gets cut
     const tokens = [tok(' um', 0.1), tok(' Hello', 0.2)];
-    const result = applyTextPartsToTokens('{um:filler} Hello', tokens);
     // "um:filler" is treated as the full span — won't match token "um"
     // This is acceptable: old docs with reasons just won't cut those tokens
     // (the important thing is it doesn't crash)
@@ -1298,6 +1293,18 @@ describe('> SPEAKER split', () => {
     expect(synth.text).toMatch(/^Right/i);
   });
 
+  test('> SPEAKER split marks the created segment with synthetic: true', () => {
+    const result = mergeDocIntoTranscript(makeSplitTranscript(), doc);
+    const synth = result.segments.find(s => s.id !== 1 && s.id !== 2 && s.speaker === 'Natasha' && s.start < 20);
+    expect(synth.synthetic).toBe(true);
+  });
+
+  test('real segments do not carry synthetic: true', () => {
+    const result = mergeDocIntoTranscript(makeSplitTranscript(), doc);
+    const real = result.segments.filter(s => s.id === 1 || s.id === 2);
+    for (const s of real) expect(s.synthetic).toBeFalsy();
+  });
+
   test('no segment overlaps in output', () => {
     const result = mergeDocIntoTranscript(makeSplitTranscript(), doc);
     const active = result.segments.filter(s => !s.cut).sort((a, b) => a.start - b.start);
@@ -1321,5 +1328,34 @@ describe('> SPEAKER split', () => {
     // Synthetic speaker attribution preserved
     const synth = active.find(s => s.speaker === 'Natasha' && s.start < 20);
     expect(synth).toBeDefined();
+  });
+});
+
+// ── reInjectSyntheticSegments ──────────────────────────────────────────────────
+
+describe('reInjectSyntheticSegments', () => {
+  const makeSeg = (id, synthetic) => ({
+    id, start: id * 10, end: id * 10 + 5, speaker: 'X', text: 'hi',
+    cut: false, tokens: [], cuts: [], graphics: [], synthetic,
+  });
+
+  test('re-injects synthetic segments whose id is not in matchedIds', () => {
+    const segs = [makeSeg(1, true), makeSeg(2, true)];
+    const result = reInjectSyntheticSegments(segs, new Set());
+    expect(result).toHaveLength(2);
+    expect(result.map(s => s.id)).toEqual([1, 2]);
+  });
+
+  test('does not re-inject real segments even when id is not in matchedIds', () => {
+    const segs = [makeSeg(1, false), makeSeg(2, undefined)];
+    const result = reInjectSyntheticSegments(segs, new Set());
+    expect(result).toHaveLength(0);
+  });
+
+  test('does not re-inject synthetic segments whose id was already matched', () => {
+    const segs = [makeSeg(1, true), makeSeg(2, true)];
+    const result = reInjectSyntheticSegments(segs, new Set([1]));
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe(2);
   });
 });

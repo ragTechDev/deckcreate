@@ -73,6 +73,7 @@ segments[]
     text: string
     cut: boolean
   cuts: TimeCut[]         [{from, to}] intra-segment ranges to skip
+  synthetic?: boolean     true when created by a > SPEAKER split in the doc; absent on raw segments
   hook?: boolean          when true, prepended as hook/teaser before main
   hookFrom?, hookTo?      clip bounds within the segment (seconds)
   cameraCues[]            explicit camera shot overrides (> CAM directives in doc)
