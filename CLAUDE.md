@@ -73,6 +73,7 @@ segments[]
     text: string
     cut: boolean
   cuts: TimeCut[]         [{from, to}] intra-segment ranges to skip
+  synthetic?: boolean     true when created by a > SPEAKER split in the doc; absent on raw segments
   hook?: boolean          when true, prepended as hook/teaser before main
   hookFrom?, hookTo?      clip bounds within the segment (seconds)
   cameraCues[]            explicit camera shot overrides (> CAM directives in doc)
@@ -159,7 +160,7 @@ ty    = (0.5 - vp.cy) × 100%
 
 ### Known correctness bugs (Phase 5 targets)
 
-- `hookClipEnd()` has 4 separate implementations (`CameraPlayer`, `SegmentPlayer`, `Composition`, `HookOverlay`) — can disagree by 1–3 frames. Fix: `remotion/lib/hookTiming.ts`.
+- ~~`hookClipEnd()` has 4 separate implementations (`CameraPlayer`, `SegmentPlayer`, `Composition`, `HookOverlay`) — can disagree by 1–3 frames.~~ **Fixed** — `remotion/lib/hookTiming.ts` is now the single source of truth; all consumers import from it.
 - `buildCaptions()` duplicated across `HookOverlay` and `CaptionOverlay`. Fix: `remotion/lib/captions.ts`.
 - No `OverlayErrorBoundary` — overlay crash kills the composition.
 - No transcript validation on load.
@@ -173,9 +174,9 @@ ty    = (0.5 - vp.cy) × 100%
 | `PAUSE_THRESHOLD` | 0.8 s | `edit-transcript.js` |
 | `WORD_DURATION_ESTIMATE` | 0.4 s | `edit-transcript.js` |
 | `CUT_START_BIAS` | 1.0 | `edit-transcript.js` |
-| `HOOK_TAIL_PAD_UNBOUNDED_SECONDS` | 0.16 s | `SegmentPlayer.tsx` |
-| `HOOK_TAIL_PAD_BOUNDED_SECONDS` | 0.02 s | `SegmentPlayer.tsx` |
-| `HOOK_BRIDGE_MAX_GAP_SECONDS` | 1.0 s | `SegmentPlayer.tsx` |
+| `HOOK_TAIL_PAD_UNBOUNDED_SECONDS` | 0.16 s | `remotion/lib/hookTiming.ts` |
+| `HOOK_TAIL_PAD_BOUNDED_SECONDS` | 0.02 s | `remotion/lib/hookTiming.ts` |
+| `HOOK_BRIDGE_MAX_GAP_SECONDS` | 1.0 s | `remotion/lib/hookTiming.ts` |
 | `HOOK_END_FADE_FRAMES` | 12 | `SegmentPlayer.tsx` |
 | `DECLICK_FRAMES` | 3 | `SegmentPlayer.tsx` |
 | `MIN_WIDE_S` | 1.5 s | `CameraPlayer.tsx` |
@@ -189,7 +190,8 @@ ty    = (0.5 - vp.cy) × 100%
 | File | Purpose | Refactor note |
 |------|---------|---------------|
 | `remotion/Composition.tsx` | Root composition, duration calc, asset loading | Add transcript validation (Phase 5) |
-| `remotion/components/SegmentPlayer.tsx` | Jump-cut player, section builders | Extract hookTiming, captions (Phase 5) |
+| `remotion/lib/hookTiming.ts` | `hookClipEnd()`, `getHookSubClips()`, `buildHookSections()` — single source of truth for all hook clip boundary calculations | — |
+| `remotion/components/SegmentPlayer.tsx` | Jump-cut player, section builders | Extract captions (Phase 5) |
 | `remotion/components/CameraPlayer.tsx` | Camera shots, multi-angle viewport (779 lines) | Extract cameraShots lib → <350 lines (Phase 6) |
 | `remotion/components/HookOverlay.tsx` | Hook captions, Techybara (518 lines) | Extract captions.ts (Phase 5) |
 | `remotion/components/OverlayRenderer.tsx` | Graphics cue dispatcher; uses `CORE_TEMPLATE_MAP` + `getBrandOverlays(brand.id)` | Remove remaining brand hardcoding (Phase 0.5 Steps 6–7) |

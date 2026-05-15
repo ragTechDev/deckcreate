@@ -1222,6 +1222,7 @@ function mergeDocIntoTranscript(transcript, docContent) {
       const synthSeg = {
         ...parentSeg,
         id: synthId,
+        synthetic: true,
         speaker: newSpeaker,
         tokens: tokensB,
         start: splitTime,
@@ -1823,6 +1824,22 @@ function buildPrevTokensByTdtw(tokens) {
   return map;
 }
 
+// ─── Re-injection helper ──────────────────────────────────────────────────────
+
+/**
+ * Returns segments from a prior transcript run that should be re-injected into
+ * the new transcript. Only synthetic segments (created by > SPEAKER splits) are
+ * eligible — real segments whose timestamps shifted after retranscription must
+ * not be duplicated.
+ *
+ * @param {import('./types/transcript').Segment[]} existingSegments
+ * @param {Set<number>} matchedExistingIds  IDs already matched to new sentences
+ * @returns {import('./types/transcript').Segment[]}
+ */
+export function reInjectSyntheticSegments(existingSegments, matchedExistingIds) {
+  return existingSegments.filter(s => s.synthetic && !matchedExistingIds.has(s.id));
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -1927,7 +1944,10 @@ async function main() {
 
     // Re-inject synthetic segments (created by > SPEAKER splits) that were never
     // matched by findPrev — these have no corresponding raw sentence.
-    const syntheticSegs = existing.segments.filter(s => !matchedExistingIds.has(s.id));
+    // Only segments explicitly marked synthetic are re-injected; unmarked unmatched
+    // segments are real sentences from a previous run whose timestamps no longer
+    // align after a fresh transcription/alignment pass.
+    const syntheticSegs = reInjectSyntheticSegments(existing.segments, matchedExistingIds);
     if (syntheticSegs.length > 0) {
       const syntheticStarts = new Set(syntheticSegs.map(s => s.start));
       const merged = [...transcript.segments, ...syntheticSegs].sort((a, b) => a.start - b.start);

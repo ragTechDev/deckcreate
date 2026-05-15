@@ -1,11 +1,12 @@
 import React, { useEffect, useRef } from 'react';
 import { OffthreadVideo, Sequence, useCurrentFrame, useVideoConfig, getRemotionEnvironment } from 'remotion';
 import type { Segment, TimeCut } from '../types/transcript';
-import { isSpokenToken } from '../lib/tokens';
+import { buildHookSections } from '../lib/hookTiming';
+import type { SubClip, Section } from '../lib/hookTiming';
 
-export type SubClip = { sourceStart: number; sourceEnd: number };
-
-export type Section = { trimBefore: number; trimAfter: number };
+// Re-export for backward compatibility — consumers that import these types
+// from SegmentPlayer continue to work without changes.
+export type { SubClip, Section } from '../lib/hookTiming';
 
 export type SplitSections = { hookSections: Section[]; mainSections: Section[] };
 
@@ -129,58 +130,6 @@ export function buildMainSubClips(
   return clips.filter(c => (c.sourceEnd - c.sourceStart) >= 0.034);
 }
 
-/**
- * Returns the clip range for a hook segment: phrase window if set, else the raw segment
- *  (no cuts applied — hook clips play uninterrupted so the music stays in sync).
- *
- *  The clip end is extended when spoken tokens drift past the segment boundary,
- *  matching HookOverlay/Composition/CameraPlayer so hook audio does not clip the
- *  trailing word of a phrase. */
-function getHookSubClips(segment: Segment, nextHookStart?: number): SubClip[] {
-  const sourceStart = segment.hookFrom ?? segment.start;
-  const baseEnd = segment.hookTo ?? segment.end;
-  const isBoundedHook = segment.hookTo !== undefined && segment.hookTo !== null;
-
-  let sourceEnd = baseEnd;
-  // Extend to cover the last spoken token's audio tail (both bounded and unbounded hooks)
-  const lastSpokenToken = segment.tokens
-    .filter(t => isSpokenToken(t) && t.t_dtw >= sourceStart && t.t_dtw <= baseEnd)
-    .sort((a, b) => (b.t_end ?? 0) - (a.t_end ?? 0))[0];
-
-  if (lastSpokenToken?.t_end) {
-    const tEnd = nextHookStart !== undefined
-      ? Math.min(lastSpokenToken.t_end, nextHookStart)
-      : lastSpokenToken.t_end;
-    sourceEnd = Math.max(sourceEnd, tEnd);
-  }
-
-  // Bridge to the next hook when the gap is small and this hook ends at the
-  // segment tail — must match CameraPlayer.getOutputDuration / Composition.hookClipEnd.
-  const hasSpokenTokenAfterEnd = segment.tokens.some(
-    t => isSpokenToken(t) && t.t_dtw > sourceEnd + 0.02,
-  );
-  const endsAtSegmentTail = !hasSpokenTokenAfterEnd;
-  const canBridge = nextHookStart !== undefined
-    && nextHookStart > sourceEnd
-    && nextHookStart - sourceEnd <= HOOK_BRIDGE_MAX_GAP_SECONDS;
-  if (endsAtSegmentTail && canBridge) {
-    sourceEnd = nextHookStart;
-  }
-
-  // Add a small tail pad to avoid cutting off the audio abruptly
-  sourceEnd += isBoundedHook
-    ? HOOK_TAIL_PAD_BOUNDED_SECONDS
-    : HOOK_TAIL_PAD_UNBOUNDED_SECONDS;
-
-  // Hard cap: never extend into the next hook's source window.
-  // Prevents overlapping source ranges which cause backward jumps in SectionGroupPlayer.
-  if (nextHookStart !== undefined) {
-    sourceEnd = Math.min(sourceEnd, nextHookStart);
-  }
-
-  return [{ sourceStart, sourceEnd }];
-}
-
 function toSections(clips: SubClip[], fps: number): Section[] {
   return clips.map(c => {
     const trimBefore = Math.floor(c.sourceStart * fps);
@@ -214,22 +163,9 @@ export function buildSections(
   videoEnd?: number,
 ): SplitSections {
   const hookSegments = segments.filter(s => s.hook && !s.cut);
-  const rawHookSections = hookSegments
-    .flatMap((seg, idx) => {
-      const next = hookSegments[idx + 1];
-      const nextHookStart = next ? (next.hookFrom ?? next.start) : undefined;
-      return toSections(getHookSubClips(seg, nextHookStart), fps);
-    });
-  // De-overlap: if a section's trimBefore precedes the previous section's trimAfter
-  // (caused by t_end extension or bridging across overlapping source ranges), advance it.
-  const hookSections: Section[] = [];
-  for (const s of rawHookSections) {
-    const prev = hookSections[hookSections.length - 1];
-    const trimBefore = prev ? Math.max(s.trimBefore, prev.trimAfter) : s.trimBefore;
-    if (trimBefore < s.trimAfter) {
-      hookSections.push({ trimBefore, trimAfter: s.trimAfter });
-    }
-  }
+  // Delegate to shared hook timing lib — single source of truth for hook sections.
+  const hookSections = buildHookSections(hookSegments, fps);
+
   const allMainSegments = segments.filter(s => !s.hook);
   const mainSubClips = buildMainSubClips(allMainSegments, videoStart, videoEnd);
   const rawMainSections = toSections(mainSubClips, fps);
@@ -251,9 +187,6 @@ export function buildSections(
 
 // Frames to fade in/out at each cut boundary (~50ms at 60fps)
 const DECLICK_FRAMES = 3;
-const HOOK_TAIL_PAD_UNBOUNDED_SECONDS = 0.16;
-const HOOK_TAIL_PAD_BOUNDED_SECONDS = 0.02;
-const HOOK_BRIDGE_MAX_GAP_SECONDS = 1.0;
 const HOOK_END_FADE_FRAMES = 12;
 
 /**
