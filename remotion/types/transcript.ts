@@ -66,6 +66,8 @@ export type Segment = {
   graphics: GraphicsCue[];
   /** Explicit camera cut overrides — take priority over the pacing algorithm */
   cameraCues?: CameraCue[];
+  /** True when this segment was created by a > SPEAKER split in the doc; absent on raw segments */
+  synthetic?: boolean;
   /** When true, this segment is prepended to the video as a hook/teaser */
   hook?: boolean;
   /** The specific phrase within the segment used as the hook clip */
