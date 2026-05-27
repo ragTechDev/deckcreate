@@ -421,6 +421,16 @@ export function buildCameraShots(
     const profile = getSpeakerProfile(profiles, seg.speaker, segSpeakerAngles[0]?.angleName);
     currentSourceTime = seg.hookFrom ?? seg.start;
 
+    // Force a shot boundary at the start of every hook segment (segStart > 0) so that
+    // each hook clip gets its own shot with shotProgress starting at 0 — which is what
+    // makes the slow-zoom-in restart fresh for every clip regardless of whether the
+    // speaker changed.  applyPacing won't double-emit here because after we update
+    // shotStart it sees segStart === shotStart and skips its own emit.
+    if (segStart > shotStart) {
+      shots.push(emitShot(segStart, currentSourceTime));
+      shotStart = segStart;
+    }
+
     applyPacing(segStart, segDur, profile, seg.speaker, seg.id);
   }
 
@@ -589,9 +599,10 @@ function applyOverrides(shots: CameraShot[], overrides: OverrideEvent[]): Camera
     if (F === shot.startFrame) {
       result[idx] = { ...shot, viewport, ...(videoSrc !== undefined ? { videoSrc } : {}) };
     } else {
+      // Spread `shot` so all fields (including hookTransition) are preserved on both halves.
       result.splice(idx, 1,
-        { startFrame: shot.startFrame, endFrame: F,            viewport: shot.viewport, videoSrc: shot.videoSrc },
-        { startFrame: F,              endFrame: shot.endFrame, viewport,                videoSrc: videoSrc ?? shot.videoSrc },
+        { ...shot, endFrame: F },
+        { ...shot, startFrame: F, viewport, ...(videoSrc !== undefined ? { videoSrc } : {}) },
       );
     }
   }
@@ -652,8 +663,9 @@ export const CameraPlayer: React.FC<Props> = ({ src, hookSections, mainSections,
         // Entirely within main territory — shift by mainOffset
         result.push({ ...shot, startFrame: shot.startFrame + mainOffset, endFrame: shot.endFrame + mainOffset });
       } else {
-        // Spans the boundary — split into hook portion (unchanged) and main portion (shifted)
-        result.push({ startFrame: shot.startFrame, endFrame: hookOutputFrames, viewport: shot.viewport, videoSrc: shot.videoSrc });
+        // Spans the boundary — split into hook portion (unchanged, hookTransition preserved)
+        // and main portion (shifted; hookTransition intentionally dropped — it is a main shot).
+        result.push({ ...shot, endFrame: hookOutputFrames });
         result.push({ startFrame: hookOutputFrames + mainOffset, endFrame: shot.endFrame + mainOffset, viewport: shot.viewport, videoSrc: shot.videoSrc });
       }
     }
