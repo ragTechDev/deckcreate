@@ -552,12 +552,16 @@ type Props = {
 
 export const CameraPlayer: React.FC<Props> = ({ src, hookSections, mainSections, mainOffset = 0, segments, profiles, isShortForm = false }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, width: canvasW, height: canvasH } = useVideoConfig();
 
   const srcW = profiles.sourceWidth;
   const srcH = profiles.sourceHeight;
-  const outW = profiles.outputWidth;
-  const outH = profiles.outputHeight;
+  // Use the actual Remotion canvas dimensions for the transform, not profiles.outputWidth/Height.
+  // profiles.outputWidth/Height reflects the source resolution (e.g. 4K), but the render canvas
+  // may differ (calculateMetadata always returns 1920×1080). Using the wrong value shifts the
+  // transform-origin away from the canvas centre, producing incorrect pan/zoom.
+  const outW = canvasW;
+  const outH = canvasH;
 
   // Total hook duration in output frames — must match SegmentPlayer's hookDuration exactly
   // so the mainOffset shift boundary aligns with where main content actually starts playing.
