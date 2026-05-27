@@ -72,20 +72,13 @@ function computeTransform(
 
 // ── Hook transition animation ─────────────────────────────────────────────────
 
-/** Cycling order for same-angle hook shots. */
-const HOOK_TRANSITIONS: HookTransition[] = ['slowZoomIn', 'panRight', 'slowZoomOut', 'panLeft'];
-
 /**
- * Magnitude of the zoom delta for slow-zoom transitions.
- * 0.06 = 6% — visible but not jarring on a 5–8 s hook clip.
+ * Zoom range for hook transitions — the viewport starts this many percent wider
+ * than the base closeup at progress=0 and arrives at the exact closeup at progress=1.
+ * 0.08 = 8% gives a clearly readable push-in over a 5–10 s clip without feeling
+ * rushed or disorienting.
  */
-const HOOK_ZOOM_RANGE = 0.06;
-
-/**
- * Magnitude of the pan delta (normalised cx / cy) for left/right pan transitions.
- * 0.025 = 2.5% — a gentle drift that reads as motion without repositioning the subject.
- */
-const HOOK_PAN_RANGE = 0.025;
+const HOOK_ZOOM_RANGE = 0.08;
 
 /**
  * Return an animated version of `vp` for the given progress through a hook shot.
@@ -100,25 +93,28 @@ function animateHookViewport(
   progress: number,
 ): CropViewport {
   switch (transition) {
-    case 'slowZoomIn':
-      // Begin slightly wider, ease into the base closeup.
-      // factor = (1 + range) at progress=0 → 1.0 at progress=1
-      return { ...vp, w: vp.w * (1 + HOOK_ZOOM_RANGE * (1 - progress)),
-                      h: vp.h * (1 + HOOK_ZOOM_RANGE * (1 - progress)) };
+    case 'slowZoomIn': {
+      // Start wider (zoom out from closeup) and push in to the base closeup.
+      // The factor runs from (1 + HOOK_ZOOM_RANGE) at progress=0 down to 1.0 at progress=1.
+      // Clamped so w and h never exceed 1.0 — viewport w/h > 1.0 on a 1:1 source/output
+      // would drop the scale below 1 and produce letterbox bars.
+      const factor = 1 + HOOK_ZOOM_RANGE * (1 - progress);
+      return {
+        ...vp,
+        w: Math.min(vp.w * factor, 1),
+        h: Math.min(vp.h * factor, 1),
+      };
+    }
 
-    case 'slowZoomOut':
-      // Begin at the base closeup, gently pull back.
-      // factor = 1.0 at progress=0 → (1 + range) at progress=1
-      return { ...vp, w: vp.w * (1 + HOOK_ZOOM_RANGE * progress),
-                      h: vp.h * (1 + HOOK_ZOOM_RANGE * progress) };
-
-    case 'panRight':
-      // cx drifts from (cx − range/2) to (cx + range/2) — leftward start, rightward end.
-      return { ...vp, cx: vp.cx + HOOK_PAN_RANGE * (progress - 0.5) };
-
-    case 'panLeft':
-      // cx drifts from (cx + range/2) to (cx − range/2) — rightward start, leftward end.
-      return { ...vp, cx: vp.cx - HOOK_PAN_RANGE * (progress - 0.5) };
+    case 'slowZoomOut': {
+      // Start at the base closeup and gently pull back.
+      const factor = 1 + HOOK_ZOOM_RANGE * progress;
+      return {
+        ...vp,
+        w: Math.min(vp.w * factor, 1),
+        h: Math.min(vp.h * factor, 1),
+      };
+    }
 
     default:
       return vp;
@@ -491,28 +487,14 @@ export function buildCameraShots(
     shots.push(emitShot(totalOutputFrames, finalSourceTime));
   }
 
-  // ── Tag hook shots with cycling transition animations ────────────────────────
+  // ── Tag every hook shot with a slow zoom-in ──────────────────────────────────
   //
-  // For each camera angle (identified by videoSrc), the FIRST hook shot on that
-  // angle is a clean cut-in (no transition — it establishes the angle). Every
-  // subsequent hook shot on the SAME angle receives the next style from the cycle
-  // [slowZoomIn, panRight, slowZoomOut, panLeft], giving organic motion variety
-  // without requiring any transcript annotation.
-  //
-  // Shots on a DIFFERENT angle already provide visual variety through the cut,
-  // so they are left as static until a second same-angle shot is encountered.
-  {
-    const angleOccurrences = new Map<string, number>(); // videoSrc key → count seen
-    for (const shot of shots) {
-      if (shot.startFrame >= hookTotalFrames) break; // past the hook zone
-      const key = shot.videoSrc ?? '__primary__';
-      const count = angleOccurrences.get(key) ?? 0;
-      if (count > 0) {
-        // 2nd+ occurrence of this angle in the hook zone — assign a transition.
-        shot.hookTransition = HOOK_TRANSITIONS[(count - 1) % HOOK_TRANSITIONS.length];
-      }
-      angleOccurrences.set(key, count + 1);
-    }
+  // Every hook shot — regardless of angle — starts 8% wider than the closeup and
+  // continuously zooms in over its full duration. This creates consistent motion
+  // on every hook clip without requiring any transcript annotation.
+  for (const shot of shots) {
+    if (shot.startFrame >= hookTotalFrames) break; // past the hook zone
+    shot.hookTransition = 'slowZoomIn';
   }
 
   // Log final shot list for debugging

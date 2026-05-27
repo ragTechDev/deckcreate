@@ -101,16 +101,17 @@ export type CameraProfiles = {
 };
 
 /**
- * Subtle animated-viewport style applied to hook shots that share the same camera
- * angle as a previous hook shot. Each style animates the viewport over the shot
- * duration to add visual interest without distracting from the speaker.
+ * Animated-viewport style applied to hook shots to create visual interest.
+ * Applied once per shot; the viewport is interpolated from the start state to
+ * the base closeup viewport (or away from it) over the shot duration.
  *
- * - slowZoomIn  — starts slightly wide and gently zooms to the closeup
- * - slowZoomOut — starts at the closeup and gently pulls back
- * - panLeft     — slow leftward drift across the shot
- * - panRight    — slow rightward drift across the shot
+ * - slowZoomIn  — starts 8% wider than the closeup and continuously zooms in.
+ *                 Applied to every hook shot. The starting viewport is clamped
+ *                 so the video always fills the frame (no letterbox bars).
+ * - slowZoomOut — starts at the closeup and gently pulls back 8%.
+ *                 Reserved for future use.
  */
-export type HookTransition = 'slowZoomIn' | 'slowZoomOut' | 'panLeft' | 'panRight';
+export type HookTransition = 'slowZoomIn' | 'slowZoomOut';
 
 /** A camera shot: a viewport applied to output timeline frames [startFrame, endFrame). */
 export type CameraShot = {
