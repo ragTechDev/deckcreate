@@ -100,6 +100,18 @@ export type CameraProfiles = {
   angles?: Record<string, AngleConfig>;
 };
 
+/**
+ * Subtle animated-viewport style applied to hook shots that share the same camera
+ * angle as a previous hook shot. Each style animates the viewport over the shot
+ * duration to add visual interest without distracting from the speaker.
+ *
+ * - slowZoomIn  — starts slightly wide and gently zooms to the closeup
+ * - slowZoomOut — starts at the closeup and gently pulls back
+ * - panLeft     — slow leftward drift across the shot
+ * - panRight    — slow rightward drift across the shot
+ */
+export type HookTransition = 'slowZoomIn' | 'slowZoomOut' | 'panLeft' | 'panRight';
+
 /** A camera shot: a viewport applied to output timeline frames [startFrame, endFrame). */
 export type CameraShot = {
   startFrame: number;
@@ -115,4 +127,11 @@ export type CameraShot = {
    * Used for time-keyed viewport selection when camera angles change during filming.
    */
   sourceTime?: number;
+  /**
+   * Animated viewport style for this hook shot. Assigned by buildCameraShots to
+   * same-angle hook shots (the second+ occurrence of each angle in the hook zone),
+   * cycling through the four styles for visual variety.
+   * Absent on wide shots and all main-video shots.
+   */
+  hookTransition?: HookTransition;
 };

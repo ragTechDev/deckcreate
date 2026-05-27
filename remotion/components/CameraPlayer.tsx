@@ -3,7 +3,7 @@ import { AbsoluteFill, staticFile, useCurrentFrame, useVideoConfig } from 'remot
 import { SegmentPlayer, getEffectiveDuration, Section } from './SegmentPlayer';
 import { hookClipEnd } from '../lib/hookTiming';
 import type { Segment } from '../types/transcript';
-import type { CameraProfiles, CameraShot, CropViewport, AngleConfig, SpeakerProfile } from '../types/camera';
+import type { CameraProfiles, CameraShot, CropViewport, AngleConfig, SpeakerProfile, HookTransition } from '../types/camera';
 
 function resolveVideoSrc(videoSrc: string): string {
   // Already resolved paths (from staticFile or URLs) don't need processing
@@ -68,6 +68,61 @@ function computeTransform(
   const tx = (0.5 - vp.cx) * 100;
   const ty = (0.5 - vp.cy) * 100;
   return { scale, tx, ty };
+}
+
+// ── Hook transition animation ─────────────────────────────────────────────────
+
+/** Cycling order for same-angle hook shots. */
+const HOOK_TRANSITIONS: HookTransition[] = ['slowZoomIn', 'panRight', 'slowZoomOut', 'panLeft'];
+
+/**
+ * Magnitude of the zoom delta for slow-zoom transitions.
+ * 0.06 = 6% — visible but not jarring on a 5–8 s hook clip.
+ */
+const HOOK_ZOOM_RANGE = 0.06;
+
+/**
+ * Magnitude of the pan delta (normalised cx / cy) for left/right pan transitions.
+ * 0.025 = 2.5% — a gentle drift that reads as motion without repositioning the subject.
+ */
+const HOOK_PAN_RANGE = 0.025;
+
+/**
+ * Return an animated version of `vp` for the given progress through a hook shot.
+ *
+ * @param vp         - The base closeup viewport (static centre + size).
+ * @param transition - Which animation style to apply.
+ * @param progress   - Normalised time within the shot [0, 1].
+ */
+function animateHookViewport(
+  vp: CropViewport,
+  transition: HookTransition,
+  progress: number,
+): CropViewport {
+  switch (transition) {
+    case 'slowZoomIn':
+      // Begin slightly wider, ease into the base closeup.
+      // factor = (1 + range) at progress=0 → 1.0 at progress=1
+      return { ...vp, w: vp.w * (1 + HOOK_ZOOM_RANGE * (1 - progress)),
+                      h: vp.h * (1 + HOOK_ZOOM_RANGE * (1 - progress)) };
+
+    case 'slowZoomOut':
+      // Begin at the base closeup, gently pull back.
+      // factor = 1.0 at progress=0 → (1 + range) at progress=1
+      return { ...vp, w: vp.w * (1 + HOOK_ZOOM_RANGE * progress),
+                      h: vp.h * (1 + HOOK_ZOOM_RANGE * progress) };
+
+    case 'panRight':
+      // cx drifts from (cx − range/2) to (cx + range/2) — leftward start, rightward end.
+      return { ...vp, cx: vp.cx + HOOK_PAN_RANGE * (progress - 0.5) };
+
+    case 'panLeft':
+      // cx drifts from (cx + range/2) to (cx − range/2) — rightward start, leftward end.
+      return { ...vp, cx: vp.cx - HOOK_PAN_RANGE * (progress - 0.5) };
+
+    default:
+      return vp;
+  }
 }
 
 // ── Time-keyed viewport helpers ───────────────────────────────────────────────
@@ -436,6 +491,30 @@ export function buildCameraShots(
     shots.push(emitShot(totalOutputFrames, finalSourceTime));
   }
 
+  // ── Tag hook shots with cycling transition animations ────────────────────────
+  //
+  // For each camera angle (identified by videoSrc), the FIRST hook shot on that
+  // angle is a clean cut-in (no transition — it establishes the angle). Every
+  // subsequent hook shot on the SAME angle receives the next style from the cycle
+  // [slowZoomIn, panRight, slowZoomOut, panLeft], giving organic motion variety
+  // without requiring any transcript annotation.
+  //
+  // Shots on a DIFFERENT angle already provide visual variety through the cut,
+  // so they are left as static until a second same-angle shot is encountered.
+  {
+    const angleOccurrences = new Map<string, number>(); // videoSrc key → count seen
+    for (const shot of shots) {
+      if (shot.startFrame >= hookTotalFrames) break; // past the hook zone
+      const key = shot.videoSrc ?? '__primary__';
+      const count = angleOccurrences.get(key) ?? 0;
+      if (count > 0) {
+        // 2nd+ occurrence of this angle in the hook zone — assign a transition.
+        shot.hookTransition = HOOK_TRANSITIONS[(count - 1) % HOOK_TRANSITIONS.length];
+      }
+      angleOccurrences.set(key, count + 1);
+    }
+  }
+
   // Log final shot list for debugging
   console.log('[CameraDebug] Final shots (first 10):');
   shots.slice(0, 10).forEach((shot, i) => {
@@ -613,6 +692,16 @@ export const CameraPlayer: React.FC<Props> = ({ src, hookSections, mainSections,
   const activeVideoSrc = resolveVideoSrc(currentShot?.videoSrc ?? src);
   const viewport = currentShot?.viewport ?? profiles.wideViewport;
 
+  // Animated viewport for hook shots that have a hookTransition assigned.
+  // progress is clamped to [0, 1] so the first/last frame never overshoots.
+  const shotDuration = (currentShot?.endFrame ?? 0) - (currentShot?.startFrame ?? 0);
+  const shotProgress = shotDuration > 0
+    ? Math.min(Math.max((frame - (currentShot?.startFrame ?? 0)) / shotDuration, 0), 1)
+    : 0;
+  const animatedViewport = currentShot?.hookTransition
+    ? animateHookViewport(viewport, currentShot.hookTransition, shotProgress)
+    : viewport;
+
   // Collect every unique video source referenced across all shots (always includes primary)
   // Resolve all paths to ensure deduplication works (primary src is resolved, angle paths are relative)
   const allVideoSrcs = useMemo(() => {
@@ -693,7 +782,7 @@ export const CameraPlayer: React.FC<Props> = ({ src, hookSections, mainSections,
       {allVideoSrcs.map((videoSrc, i) => {
         const dims = angleByVideoSrc.get(videoSrc) ?? { srcW, srcH };
         const isActive = videoSrc === activeVideoSrc;
-        const { scale, tx, ty } = computeTransform(viewport, dims.srcW, dims.srcH, outW, outH);
+        const { scale, tx, ty } = computeTransform(animatedViewport, dims.srcW, dims.srcH, outW, outH);
         const angleSections = sectionsByVideoSrc.get(videoSrc) ?? { hook: hookSections, main: mainSections };
         const matrix = colorCorrectionByVideoSrc.get(videoSrc);
 
