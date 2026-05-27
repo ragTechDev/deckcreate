@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "next build",
+    "pexels:fetch": "node scripts/fetch-pexels.js",
     "camera:color-match": "tsx scripts/camera/color-match.ts",
     "camera:color-match:docker": "docker compose run --rm color-match",
     "camera:setup": "node scripts/camera/setup-camera.js",
@@ -118,8 +119,8 @@
     "brace-expansion": ">=5.0.6"
   },
   "lint-staged": {
-    "*.{ts,tsx}": "eslint --max-warnings=0",
-    "*.{js,mjs}": "eslint --max-warnings=0",
+    "*.{ts,tsx}": "eslint --max-warnings=0 --no-warn-ignored",
+    "*.{js,mjs}": "eslint --max-warnings=0 --no-warn-ignored",
     "*.json": "node .husky/validate-json.cjs",
     "*.py": "python3 -m py_compile"
   },

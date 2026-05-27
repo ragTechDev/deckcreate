@@ -4,6 +4,7 @@ import fs from 'fs-extra';
 import path from 'path';
 import { convertVttToSrt } from './shared/vtt-to-srt.js';
 import { stampMetadata } from './config/metadata.js';
+import 'dotenv/config';
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -1990,6 +1991,21 @@ async function main() {
     const docContent = (await fs.readFile(cli.docPath, 'utf8')).replace(/\r\n/g, '\n');
     transcript = mergeDocIntoTranscript(transcript, docContent);
     console.log(`Applied doc edits.`);
+
+    // Auto-download any Pexels URLs found in FullscreenMedia graphics cues.
+    // Runs only when PEXELS_API_KEY is in the environment (loaded from .env.local above).
+    // Rewrites props.src from the Pexels page/CDN URL to a local public/assets/pexels/ path.
+    if (process.env.PEXELS_API_KEY) {
+      const { resolveAllPexelsAssets } = await import('./lib/resolve-pexels.js');
+      const { transcript: resolved, changed } = await resolveAllPexelsAssets(transcript, {
+        apiKey: process.env.PEXELS_API_KEY,
+        cwd,
+      });
+      if (changed) {
+        transcript = resolved;
+        console.log(`Resolved Pexels assets in FullscreenMedia cues.`);
+      }
+    }
   }
 
   // Store video source path(s) in meta so Remotion and camera setup can resolve video files
