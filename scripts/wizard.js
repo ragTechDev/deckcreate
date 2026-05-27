@@ -1132,6 +1132,11 @@ async function main() {
   // the full overlay render (30-45 min) only runs on an approved cut.
   if (mode !== 4 && (!redoStepId || redoStepId === 'preview')) {
     const previewPath = path.join(cwd, 'public', 'edit', 'preview-cut.mp4');
+    const doPreview = redoStepId === 'preview' || await confirm('  Build cut preview (fast FFmpeg export, ~2-5 min)?', true);
+    if (!doPreview) {
+      if (redoStepId === 'preview') redoStepId = null;
+      // skip to Remotion
+    } else {
     console.log('\n  ── Review your edit (cut preview) ───────────────────');
     await runStep('npm run cut:preview', 'npm', ['run', 'cut:preview'], previewPath);
     openFile(previewPath);
@@ -1142,6 +1147,7 @@ async function main() {
     console.log('    2. npm run transcript:merge');
     console.log('    3. npm run cut:preview');
     if (redoStepId === 'preview') redoStepId = null;
+    } // end doPreview
   }
 
   // ── STEP: Remotion (optional — skip for audio-only) ──────────────────────
