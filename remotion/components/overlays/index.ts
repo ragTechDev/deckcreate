@@ -17,26 +17,8 @@ export {
 
 // ── Keyword-triggered overlays (topic/keyword-specific) ───────────────────────
 export {
-  CodingOverlay,
-  EngineeringOverlay,
-  type CodingOverlayProps,
-  type EngineeringOverlayProps,
-  LanguageOverlay,
-  FrameworkOverlay,
-  type LanguageOverlayProps,
-  type FrameworkOverlayProps,
-  RoleOverlay,
-  type RoleOverlayProps,
-  PracticeOverlay,
-  type PracticeOverlayProps,
-  InfrastructureOverlay,
-  type InfrastructureOverlayProps,
-  AIOverlay,
-  type AIOverlayProps,
-  EducationOverlay,
-  type EducationOverlayProps,
-  AwardsOverlay,
-  type AwardsOverlayProps,
+  RagtechOverlay,
+  type RagtechOverlayProps,
 } from './keywords';
 
 // ── Lower-third overlays (dynamic full-screen callouts) ───────────────────────
@@ -44,4 +26,13 @@ export {
   ConceptExplainer,
   NameTitle,
   type NameTitleProps,
+  TermTypewriter,
+  type TermTypewriterProps,
 } from './lower-thirds';
+
+// ── Special animated overlays ──────────────────────────────────────────────────
+export { ImageWindowOverlay, type ImageWindowOverlayProps } from './ImageWindowOverlay';
+export { GifWindowOverlay, type GifWindowOverlayProps } from './GifWindowOverlay';
+export { FullscreenMediaOverlay, type FullscreenMediaOverlayProps } from './FullscreenMediaOverlay';
+export { GlobalSouthMap, type GlobalSouthMapProps } from './GlobalSouthMap';
+export { DataFlowAnimation, type DataFlowAnimationProps } from './DataFlowAnimation';

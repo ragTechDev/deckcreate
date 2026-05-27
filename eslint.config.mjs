@@ -18,6 +18,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Standalone CJS VSCode extension — has its own toolchain / no TS project.
+    "vscode-transcript-language/**",
   ]),
 ]);
 

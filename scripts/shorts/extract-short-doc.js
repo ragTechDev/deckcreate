@@ -20,9 +20,7 @@ const cwd = path.join(__dirname, '../..');
 
 const GRAPHIC_TYPES = [
   'LowerThird', 'NameTitle', 'Callout', 'ChapterMarker', 'ChapterMarkerEnd',
-  'ConceptExplainer', 'ImageWindow', 'GifWindow', 'AIOverlay', 'CodingOverlay',
-  'EngineeringOverlay', 'LanguageOverlay', 'FrameworkOverlay', 'InfrastructureOverlay',
-  'PracticeOverlay', 'RoleOverlay', 'EducationOverlay', 'AwardsOverlay', 'RagtechOverlay',
+  'ConceptExplainer', 'ImageWindow', 'GifWindow', 'RagtechOverlay',
 ];
 const GRAPHIC_RE = new RegExp(`^>\\s*(${GRAPHIC_TYPES.join('|')})\\b`, 'i');
 

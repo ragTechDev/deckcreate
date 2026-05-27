@@ -7,10 +7,7 @@ const DIRECTIVES = new Set([
   'LowerThird', 'NameTitle', 'Callout',
   'ChapterMarker', 'ChapterMarkerEnd',
   'ConceptExplainer', 'ImageWindow', 'GifWindow',
-  'AIOverlay', 'CodingOverlay', 'EngineeringOverlay',
-  'LanguageOverlay', 'FrameworkOverlay', 'InfrastructureOverlay',
-  'PracticeOverlay', 'RoleOverlay', 'EducationOverlay',
-  'AwardsOverlay', 'RagtechOverlay',
+  'RagtechOverlay',
 ]);
 
 const REQUIRES_SRC = new Set(['ImageWindow', 'GifWindow']);

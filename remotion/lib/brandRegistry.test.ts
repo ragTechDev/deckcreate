@@ -2,30 +2,10 @@ import { getBrandOverlays } from './brandRegistry';
 
 // Mock overlay components — we test registry key mapping, not rendering
 jest.mock('../components/overlays/keywords', () => ({
-  AwardsOverlay: jest.fn(),
-  CodingOverlay: jest.fn(),
-  EngineeringOverlay: jest.fn(),
-  AIOverlay: jest.fn(),
-  InfrastructureOverlay: jest.fn(),
-  PracticeOverlay: jest.fn(),
-  RoleOverlay: jest.fn(),
-  LanguageOverlay: jest.fn(),
-  FrameworkOverlay: jest.fn(),
-  EducationOverlay: jest.fn(),
   RagtechOverlay: jest.fn(),
 }));
 
 const RAGTECH_OVERLAY_KEYS = [
-  'AwardsOverlay',
-  'CodingOverlay',
-  'EngineeringOverlay',
-  'AIOverlay',
-  'InfrastructureOverlay',
-  'PracticeOverlay',
-  'RoleOverlay',
-  'LanguageOverlay',
-  'FrameworkOverlay',
-  'EducationOverlay',
   'RagtechOverlay',
 ];
 

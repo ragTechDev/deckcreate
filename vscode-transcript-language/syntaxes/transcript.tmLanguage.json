@@ -63,12 +63,12 @@
     },
 
     "directive-name": {
-      "match": "\\b(HOOK|CAM|SPEAKER|START|END|LowerThird|NameTitle|Callout|ChapterMarker|ChapterMarkerEnd|ConceptExplainer|ImageWindow|GifWindow|AIOverlay|CodingOverlay|EngineeringOverlay|LanguageOverlay|FrameworkOverlay|InfrastructureOverlay|PracticeOverlay|RoleOverlay|EducationOverlay|AwardsOverlay|RagtechOverlay)\\b",
+      "match": "\\b(HOOK|CAM|SPEAKER|START|END|LowerThird|NameTitle|Callout|ChapterMarker|ChapterMarkerEnd|ConceptExplainer|TermTypewriter|ImageWindow|GifWindow|RagtechOverlay)\\b",
       "name": "keyword.control.directive.transcript-doc"
     },
 
     "attr-assignment": {
-      "match": "\\b(at|duration|name|title|text|chapterTitle|src|caption|width|gifHeight|playbackRate|loopBehavior|char|keyPhrase|description|side|concept|hookFrom|hookTo|bg|middlespeaker|extendedTitle|episodeNumber)(=)",
+      "match": "\\b(at|duration|name|title|text|chapterTitle|src|caption|width|gifHeight|playbackRate|loopBehavior|char|keyPhrase|description|side|concept|hookFrom|hookTo|bg|middlespeaker|extendedTitle|episodeNumber|term|label|emoji)(=)",
       "captures": {
         "1": { "name": "variable.parameter.attr.transcript-doc" },
         "2": { "name": "punctuation.separator.key-value.transcript-doc" }

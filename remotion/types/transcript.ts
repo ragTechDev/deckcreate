@@ -17,12 +17,13 @@ export type GraphicType =
   // Lower-third overlays
   | 'ConceptExplainer' | 'NameTitle'
   // Keyword overlay components
-  | 'AwardsOverlay' | 'CodingOverlay' | 'EngineeringOverlay'
-  | 'AIOverlay' | 'InfrastructureOverlay' | 'PracticeOverlay'
-  | 'RoleOverlay' | 'LanguageOverlay' | 'FrameworkOverlay'
-  | 'EducationOverlay' | 'RagtechOverlay'
+  | 'RagtechOverlay'
   | 'ImageWindow'
-  | 'GifWindow';
+  | 'GifWindow'
+  /** Scales an image/video/gif to cover the full camera viewport. No enter/exit transitions. */
+  | 'FullscreenMedia'
+  /** Terminal window that types out a key term in large text, then fades out. */
+  | 'TermTypewriter';
 
 export type CameraCue = {
   /** 'closeup' on a named speaker, or 'wide' for the wide shot */

@@ -3,14 +3,19 @@ import { useVideoConfig, useCurrentFrame, Sequence } from 'remotion';
 import type { Segment, GraphicsCue } from '../types/transcript';
 import type { Brand } from '../types/brand';
 import type { Section } from './SegmentPlayer';
-import { getBrandOverlays } from '../lib/brandRegistry';
 
 // Core / general editing overlays
-import { ConceptExplainer, NameTitle, ChapterMarker } from './overlays/lower-thirds';
+import { ConceptExplainer, Callout, NameTitle, ChapterMarker, TermTypewriter } from './overlays/lower-thirds';
 import { ConceptExplainerShort } from './overlays/lower-thirds/ConceptExplainer.short';
 import { NameTitleShort } from './overlays/lower-thirds/NameTitle.short';
 import { ImageWindowOverlay } from './overlays/ImageWindowOverlay';
 import { GifWindowOverlay } from './overlays/GifWindowOverlay';
+import { FullscreenMediaOverlay } from './overlays/FullscreenMediaOverlay';
+import { GlobalSouthMap } from './overlays/GlobalSouthMap';
+import { DataFlowAnimation } from './overlays/DataFlowAnimation';
+
+// Keyword-triggered overlays
+import { RagtechOverlay } from './overlays/keywords';
 
 interface OverlayRendererProps {
   segments: Segment[];
@@ -26,19 +31,29 @@ interface OverlayRendererProps {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const CORE_TEMPLATE_MAP: Record<string, React.FC<any>> = {
+const LONGFORM_COMPONENT_MAP: Record<string, React.FC<any>> = {
+  RagtechOverlay,
   ConceptExplainer,
+  Callout,
   NameTitle,
   ChapterMarker,
+  TermTypewriter,
   ImageWindow: ImageWindowOverlay,
   GifWindow: GifWindowOverlay,
+  GlobalSouthMap,
+  DataFlowAnimation,
+  FullscreenMedia: FullscreenMediaOverlay,
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const SHORTFORM_OVERRIDES: Record<string, React.FC<any>> = {
+const SHORTFORM_COMPONENT_MAP: Record<string, React.FC<any>> = {
+  ...LONGFORM_COMPONENT_MAP,
   ConceptExplainer: ConceptExplainerShort,
   NameTitle: NameTitleShort,
 };
+
+// Overlay types that should NOT appear during hook playback (but will appear in main video)
+const HOOK_EXCLUDED_OVERLAYS = new Set(['Callout', 'ConceptExplainer', 'NameTitle', 'ImageWindow', 'GifWindow', 'GlobalSouthMap', 'DataFlowAnimation']);
 
 /**
  * Convert a raw audio timestamp (seconds) to its composition frame using a
@@ -75,14 +90,10 @@ export const OverlayRenderer: React.FC<OverlayRendererProps> = ({
   mainStartFrame,
   isShortForm = false,
 }) => {
-  // SHORTFORM_OVERRIDES spreads last so shortform variants always beat brand overlays.
-  const componentMap = useMemo(() => ({
-    ...CORE_TEMPLATE_MAP,
-    ...getBrandOverlays(brand.id),
-    ...(isShortForm ? SHORTFORM_OVERRIDES : {}),
-  }), [brand.id, isShortForm]);
+  const componentMap = isShortForm ? SHORTFORM_COMPONENT_MAP : LONGFORM_COMPONENT_MAP;
   const { fps } = useVideoConfig();
   const currentFrame = useCurrentFrame();
+
 
   // Collect all graphics cues from all segments with their timing info
   const graphicsCues = useMemo(() => {
@@ -104,32 +115,34 @@ export const OverlayRenderer: React.FC<OverlayRendererProps> = ({
         const fullDurationFrames = Math.round(graphic.duration * fps);
 
         if (segment.hook) {
-          // Hook segment: add cue to BOTH hook and main timelines
+          // Hook segment: add cue to BOTH hook and main timelines (unless excluded from hooks)
 
-          // 1. Hook timeline (capped to hook clip length, or to hook section end for ChapterMarkers)
-          const hookStartFrame = rawTimeToGroupFrame(graphic.at, hookSections, fps);
-          let hookDuration = fullDurationFrames;
-          if (segment.hookFrom !== undefined && segment.hookTo !== undefined) {
-            const hookClipDuration = Math.round((segment.hookTo - segment.hookFrom) * fps);
-            hookDuration = Math.min(hookDuration, hookClipDuration);
+          // 1. Hook timeline - only add if not in the excluded set
+          if (!HOOK_EXCLUDED_OVERLAYS.has(graphic.type)) {
+            const hookStartFrame = rawTimeToGroupFrame(graphic.at, hookSections, fps);
+            let hookDuration = fullDurationFrames;
+            if (segment.hookFrom !== undefined && segment.hookTo !== undefined) {
+              const hookClipDuration = Math.round((segment.hookTo - segment.hookFrom) * fps);
+              hookDuration = Math.min(hookDuration, hookClipDuration);
+            }
+            // For ChapterMarkers in hooks: cap to total hook sections duration so they don't carry into main
+            if (graphic.type === 'ChapterMarker' && hookSections.length > 0) {
+              const totalHookDuration = hookSections.reduce((sum, s) => sum + (s.trimAfter - s.trimBefore), 0);
+              const maxAllowedDuration = totalHookDuration - hookStartFrame;
+              console.log(`[OverlayRenderer] ChapterMarker hook calc: totalHookDuration=${totalHookDuration}, hookStartFrame=${hookStartFrame}, maxAllowed=${maxAllowedDuration}, originalDuration=${hookDuration}`);
+              hookDuration = Math.min(hookDuration, maxAllowedDuration);
+            }
+            const finalDuration = Math.max(1, Math.floor(hookDuration));
+            cues.push({
+              cue: graphic,
+              startFrame: hookStartFrame,
+              durationInFrames: finalDuration,
+              key: `${segment.id}-${idx}-hook-${graphic.type}`,
+            });
+            console.log(`[OverlayRenderer] Hook cue ${graphic.type} on seg ${segment.id}: hookStart=${hookStartFrame}, duration=${finalDuration}, endFrame=${hookStartFrame + finalDuration}`);
           }
-          // For ChapterMarkers in hooks: cap to total hook sections duration so they don't carry into main
-          if (graphic.type === 'ChapterMarker' && hookSections.length > 0) {
-            const totalHookDuration = hookSections.reduce((sum, s) => sum + (s.trimAfter - s.trimBefore), 0);
-            const maxAllowedDuration = totalHookDuration - hookStartFrame;
-            console.log(`[OverlayRenderer] ChapterMarker hook calc: totalHookDuration=${totalHookDuration}, hookStartFrame=${hookStartFrame}, maxAllowed=${maxAllowedDuration}, originalDuration=${hookDuration}`);
-            hookDuration = Math.min(hookDuration, maxAllowedDuration);
-          }
-          const finalDuration = Math.max(1, Math.floor(hookDuration));
-          cues.push({
-            cue: graphic,
-            startFrame: hookStartFrame,
-            durationInFrames: finalDuration,
-            key: `${segment.id}-${idx}-hook-${graphic.type}`,
-          });
-          console.log(`[OverlayRenderer] Hook cue ${graphic.type} on seg ${segment.id}: hookStart=${hookStartFrame}, duration=${finalDuration}, endFrame=${hookStartFrame + finalDuration}`);
 
-          // 2. Main timeline (full duration at original position)
+          // 2. Main timeline (full duration at original position) - always add
           const mainCueStartFrame = mainStartFrame + rawTimeToGroupFrame(graphic.at, mainSections, fps);
           cues.push({
             cue: graphic,
@@ -196,6 +209,7 @@ export const OverlayRenderer: React.FC<OverlayRendererProps> = ({
           }
         }
         // Previous marker fades out as next one starts - no gap
+        // Fade-out is 60 frames, so marker ends exactly when next starts
         const requestedDuration = cue.durationInFrames;
         const availableDuration = nextMarkerStartFrame - cue.startFrame;
         // Cap duration so fade-out completes exactly when next marker starts
@@ -248,8 +262,8 @@ export const OverlayRenderer: React.FC<OverlayRendererProps> = ({
         }
 
         // Pass brand, durationInFrames, and other props (excluding brand string from transcript)
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { brand: _brand, ...otherProps } = cue.props || {};
+        void _brand;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const props: any = {
           ...otherProps,

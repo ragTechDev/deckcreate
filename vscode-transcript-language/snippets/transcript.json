@@ -89,29 +89,24 @@
     "body": "> GifWindow  at=\"$1\"  duration=${2:8}  src=\"$3\"  title=\"$4\"",
     "description": "Animated GIF window overlay"
   },
-  "AIOverlay": {
-    "prefix": ">ai",
-    "body": "> AIOverlay  at=\"$1\"  duration=${2:5}  concept=\"ai\"",
-    "description": "AI keyword overlay"
-  },
-  "CodingOverlay": {
-    "prefix": ">coding",
-    "body": "> CodingOverlay  at=\"$1\"  duration=${2:5}  concept=\"coding\"",
-    "description": "Coding keyword overlay"
-  },
   "RagtechOverlay": {
     "prefix": ">ragtech",
     "body": "> RagtechOverlay  at=\"$1\"  duration=${2:8}",
     "description": "RAG Tech brand overlay"
   },
-  "LanguageOverlay": {
-    "prefix": ">lang",
-    "body": "> LanguageOverlay  at=\"$1\"  duration=${2:5}  concept=\"${3:python}\"",
-    "description": "Programming language keyword overlay"
+  "TermTypewriter": {
+    "prefix": ">term",
+    "body": "> TermTypewriter  at=\"$1\"  duration=${2:5}  term=\"$3\"",
+    "description": "Typewriter overlay — types out a key term in large centered text then fades"
   },
-  "FrameworkOverlay": {
-    "prefix": ">framework",
-    "body": "> FrameworkOverlay  at=\"$1\"  duration=${2:5}  concept=\"${3:react}\"",
-    "description": "Framework keyword overlay"
+  "TermTypewriter with label": {
+    "prefix": ">termlabel",
+    "body": "> TermTypewriter  at=\"$1\"  duration=${2:5}  term=\"$3\"  label=\"$4\"",
+    "description": "Typewriter overlay with custom comment label"
+  },
+  "TermTypewriter with emoji": {
+    "prefix": ">termoji",
+    "body": "> TermTypewriter  at=\"$1\"  duration=${2:5}  term=\"$3\"  emoji=\"$4\"",
+    "description": "Typewriter overlay with floating emoji to the left of the term"
   }
 }

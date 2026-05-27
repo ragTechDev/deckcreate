@@ -2,25 +2,22 @@ import React from 'react';
 import { render } from '@testing-library/react';
 import { OverlayRenderer } from './OverlayRenderer';
 import type { Brand } from '../types/brand';
-import * as brandRegistry from '../lib/brandRegistry';
 
 // Mock remotion hooks used by OverlayRenderer
 jest.mock('remotion', () => ({
   useVideoConfig: () => ({ fps: 60, width: 1920, height: 1080, durationInFrames: 3600 }),
   useCurrentFrame: () => 0,
   Sequence: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}));
-
-// Mock registry so the test doesn't cascade into overlay component imports
-jest.mock('../lib/brandRegistry', () => ({
-  getBrandOverlays: jest.fn(() => ({})),
+  staticFile: (p: string) => `/public/${p}`,
 }));
 
 // Mock all overlay components imported directly by OverlayRenderer
 jest.mock('./overlays/lower-thirds', () => ({
   ConceptExplainer: jest.fn(() => null),
+  Callout: jest.fn(() => null),
   NameTitle: jest.fn(() => null),
   ChapterMarker: jest.fn(() => null),
+  TermTypewriter: jest.fn(() => null),
 }));
 jest.mock('./overlays/lower-thirds/ConceptExplainer.short', () => ({
   ConceptExplainerShort: jest.fn(() => null),
@@ -33,6 +30,22 @@ jest.mock('./overlays/ImageWindowOverlay', () => ({
 }));
 jest.mock('./overlays/GifWindowOverlay', () => ({
   GifWindowOverlay: jest.fn(() => null),
+}));
+jest.mock('./overlays/GlobalSouthMap', () => ({
+  GlobalSouthMap: jest.fn(() => null),
+}));
+jest.mock('./overlays/DataFlowAnimation', () => ({
+  DataFlowAnimation: jest.fn(() => null),
+}));
+jest.mock('./overlays/keywords', () => ({
+  RagtechOverlay: jest.fn(() => null),
+}));
+jest.mock('./overlays/FullscreenMediaOverlay', () => ({
+  FullscreenMediaOverlay: jest.fn(() => null),
+}));
+// @remotion/gif uses Remotion internals that don't run in Jest — mock the whole package.
+jest.mock('@remotion/gif', () => ({
+  Gif: jest.fn(() => null),
 }));
 
 const mockBrand: Brand = {
@@ -89,11 +102,6 @@ describe('OverlayRenderer', () => {
       />
     );
     expect(container.firstChild).toBeNull();
-  });
-
-  it('delegates brand-specific overlays to getBrandOverlays with brand.id', () => {
-    render(<OverlayRenderer {...baseProps} />);
-    expect(brandRegistry.getBrandOverlays).toHaveBeenCalledWith('ragtech');
   });
 
   it('passes isShortForm=true without crashing', () => {
