@@ -81,6 +81,19 @@ function computeTransform(
 const HOOK_ZOOM_RANGE = 0.08;
 
 /**
+ * Minimum shot duration (seconds) for a slow-zoom-in to be applied.
+ * Clips shorter than this are too brief for the motion to be perceptible.
+ */
+const HOOK_ZOOM_MIN_S = 1.5;
+
+/**
+ * Minimum gap (seconds of hook timeline) that must elapse after a zoomed shot
+ * before the next zoom is allowed. Prevents consecutive zooms on back-to-back
+ * clips, which reads as mechanical repetition rather than intentional motion.
+ */
+const HOOK_ZOOM_SPACING_S = 3.0;
+
+/**
  * Return an animated version of `vp` for the given progress through a hook shot.
  *
  * @param vp         - The base closeup viewport (static centre + size).
@@ -499,14 +512,25 @@ export function buildCameraShots(
     shots.push(emitShot(totalOutputFrames, finalSourceTime));
   }
 
-  // ── Tag every hook shot with a slow zoom-in ──────────────────────────────────
+  // ── Tag qualifying hook shots with spaced slow zoom-ins ─────────────────────
   //
-  // Every hook shot — regardless of angle — starts 8% wider than the closeup and
-  // continuously zooms in over its full duration. This creates consistent motion
-  // on every hook clip without requiring any transcript annotation.
-  for (const shot of shots) {
-    if (shot.startFrame >= hookTotalFrames) break; // past the hook zone
-    shot.hookTransition = 'slowZoomIn';
+  // Not every hook shot gets a zoom — applying it to every clip (especially short
+  // ones) reads as mechanical repetition and the effect is invisible on < 1.5 s
+  // clips anyway. Instead, only assign slowZoomIn when:
+  //   1. The shot is at least HOOK_ZOOM_MIN_S long (effect is perceptible), AND
+  //   2. At least HOOK_ZOOM_SPACING_S of hook time has elapsed since the last zoom
+  //      (prevents back-to-back zooms from feeling like a stuck record).
+  {
+    let lastZoomEndFrame = -Infinity;
+    for (const shot of shots) {
+      if (shot.startFrame >= hookTotalFrames) break;
+      const durationS = (shot.endFrame - shot.startFrame) / fps;
+      const gapS      = (shot.startFrame - lastZoomEndFrame) / fps;
+      if (durationS >= HOOK_ZOOM_MIN_S && gapS >= HOOK_ZOOM_SPACING_S) {
+        shot.hookTransition = 'slowZoomIn';
+        lastZoomEndFrame = shot.endFrame;
+      }
+    }
   }
 
   // Log final shot list for debugging
