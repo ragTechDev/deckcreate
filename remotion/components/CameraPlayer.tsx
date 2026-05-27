@@ -73,10 +73,10 @@ function computeTransform(
 // ── Hook transition animation ─────────────────────────────────────────────────
 
 /**
- * Zoom range for hook transitions — the viewport starts this many percent wider
- * than the base closeup at progress=0 and arrives at the exact closeup at progress=1.
- * 0.08 = 8% gives a clearly readable push-in over a 5–10 s clip without feeling
- * rushed or disorienting.
+ * Zoom range for hook transitions.
+ * 0.08 = 8% — the viewport tightens by 8% over the clip duration, giving a
+ * clearly readable push-in that reads as intentional motion without feeling
+ * rushed or disorienting on a 3–10 s hook clip.
  */
 const HOOK_ZOOM_RANGE = 0.08;
 
@@ -94,20 +94,22 @@ function animateHookViewport(
 ): CropViewport {
   switch (transition) {
     case 'slowZoomIn': {
-      // Start wider (zoom out from closeup) and push in to the base closeup.
-      // The factor runs from (1 + HOOK_ZOOM_RANGE) at progress=0 down to 1.0 at progress=1.
-      // Clamped so w and h never exceed 1.0 — viewport w/h > 1.0 on a 1:1 source/output
-      // would drop the scale below 1 and produce letterbox bars.
-      const factor = 1 + HOOK_ZOOM_RANGE * (1 - progress);
-      return {
-        ...vp,
-        w: Math.min(vp.w * factor, 1),
-        h: Math.min(vp.h * factor, 1),
-      };
+      // Starts at the BASE closeup ("normal position") and slowly zooms in
+      // to a slightly tighter view over the clip duration.
+      //   progress=0 → w/h = vp.w / vp.h  (exactly the base closeup, no offset, no gap)
+      //   progress=1 → w/h * (1 − ZOOM_RANGE)  (8% tighter)
+      //
+      // Because w and h only ever decrease, scale only ever increases — the viewport
+      // can never extend beyond the source boundaries, so no edge gaps are possible
+      // regardless of where cx/cy sits in the frame.
+      const factor = 1 - HOOK_ZOOM_RANGE * progress;
+      return { ...vp, w: vp.w * factor, h: vp.h * factor };
     }
 
     case 'slowZoomOut': {
-      // Start at the base closeup and gently pull back.
+      // Starts at the base closeup and gently pulls back (reserved for future use).
+      // NOTE: expanding the viewport can create edge gaps if cx/cy is near a boundary.
+      // Clamp w/h at 1.0 as a minimum safety guard.
       const factor = 1 + HOOK_ZOOM_RANGE * progress;
       return {
         ...vp,
