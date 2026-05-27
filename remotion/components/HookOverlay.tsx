@@ -8,7 +8,7 @@ import { createTikTokStyleCaptions } from '@remotion/captions';
 import type { Caption } from '@remotion/captions';
 import { whip } from '@remotion/sfx';
 import type { Segment, Token } from '../types/transcript';
-import { hookClipEnd } from '../lib/hookTiming';
+import { hookClipEnd, buildHookSections } from '../lib/hookTiming';
 import { isSpokenToken } from '../lib/tokens';
 import type { Brand } from '../types/brand';
 import { ChapterMarker } from './overlays/lower-thirds';
@@ -65,13 +65,13 @@ function buildCaptions(
   dedupedTokens.reverse();
 
   // Group BPE sub-tokens into word-level groups
-  const wordGroups: { text: string; t_dtw: number }[] = [];
+  const wordGroups: { text: string; t_dtw: number; t_end?: number }[] = [];
   for (const t of dedupedTokens) {
     const trimmed = t.text.trim();
     const punctuationOnly = isPunctuationOnlyTokenText(trimmed);
     if (wordGroups.length === 0) {
       if (punctuationOnly) continue;
-      wordGroups.push({ text: t.text, t_dtw: t.t_dtw });
+      wordGroups.push({ text: t.text, t_dtw: t.t_dtw, t_end: t.t_end });
     } else {
       const prev = wordGroups[wordGroups.length - 1];
       const prevTrimmed = prev.text.trim();
@@ -102,10 +102,13 @@ function buildCaptions(
       }
 
       if (shouldAttach) {
-        // Continuation sub-token: append to previous group
+        // Continuation sub-token: append to previous group; keep latest t_end
         prev.text += t.text;
+        if (t.t_end !== undefined && (prev.t_end === undefined || t.t_end > prev.t_end)) {
+          prev.t_end = t.t_end;
+        }
       } else {
-        wordGroups.push({ text: t.text, t_dtw: t.t_dtw });
+        wordGroups.push({ text: t.text, t_dtw: t.t_dtw, t_end: t.t_end });
       }
     }
   }
@@ -121,12 +124,26 @@ function buildCaptions(
     return !(sameTime && sameToken);
   });
 
-  // Filter to the hook window
-  const inRange = deduped.filter(w => w.t_dtw >= sourceStart && w.t_dtw < sourceEnd);
+  // Filter to the hook window.
+  // Normal case: t_dtw is within [sourceStart, sourceEnd) — same as before.
+  // Edge case: t_dtw < sourceStart (word started before the hook window) but
+  // t_end extends into the window — the word is still being spoken when the clip
+  // begins, so include it. Requires an explicit t_end; without one we can't know
+  // when the word ends and conservatively exclude it.
+  // Example: "productive" with t_dtw=1057.774, hookFrom=1058.274, t_end=1058.778.
+  const sourceStartMs = Math.round(sourceStart * 1000);
+  const inRange = deduped.filter(w => {
+    if (w.t_dtw >= sourceStart) return w.t_dtw < sourceEnd;           // normal path
+    return w.t_end !== undefined && w.t_end > sourceStart;            // early-start overlap
+  });
   return inRange.map((w, i) => {
-    const startMs = (i === 0 && isBoundedHook && w.t_dtw > sourceStart)
-      ? Math.round(sourceStart * 1000)
-      : Math.round(w.t_dtw * 1000);
+    const tokenStartMs = Math.round(w.t_dtw * 1000);
+    // For bounded hooks the first caption always snaps to hookFrom so it appears
+    // immediately when the clip starts. Also clamp any token that starts before
+    // sourceStart (speech overlaps the window but t_dtw is before it).
+    const startMs = (i === 0 && isBoundedHook)
+      ? sourceStartMs
+      : Math.max(tokenStartMs, sourceStartMs);
     const rawEndMs = Math.round(
       (i + 1 < inRange.length ? inRange[i + 1].t_dtw : sourceEnd) * 1000,
     );
@@ -158,11 +175,29 @@ type HookTiming = {
 };
 
 function buildHookTimings(segments: Segment[], fps: number): HookTiming[] {
+  // Use the SAME de-overlapped sections that buildHookSections produces so that
+  // the cumulative output frame for each hook segment matches exactly what
+  // SectionGroupPlayer renders.  Computing durations independently
+  // (ceil(sourceEnd*fps) - floor(sourceStart*fps)) diverges from the video by
+  // 1 frame whenever the de-overlap pass advances a section's trimBefore.
+  // Over 46 hooks that is ~10 frames, causing captions to lag the video.
+  const deOverlappedSections = buildHookSections(segments, fps);
+
   const timings: HookTiming[] = [];
   let cum = 0;
+  let sectionIdx = 0;
+
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i];
     if (!seg.hook || seg.cut) continue;
+
+    // Pair with the corresponding de-overlapped section (same iteration order).
+    const section = deOverlappedSections[sectionIdx++];
+    if (!section) break; // guard against unexpected mismatch
+
+    // Use the section's actual post-de-overlap duration so outputStartFrame
+    // stays perfectly in sync with the video player's frame counter.
+    const dur = section.trimAfter - section.trimBefore;
 
     const sourceStart = seg.hookFrom ?? seg.start;
     const isBoundedHook = seg.hookTo !== undefined && seg.hookTo !== null;
@@ -174,10 +209,6 @@ function buildHookTimings(segments: Segment[], fps: number): HookTiming[] {
     const sourceEnd = hookClipEnd(seg, nextHookStart);
 
     const captions = buildCaptions(seg.tokens, sourceStart, sourceEnd, isBoundedHook);
-
-    const startFrame = Math.floor(sourceStart * fps);
-    const endFrame = Math.ceil(sourceEnd * fps);
-    const dur = Math.max(1, endFrame - startFrame);
 
     const { pages } = createTikTokStyleCaptions({
       captions,
