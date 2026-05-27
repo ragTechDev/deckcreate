@@ -53,17 +53,27 @@ export interface FullscreenMediaOverlayProps {
 /**
  * FullscreenMediaOverlay
  *
- * Scales media to fill the frame using aspect-ratio-aware logic (centred, no
- * cropping). The axis used to fit depends on the media's intrinsic shape:
+ * Scales media to fill the entire frame using **cover** semantics:
+ *   - Both axes are filled to 100 % of the composition dimensions
+ *   - Aspect ratio is preserved
+ *   - Any overflow is cropped symmetrically (centred on the media)
  *
- *   Landscape (w > h) → fits to frame HEIGHT in longform (16:9)
- *                       fits to frame WIDTH  in shortform (9:16)
- *   Portrait  (h > w) → fits to frame HEIGHT in both longform and shortform
- *   Square    (w = h) → fits to frame HEIGHT in longform (16:9)
- *                       fits to frame WIDTH  in shortform (9:16)
+ * This works correctly for every combination of media shape × frame aspect ratio:
  *
- * Intrinsic dimensions are loaded once via delayRender/continueRender so both
- * Studio preview and final renders use the correct sizing from frame 0.
+ *   Landscape media  + longform  frame (16:9) → minimal/no cropping
+ *   Portrait  media  + shortform frame (9:16) → minimal/no cropping
+ *   Landscape media  + shortform frame (9:16) → sides cropped  (fine for B-roll)
+ *   Portrait  media  + longform  frame (16:9) → top/bottom cropped (fine for B-roll)
+ *   Square    media  + either    frame         → one axis cropped symmetrically
+ *
+ * Implementation strategy by type:
+ *   image / video     → CSS `object-fit: cover` with width/height 100 % — no
+ *                        dimension-loading required; the browser / Remotion renderer
+ *                        handles scaling natively.
+ *   gif (Studio)      → <Img> with the same CSS cover style.
+ *   gif (headless)    → intrinsic dimensions are loaded via delayRender, then an
+ *                        explicit cover scale is computed and the <Gif> element is
+ *                        pixel-positioned to fill the frame.
  */
 export const FullscreenMediaOverlay: React.FC<FullscreenMediaOverlayProps> = ({
   src,
@@ -72,62 +82,51 @@ export const FullscreenMediaOverlay: React.FC<FullscreenMediaOverlayProps> = ({
 }) => {
   const { width: frameWidth, height: frameHeight } = useVideoConfig();
   const { isRendering } = getRemotionEnvironment();
-  const isPortraitFrame = frameHeight > frameWidth; // shortform composition
 
-  // ── Load intrinsic media dimensions ──────────────────────────────────────
-  // delayRender pauses frame capture until we know the media's w/h.
-  // This runs in both Remotion Studio and headless render (Puppeteer).
   const resolvedSrc = useMemo(() => resolveSrc(src), [src]);
 
+  // ── Dimension loading (gif render mode only) ──────────────────────────────
+  // object-fit:cover handles sizing for image/video and gif-in-Studio without
+  // any JS measurement.  The <Gif> component used during headless rendering needs
+  // explicit pixel width/height, so we measure intrinsic size only in that case.
+  const needsDimensions = mediaType === 'gif' && isRendering;
+
   const delayHandle = useMemo(
-    () => delayRender(`FullscreenMediaOverlay: measuring ${src}`),
+    () =>
+      needsDimensions
+        ? delayRender(`FullscreenMediaOverlay: measuring ${src}`)
+        : null,
+    // stable for the component lifetime — src and mediaType don't change mid-render
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
+
   const [mediaSize, setMediaSize] = useState<{ w: number; h: number } | null>(null);
 
   useEffect(() => {
+    if (!needsDimensions) return;
+
     const done = (w: number, h: number) => {
       setMediaSize({ w, h });
-      continueRender(delayHandle);
+      continueRender(delayHandle!);
     };
     const fail = () => {
-      // Fall back to frame dimensions so the overlay still renders even if the
-      // media element can't report its intrinsic size (e.g. unsupported container).
-      // object-fit / width+height logic will still apply using the frame ratio.
-      console.warn(`[FullscreenMediaOverlay] Could not load dimensions for "${src}" — falling back to frame size`);
+      // Fall back to frame dimensions so the overlay still renders even if
+      // the GIF can't report its intrinsic size.  The cover calculation will
+      // produce no-op scaling (1:1) and fill the frame.
+      console.warn(
+        `[FullscreenMediaOverlay] Could not load dimensions for "${src}" — falling back to frame size`,
+      );
       setMediaSize({ w: frameWidth, h: frameHeight });
-      continueRender(delayHandle);
+      continueRender(delayHandle!);
     };
 
-    if (mediaType === 'video') {
-      const vid = document.createElement('video');
-      vid.onloadedmetadata = () => done(vid.videoWidth, vid.videoHeight);
-      vid.onerror = fail;
-      vid.src = resolvedSrc;
-      vid.load();
-    } else {
-      // image or gif — use resolvedSrc so local paths work via staticFile()
-      const img = new window.Image();
-      img.onload = () => done(img.naturalWidth, img.naturalHeight);
-      img.onerror = fail;
-      img.src = resolvedSrc;
-    }
-  // delayHandle is stable (created once); src/mediaType don't change mid-session.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    const img = new window.Image();
+    img.onload = () => done(img.naturalWidth, img.naturalHeight);
+    img.onerror = fail;
+    img.src = resolvedSrc;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // While dimensions are loading, render nothing — delayRender holds the frame.
-  if (!mediaSize) return null;
-
-  // ── Determine fit axis ────────────────────────────────────────────────────
-  //   Landscape (w > h) → height-fit in longform, width-fit in shortform
-  //   Portrait  (h > w) → height-fit (both longform & shortform)
-  //   Square    (w = h) → height-fit in longform, width-fit in shortform
-  //
-  // Simplified: fit width only when shortform (portrait frame) AND media is not portrait
-  const isPortraitMedia = mediaSize.h > mediaSize.w;
-  const fitWidth = isPortraitFrame && !isPortraitMedia;
 
   // ── Shared container ──────────────────────────────────────────────────────
   const containerStyle: React.CSSProperties = {
@@ -137,61 +136,53 @@ export const FullscreenMediaOverlay: React.FC<FullscreenMediaOverlayProps> = ({
     pointerEvents: 'none',
   };
 
-  // ── Media styles (absolute-positioned, centred on the relevant axis) ──────
-  //
-  // fit-width:  fill 100% of composition width, height scales proportionally,
-  //             centred vertically (translateY -50%).
-  // fit-height: fill 100% of composition height, width scales proportionally,
-  //             centred horizontally (translateX -50%).
-  const mediaStyle: React.CSSProperties = fitWidth
-    ? {
-        position: 'absolute',
-        width: '100%',
-        height: 'auto',
-        top: '50%',
-        left: 0,
-        transform: 'translateY(-50%)',
-        display: 'block',
-      }
-    : {
-        position: 'absolute',
-        width: 'auto',
-        height: '100%',
-        top: 0,
-        left: '50%',
-        transform: 'translateX(-50%)',
-        display: 'block',
-      };
+  // ── Cover style (image / video / gif-Studio) ──────────────────────────────
+  // object-fit:cover fills 100 % of both axes, preserves aspect ratio, and
+  // crops any overflow symmetrically — a true full-bleed overlay regardless of
+  // how the media aspect ratio relates to the composition aspect ratio.
+  const coverStyle: React.CSSProperties = {
+    position: 'absolute',
+    inset: 0,
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+    objectPosition: 'center',
+    display: 'block',
+  };
 
-  // ── Gif branch (Studio: <Img> for performance, render: <Gif> for animation)
+  // ── Gif branch ────────────────────────────────────────────────────────────
   if (mediaType === 'gif') {
     if (isRendering) {
-      // Compute exact pixel dimensions so <Gif fit="fill"> renders at the
-      // right size without any internal scaling artifacts.
-      const gifWidth  = fitWidth
-        ? frameWidth
-        : Math.round(frameHeight * (mediaSize.w / mediaSize.h));
-      const gifHeight = fitWidth
-        ? Math.round(frameWidth * (mediaSize.h / mediaSize.w))
-        : frameHeight;
+      // Wait for intrinsic dimensions — delayRender holds the frame.
+      if (!mediaSize) return null;
 
-      const gifWrapStyle: React.CSSProperties = fitWidth
-        ? { position: 'absolute', width: gifWidth, top: '50%', left: 0,   transform: 'translateY(-50%)' }
-        : { position: 'absolute', height: gifHeight, top: 0, left: '50%', transform: 'translateX(-50%)' };
+      // Cover scale: the larger of the two scale factors ensures both axes
+      // are >= the corresponding frame dimension.
+      const scale = Math.max(frameWidth / mediaSize.w, frameHeight / mediaSize.h);
+      const gifW = Math.round(mediaSize.w * scale);
+      const gifH = Math.round(mediaSize.h * scale);
+
+      // Centre the (potentially larger) scaled GIF over the frame.
+      // Negative offsets push the overflow equally off both edges.
+      const gifWrapStyle: React.CSSProperties = {
+        position: 'absolute',
+        top: Math.round((frameHeight - gifH) / 2),
+        left: Math.round((frameWidth - gifW) / 2),
+      };
 
       return (
         <div style={containerStyle}>
           <div style={gifWrapStyle}>
-            <Gif src={resolvedSrc} width={gifWidth} height={gifHeight} fit="fill" loopBehavior="loop" />
+            <Gif src={resolvedSrc} width={gifW} height={gifH} fit="fill" loopBehavior="loop" />
           </div>
         </div>
       );
     }
 
-    // Studio: native browser GIF — smooth, zero JS decode overhead.
+    // Studio: native browser GIF — smooth preview, CSS handles the cover sizing.
     return (
       <div style={containerStyle}>
-        <Img src={resolvedSrc} style={mediaStyle} />
+        <Img src={resolvedSrc} style={coverStyle} />
       </div>
     );
   }
@@ -200,7 +191,7 @@ export const FullscreenMediaOverlay: React.FC<FullscreenMediaOverlayProps> = ({
   if (mediaType === 'image') {
     return (
       <div style={containerStyle}>
-        <Img src={resolvedSrc} style={mediaStyle} />
+        <Img src={resolvedSrc} style={coverStyle} />
       </div>
     );
   }
@@ -210,13 +201,13 @@ export const FullscreenMediaOverlay: React.FC<FullscreenMediaOverlayProps> = ({
     return (
       <div style={containerStyle}>
         {/*
+          OffthreadVideo renders each frame as an <img>, so object-fit:cover
+          scales it identically to a regular <img> element.
           trimBefore=0 → play from the first frame of the clip.
-          OffthreadVideo renders each frame as an <img> so width/auto / auto/height
-          scales it the same way as a regular image element.
         */}
         <OffthreadVideo
           src={resolvedSrc}
-          style={mediaStyle}
+          style={coverStyle}
           trimBefore={0}
           muted={muted}
         />
