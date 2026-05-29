@@ -3,7 +3,7 @@
  * Re-encode synced video files with dense keyframes so Remotion can seek
  * efficiently frame-by-frame without decoding back to sparse keyframes.
  *
- * -crf 28        = libx264 constant quality (~5–8 Mbps for 1080p talking-head)
+ * -crf 23        = libx264 constant quality (~8–15 Mbps for 1080p talking-head, visually lossless)
  * -g 25          = keyframe every 25 frames (1 s at 25 fps)
  * +faststart     = move index to front of file for fast initial seeks
  *
@@ -35,7 +35,7 @@ function progressBar(pct, width = 20) {
 
 function encodeWithKeyframes(inputPath, outputPath) {
   return new Promise((resolve, reject) => {
-    const videoCodecArgs = ['-c:v', 'libx264', '-crf', '28', '-preset', 'fast', '-g', '25'];
+    const videoCodecArgs = ['-c:v', 'libx264', '-crf', '23', '-preset', 'fast', '-g', '25'];
 
     const args = [
       '-i', inputPath,
