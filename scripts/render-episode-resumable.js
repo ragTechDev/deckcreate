@@ -113,7 +113,7 @@ function queryTotalFrames(entry, compositionId, props) {
 // ── Chunk render ─────────────────────────────────────────────────────────────
 
 async function renderChunk(config, chunk) {
-  const { entry, compositionId, props, timeout } = config;
+  const { entry, compositionId, props, timeout, concurrency } = config;
   const { startFrame, endFrame, file, index } = chunk;
 
   for (let attempt = 1; ; attempt++) {
@@ -126,6 +126,8 @@ async function renderChunk(config, chunk) {
     const { code, warpKilled } = await new Promise((resolve, reject) => {
       let warpKilled = false;
 
+      // Pipe output so we can scan for ERR_NETWORK_CHANGED while still
+      // displaying the Remotion progress bar on the real TTY.
       const proc = spawn('npx', [
         'remotion', 'render',
         entry, compositionId, file,
@@ -134,17 +136,31 @@ async function renderChunk(config, chunk) {
         '--image-format', 'jpeg',
         '--frames', `${startFrame}-${endFrame}`,
         '--overwrite',
-      ], { cwd: PROJECT_ROOT, stdio: 'inherit' });
+        ...(concurrency ? ['--concurrency', String(concurrency)] : []),
+      ], { cwd: PROJECT_ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
 
-      // Poll every 5 s — kill immediately when WARP turns on instead of
-      // waiting for the per-frame timeout to expire (saves up to 5 min)
-      const watcher = setInterval(() => {
-        if (!warpKilled && isWarpActive()) {
-          warpKilled = true;
-          process.stdout.write('\n[resume-render] WARP detected — stopping render...\n');
-          proc.kill('SIGTERM');
+      const kill = (reason) => {
+        if (warpKilled) return;
+        warpKilled = true;
+        process.stdout.write(`\n[resume-render] ${reason} — stopping render...\n`);
+        proc.kill('SIGTERM');
+      };
+
+      // Relay output to terminal and scan for network-change errors.
+      // ERR_NETWORK_CHANGED means WARP just turned on (even if it turns off
+      // before the next warp-cli poll), leaving in-flight requests dead.
+      const scan = (chunk) => {
+        if (!warpKilled && chunk.toString().includes('ERR_NETWORK_CHANGED')) {
+          kill('ERR_NETWORK_CHANGED detected');
         }
-      }, 5000);
+      };
+      proc.stdout.on('data', buf => { process.stdout.write(buf); scan(buf); });
+      proc.stderr.on('data', buf => { process.stderr.write(buf); scan(buf); });
+
+      // Poll every 2 s as a backup (catches WARP states not reflected in output)
+      const watcher = setInterval(() => {
+        if (isWarpActive()) kill('WARP detected');
+      }, 2000);
 
       proc.on('close', code => { clearInterval(watcher); resolve({ code, warpKilled }); });
       proc.on('error', err  => { clearInterval(watcher); reject(err); });
@@ -208,6 +224,7 @@ function parseArgs() {
     timeout:           300000,
     chunkSize:         DEFAULT_CHUNK_SIZE,
     totalFrames:       null,
+    concurrency:       null,
     reset:             false,
     skipUrlCheck:      false,
     chunkIndex:        null,
@@ -225,6 +242,7 @@ function parseArgs() {
     else if (a === '--timeout'         && args[i+1]) out.timeout           = parseInt(args[++i], 10);
     else if (a === '--chunk-size'      && args[i+1]) out.chunkSize         = parseInt(args[++i], 10);
     else if (a === '--total-frames'    && args[i+1]) out.totalFrames       = parseInt(args[++i], 10);
+    else if (a === '--concurrency'     && args[i+1]) out.concurrency       = parseInt(args[++i], 10);
     else if (a === '--skip-url-check')               out.skipUrlCheck      = true;
     else if (a === '--reset')                        out.reset             = true;
     else if (a === '--warp')                         out.warp              = true;
@@ -325,7 +343,7 @@ async function main() {
   progress.warpMonitoring = warpMonitoringEnabled;
   await fs.writeJson(PROGRESS_FILE, progress, { spaces: 2 });
 
-  const config = { entry: cli.entry, compositionId: cli.compositionId, props, timeout: cli.timeout };
+  const config = { entry: cli.entry, compositionId: cli.compositionId, props, timeout: cli.timeout, concurrency: cli.concurrency };
 
   const isTargeted = cli.chunkIndex !== null || cli.chunkRange !== null;
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { useCurrentFrame, useVideoConfig, spring, interpolate, AbsoluteFill, staticFile } from 'remotion';
+import { useCurrentFrame, useVideoConfig, spring, interpolate, staticFile } from 'remotion';
 import type { Brand } from '../../../types/brand';
 
 const MONO = "'SF Mono', 'Monaco', 'Cascadia Code', 'Consolas', monospace";
@@ -26,7 +26,6 @@ export const ChapterMarker: React.FC<ChapterMarkerProps> = ({
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
-  const currentGlobalFrame = frame; // frame within this Sequence
 
   const { colors, shape } = brand;
 
@@ -48,14 +47,13 @@ export const ChapterMarker: React.FC<ChapterMarkerProps> = ({
   });
 
   const slideIn = interpolate(entrySpring, [0, 1], [-80, 0]);
-  const entryOpacity = interpolate(frame, [0, 8], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' });
 
-  // Fade to 0.5 opacity after 3 seconds
+  // Fade in over 8 frames, hold at 1, then settle to 0.5 after 3 seconds
   const FADE_START_FRAMES = 3 * fps;
   let opacity = interpolate(
     frame,
-    [0, FADE_START_FRAMES, FADE_START_FRAMES + 30],
-    [entryOpacity, 1, 0.5],
+    [0, 8, FADE_START_FRAMES, FADE_START_FRAMES + 30],
+    [0, 1, 1, 0.5],
     { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
   );
 
@@ -63,7 +61,8 @@ export const ChapterMarker: React.FC<ChapterMarkerProps> = ({
   if (nextMarkerFrame !== undefined) {
     const fadeOutStart = durationInFrames - 60; // Start fading 1s before end
     if (frame > fadeOutStart) {
-      opacity = interpolate(frame, [fadeOutStart, durationInFrames], [opacity, 0], {
+      const opacityAtFadeStart = opacity;
+      opacity = interpolate(frame, [fadeOutStart, durationInFrames], [opacityAtFadeStart, 0], {
         extrapolateLeft: 'clamp',
         extrapolateRight: 'clamp',
       });
@@ -105,13 +104,13 @@ export const ChapterMarker: React.FC<ChapterMarkerProps> = ({
   });
 
   const typingDone = charsRevealed >= totalChars;
-  const showCursor = Math.floor(frame / 18) % 2 === 0;
+  const showCursor = Math.floor(frame / 30) % 2 === 0;
 
   const renderLine = () => (
     <>
       <span style={{ color: colors.accent }}>chapter</span>
       <span style={{ color: '#e6edf3' }}>: </span>
-      <span style={{ color: colors.secondary }}>"{chapterTitle}"</span>
+      <span style={{ color: colors.secondary }}>{'"'}{chapterTitle}{'"'}</span>
       <span style={{ color: '#e6edf3' }}>,</span>
     </>
   );
@@ -207,7 +206,7 @@ export const ChapterMarker: React.FC<ChapterMarkerProps> = ({
             {isPausePhase && (
               <div style={{ display: 'flex', alignItems: 'center', marginTop: 4, opacity: 0.5 }}>
                 <span style={{ color: colors.accent, marginRight: 8 }}>❯</span>
-                <span style={{ fontSize: 12, color: '#8b949e' }}>// waiting...</span>
+                <span style={{ fontSize: 12, color: '#8b949e' }}>{'// waiting...'}</span>
               </div>
             )}
           </div>
@@ -216,6 +215,7 @@ export const ChapterMarker: React.FC<ChapterMarkerProps> = ({
         {/* Logo — to the right of the terminal, overlapping */}
         <img
           src={LOGO}
+          alt=""
           style={{
             height: 120,
             objectFit: 'contain',

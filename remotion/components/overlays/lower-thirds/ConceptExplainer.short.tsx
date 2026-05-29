@@ -21,8 +21,10 @@ export const ConceptExplainerShort: React.FC<ConceptExplainerShortProps> = ({
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
-  const safeDuration = Math.max(30, durationInFrames);
-  const exitStart = safeDuration - 15;
+  // Scale entry/exit to actual duration so the animation always completes
+  // before the Sequence ends (prevents abrupt cut → Techybara flash).
+  const entryEnd  = Math.min(8, Math.floor(durationInFrames * 0.25));
+  const exitStart = Math.max(entryEnd, durationInFrames - 15);
 
   const slideIn = spring({ frame, fps, config: { damping: 22, stiffness: 90, mass: 1 } });
   const slideOut = frame > exitStart
@@ -32,7 +34,7 @@ export const ConceptExplainerShort: React.FC<ConceptExplainerShortProps> = ({
   const translateY = interpolate(slideIn - slideOut, [0, 1], [60, 0]);
   const opacity = interpolate(
     frame,
-    [0, 8, exitStart, safeDuration],
+    [0, entryEnd, exitStart, durationInFrames],
     [0, 1, 1, 0],
     { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' },
   );
@@ -49,7 +51,7 @@ export const ConceptExplainerShort: React.FC<ConceptExplainerShortProps> = ({
   );
   const isTyping = frame >= typeStart && visibleChars < cmdFull.length;
   const showCursor =
-    isTyping || (visibleChars === cmdFull.length && Math.floor(frame / 18) % 2 === 0);
+    isTyping || (visibleChars === cmdFull.length && Math.floor(frame / 30) % 2 === 0);
 
   const descOpacity = interpolate(
     frame,
@@ -96,6 +98,7 @@ export const ConceptExplainerShort: React.FC<ConceptExplainerShortProps> = ({
       >
         <img
           src={TECHYBARA}
+          alt=""
           style={{
             height: 270,
             objectFit: 'contain',
