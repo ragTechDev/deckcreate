@@ -26,6 +26,7 @@
     "remotion:studio": "npx remotion studio",
     "render:episode": "node scripts/render-episode.js",
     "render:episode:resume": "node scripts/render-episode-resumable.js",
+    "render:episode:chunk": "node scripts/render-episode-resumable.js",
     "render:hook-intro": "node scripts/render-hook-intro.js",
     "check:media-urls": "node scripts/lib/checkMediaUrls.js",
     "review:guest": "node scripts/guest-review.js",

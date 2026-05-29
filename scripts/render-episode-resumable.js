@@ -10,11 +10,15 @@
  *
  * Usage:
  *   npm run render:episode:resume -- [options]
+ *   npm run render:episode:chunk -- --chunk <n> [options]
+ *   npm run render:episode:chunk -- --chunks <n>-<m> [options]
  *
  * Options: (same as render:episode, plus)
  *   --chunk-size <n>   Frames per chunk  (default: 20000 ≈ 5.5 min @ 60 fps)
  *   --total-frames <n> Skip the compositions query and use this value
  *   --reset            Discard saved progress and start fresh
+ *   --chunk <n>        Render only chunk n (0-based index); skips concat
+ *   --chunks <n>-<m>   Render only chunks n through m inclusive (0-based); skips concat
  */
 
 import path from 'path';
@@ -206,6 +210,8 @@ function parseArgs() {
     totalFrames:       null,
     reset:             false,
     skipUrlCheck:      false,
+    chunkIndex:        null,
+    chunkRange:        null,
   };
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -223,6 +229,11 @@ function parseArgs() {
     else if (a === '--reset')                        out.reset             = true;
     else if (a === '--warp')                         out.warp              = true;
     else if (a === '--no-warp')                      out.noWarp            = true;
+    else if (a === '--chunk'           && args[i+1]) out.chunkIndex        = parseInt(args[++i], 10);
+    else if (a === '--chunks'          && args[i+1]) {
+      const [from, to] = args[++i].split('-').map(Number);
+      out.chunkRange = { from, to };
+    }
   }
   return out;
 }
@@ -316,7 +327,23 @@ async function main() {
 
   const config = { entry: cli.entry, compositionId: cli.compositionId, props, timeout: cli.timeout };
 
+  const isTargeted = cli.chunkIndex !== null || cli.chunkRange !== null;
+
+  if (isTargeted) {
+    const desc = cli.chunkIndex !== null
+      ? `chunk ${cli.chunkIndex}`
+      : `chunks ${cli.chunkRange.from}–${cli.chunkRange.to}`;
+    console.log(`[resume-render] Targeted mode: rendering ${desc} only (concat skipped)`);
+  }
+
   for (const chunk of progress.chunks) {
+    if (isTargeted) {
+      const inRange =
+        (cli.chunkIndex !== null && chunk.index === cli.chunkIndex) ||
+        (cli.chunkRange !== null && chunk.index >= cli.chunkRange.from && chunk.index <= cli.chunkRange.to);
+      if (!inRange) continue;
+    }
+
     if (chunk.done) {
       console.log(`[resume-render] Chunk ${chunk.index + 1}/${progress.chunks.length} already complete, skipping`);
       continue;
@@ -326,6 +353,15 @@ async function main() {
     chunk.done = true;
     await fs.writeJson(PROGRESS_FILE, progress, { spaces: 2 });
     console.log(`[resume-render] Chunk ${chunk.index + 1}/${progress.chunks.length} saved`);
+  }
+
+  if (isTargeted) {
+    const done = progress.chunks.filter(c => c.done).length;
+    console.log(`\n[resume-render] Targeted render complete. ${done}/${progress.chunks.length} chunks done.`);
+    if (done === progress.chunks.length) {
+      console.log('[resume-render] All chunks done — run render:episode:resume (no --chunk/--chunks) to concatenate.');
+    }
+    return;
   }
 
   await concatenateChunks(progress.chunks, outputPath);
