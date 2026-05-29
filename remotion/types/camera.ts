@@ -60,6 +60,8 @@ export type AngleConfig = {
    * increasing videoOffset by small steps (e.g. 0.1 s) until cuts line up.
    */
   videoOffset?: number;
+  /** When false, this angle is excluded from camera selection (treated as if absent). */
+  enabled?: boolean;
 };
 
 export type SpeakerProfile = {
@@ -80,6 +82,8 @@ export type SpeakerProfile = {
    * Omit for single-angle workflows — existing behaviour is preserved.
    */
   angleName?: string;
+  /** When false, this speaker is excluded from camera selection (treated as if absent). */
+  enabled?: boolean;
 };
 
 export type CameraProfiles = {
@@ -135,4 +139,16 @@ export type CameraShot = {
    * Absent on wide shots and all main-video shots.
    */
   hookTransition?: HookTransition;
+  /**
+   * Internal: speaker label this shot focuses on (e.g. "Natasha", "Saloni:angle2").
+   * Populated by emitShot and used by the cutaway insertion post-processor.
+   * May differ from the transcript speaker on cutaway shots.
+   */
+  speaker?: string;
+  /**
+   * Internal: true when this is a wide/full-frame shot.
+   * Wide shots on the same speaker count toward the cutaway interval timer but
+   * are never themselves replaced by a cutaway.
+   */
+  isWide?: boolean;
 };

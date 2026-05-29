@@ -180,8 +180,11 @@ ty    = (0.5 - vp.cy) × 100%
 | `HOOK_END_FADE_FRAMES` | 12 | `SegmentPlayer.tsx` |
 | `DECLICK_FRAMES` | 3 | `SegmentPlayer.tsx` |
 | `MIN_WIDE_S` | 1.5 s | `CameraPlayer.tsx` |
-| `MAX_CLOSEUP_S` | 20 s | `CameraPlayer.tsx` |
+| `MAX_CLOSEUP_S` | 10 s | `CameraPlayer.tsx` |
 | `PERIODIC_WIDE_S` | 45 s | `CameraPlayer.tsx` |
+| `CUTAWAY_INTERVAL_S` | 20 s | `CameraPlayer.tsx` |
+| `CUTAWAY_DURATION_S` | 3 s | `CameraPlayer.tsx` |
+| `CUTAWAY_WIDE_ANGLE` | `'angle3'` | `CameraPlayer.tsx` |
 
 ---
 

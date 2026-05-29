@@ -208,6 +208,174 @@ function getOutputDuration(seg: Segment, nextHookStart?: number): number {
   return getEffectiveDuration(seg);
 }
 
+// ── Cutaway constants ──────────────────────────────────────────────────────────
+
+/**
+ * After this many seconds of continuous same-speaker content, insert a brief
+ * cutaway to a non-speaking speaker's closeup or the full wide group shot.
+ */
+const CUTAWAY_INTERVAL_S = 20.0;
+
+/** How long each cutaway shot lasts in seconds. */
+const CUTAWAY_DURATION_S = 3.0;
+
+/**
+ * Angle name used for the "full group" wide shot in the cutaway pool.
+ * This angle should cover all speakers (e.g. the overhead or wide cam).
+ */
+const CUTAWAY_WIDE_ANGLE = 'angle3';
+
+// ── Cutaway helpers ───────────────────────────────────────────────────────────
+
+type CutawayTarget = {
+  viewport: CropViewport;
+  videoSrc?: string;
+  /** Human-readable label for debug logging (e.g. "Saloni:angle2", "wide:angle3"). */
+  label: string;
+};
+
+/**
+ * Build the ordered cutaway pool for a given speaking speaker.
+ * Pool = one closeup per other enabled speaker (first enabled angle found),
+ *        followed by a wide shot of CUTAWAY_WIDE_ANGLE.
+ *
+ * The pool is cycled globally (poolIdx never resets per-speaker) so successive
+ * cutaways within the same long monologue hit different people.
+ */
+function buildCutawayPool(speakingSpeaker: string, profiles: CameraProfiles): CutawayTarget[] {
+  const pool: CutawayTarget[] = [];
+  const seenSpeakers = new Set<string>();
+
+  for (const [key, profile] of Object.entries(profiles.speakers)) {
+    if (profile.enabled === false) continue;
+    const speakerName = key.split(':')[0];
+    if (speakerName === speakingSpeaker) continue;
+    if (seenSpeakers.has(speakerName)) continue;
+
+    const angleName = profile.angleName;
+    if (!angleName) continue;
+    const angleConfig = profiles.angles?.[angleName];
+    if (!angleConfig || angleConfig.enabled === false) continue;
+
+    seenSpeakers.add(speakerName);
+    pool.push({
+      viewport: profile.closeupViewport,
+      videoSrc: angleConfig.videoSrc,
+      label: `${speakerName}:${angleName}`,
+    });
+  }
+
+  // Wide group shot at the end of each pool cycle.
+  const wideAngle = profiles.angles?.[CUTAWAY_WIDE_ANGLE];
+  if (wideAngle) {
+    pool.push({
+      viewport: wideAngle.wideViewport ?? profiles.wideViewport,
+      videoSrc: wideAngle.videoSrc,
+      label: `wide:${CUTAWAY_WIDE_ANGLE}`,
+    });
+  }
+
+  return pool;
+}
+
+/**
+ * Post-processing pass: insert brief cutaway shots into the pacing-algorithm
+ * shot list so that long runs of the same speaker are broken up with glimpses
+ * of non-speaking participants or a wide group angle.
+ *
+ * Rules:
+ * - Hook shots (endFrame ≤ hookTotalFrames) are never interrupted.
+ * - Wide shots on the same speaker count toward the interval timer but are
+ *   not themselves replaced (no back-to-back wides).
+ * - Skipped entirely in short-form compositions.
+ * - A cutaway splits the host closeup shot: cutaway occupies the first
+ *   CUTAWAY_DURATION_S frames, the remainder goes back to the main speaker.
+ */
+function insertCutaways(
+  shots: CameraShot[],
+  profiles: CameraProfiles,
+  fps: number,
+  hookTotalFrames: number,
+): CameraShot[] {
+  const INTERVAL_F = Math.round(CUTAWAY_INTERVAL_S * fps);
+  const CUTAWAY_F  = Math.round(CUTAWAY_DURATION_S * fps);
+  if (INTERVAL_F === 0 || CUTAWAY_F === 0) return shots;
+
+  const result: CameraShot[] = [];
+  let sameSpeakerF  = 0;
+  let activeSpeaker: string | undefined;
+  let pool: CutawayTarget[] = [];
+  let poolIdx = 0;   // global counter; never resets so variety cycles across speakers
+
+  for (const shot of shots) {
+    const shotDur = shot.endFrame - shot.startFrame;
+
+    // Hook shots: always pass through unchanged — hooks have their own pacing.
+    if (shot.endFrame <= hookTotalFrames) {
+      result.push(shot);
+      continue;
+    }
+
+    const speaker = shot.speaker;
+
+    // Speaker changed → reset same-speaker timer and rebuild the cutaway pool.
+    if (speaker !== activeSpeaker) {
+      activeSpeaker = speaker;
+      sameSpeakerF  = 0;
+      pool = speaker ? buildCutawayPool(speaker, profiles) : [];
+    }
+
+    // No speaker or no other speakers to cut to → pass through unchanged.
+    if (!speaker || pool.length === 0) {
+      sameSpeakerF += shotDur;
+      result.push(shot);
+      continue;
+    }
+
+    // Wide shots on the same speaker count toward the timer but are never split.
+    if (shot.isWide) {
+      sameSpeakerF += shotDur;
+      result.push(shot);
+      continue;
+    }
+
+    // Cutaway is due — insert one now.
+    if (sameSpeakerF >= INTERVAL_F) {
+      const target = pool[poolIdx % pool.length];
+      poolIdx++;
+
+      const cutDur = Math.min(CUTAWAY_F, shotDur);
+
+      console.log(`[CameraDebug] CUTAWAY ${shot.startFrame}-${shot.startFrame + cutDur} → ${target.label}`);
+
+      // Cutaway shot (non-speaking speaker or wide group).
+      result.push({
+        startFrame: shot.startFrame,
+        endFrame:   shot.startFrame + cutDur,
+        viewport:   target.viewport,
+        videoSrc:   target.videoSrc,
+        sourceTime: shot.sourceTime,
+        speaker:    target.label,
+        isWide:     target.label.startsWith('wide:'),
+      });
+
+      // Remainder of the original main-speaker shot (may be zero if cutDur === shotDur).
+      if (cutDur < shotDur) {
+        result.push({ ...shot, startFrame: shot.startFrame + cutDur });
+      }
+
+      // Timer resets to the remainder duration so the next cutaway fires
+      // only after another full INTERVAL of same-speaker content.
+      sameSpeakerF = shotDur - cutDur;
+    } else {
+      sameSpeakerF += shotDur;
+      result.push(shot);
+    }
+  }
+
+  return result;
+}
+
 // ── Pacing algorithm ──────────────────────────────────────────────────────────
 
 /**
@@ -343,7 +511,15 @@ export function buildCameraShots(
       );
     }
 
-    const shot = { startFrame: shotStart, endFrame, viewport, videoSrc, sourceTime };
+    const shot = {
+      startFrame: shotStart,
+      endFrame,
+      viewport,
+      videoSrc,
+      sourceTime,
+      speaker: shotSpeaker || undefined,
+      isWide:  shotType === 'wide',
+    };
     console.log(`[CameraDebug] EMIT shot ${shotStart}-${endFrame} type=${shotType} speaker=${shotSpeaker} angle=${angleName}`);
     return shot;
   }
@@ -533,15 +709,21 @@ export function buildCameraShots(
     }
   }
 
+  // ── Insert cutaway shots for visual variety (main content only) ──────────────
+  // Short-form has its own pacing conventions; skip cutaways there.
+  const finalShots = isShortForm
+    ? shots
+    : insertCutaways(shots, profiles, fps, hookTotalFrames);
+
   // Log final shot list for debugging
   console.log('[CameraDebug] Final shots (first 10):');
-  shots.slice(0, 10).forEach((shot, i) => {
+  finalShots.slice(0, 10).forEach((shot, i) => {
     const startTime = (shot.startFrame / fps).toFixed(2);
     const endTime = (shot.endFrame / fps).toFixed(2);
     console.log(`  Shot ${i}: ${startTime}s-${endTime}s frame=${shot.startFrame}-${shot.endFrame}`);
   });
 
-  return shots;
+  return finalShots;
 }
 
 // ── Explicit camera overrides ─────────────────────────────────────────────────

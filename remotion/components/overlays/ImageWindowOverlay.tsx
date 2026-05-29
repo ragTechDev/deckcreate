@@ -1,8 +1,18 @@
 import React, { useState } from 'react';
-import { useCurrentFrame, useVideoConfig, spring, interpolate, Img } from 'remotion';
+import { useCurrentFrame, useVideoConfig, spring, interpolate, Img, staticFile } from 'remotion';
 import type { Brand } from '../../types/brand';
 
 const MONO = "'SF Mono', 'Monaco', 'Cascadia Code', 'Consolas', monospace";
+
+/**
+ * Resolve a src string to a URL usable by Remotion's <Img>.
+ *   - Remote URLs (http/https/protocol-relative) → passed through unchanged
+ *   - Local paths relative to /public (e.g. "assets/qrcode.jpeg") → staticFile()
+ */
+function resolveSrc(src: string): string {
+  if (/^https?:\/\/|^\/\//.test(src)) return src;
+  return staticFile(src.replace(/^\/+/, ''));
+}
 
 const OPEN_FRAMES = 24;
 const CLOSE_FRAMES = 20;
@@ -165,7 +175,7 @@ export const ImageWindowOverlay: React.FC<ImageWindowOverlayProps> = ({
           }}
         >
           <Img
-            src={src}
+            src={resolveSrc(src)}
             onLoad={(e) => {
               const img = e.currentTarget;
               setNaturalSize({ w: img.naturalWidth, h: img.naturalHeight });

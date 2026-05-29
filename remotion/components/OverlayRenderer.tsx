@@ -5,7 +5,7 @@ import type { Brand } from '../types/brand';
 import type { Section } from './SegmentPlayer';
 
 // Core / general editing overlays
-import { ConceptExplainer, Callout, NameTitle, ChapterMarker, TermTypewriter } from './overlays/lower-thirds';
+import { ConceptExplainer, Callout, NameTitle, ChapterMarker, TermTypewriter, QuoteCard } from './overlays/lower-thirds';
 import { ConceptExplainerShort } from './overlays/lower-thirds/ConceptExplainer.short';
 import { NameTitleShort } from './overlays/lower-thirds/NameTitle.short';
 import { ImageWindowOverlay } from './overlays/ImageWindowOverlay';
@@ -38,6 +38,7 @@ const LONGFORM_COMPONENT_MAP: Record<string, React.FC<any>> = {
   NameTitle,
   ChapterMarker,
   TermTypewriter,
+  QuoteCard,
   ImageWindow: ImageWindowOverlay,
   GifWindow: GifWindowOverlay,
   GlobalSouthMap,
@@ -53,7 +54,7 @@ const SHORTFORM_COMPONENT_MAP: Record<string, React.FC<any>> = {
 };
 
 // Overlay types that should NOT appear during hook playback (but will appear in main video)
-const HOOK_EXCLUDED_OVERLAYS = new Set(['Callout', 'ConceptExplainer', 'NameTitle', 'ImageWindow', 'GifWindow', 'GlobalSouthMap', 'DataFlowAnimation']);
+const HOOK_EXCLUDED_OVERLAYS = new Set(['Callout', 'ConceptExplainer', 'QuoteCard', 'NameTitle', 'ImageWindow', 'GifWindow', 'DataFlowAnimation']);
 
 /**
  * Convert a raw audio timestamp (seconds) to its composition frame using a
