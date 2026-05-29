@@ -3,7 +3,8 @@
  * Re-encode synced video files with dense keyframes so Remotion can seek
  * efficiently frame-by-frame without decoding back to sparse keyframes.
  *
- * -g 60          = keyframe every 60 frames (1 s at 60 fps)
+ * -crf 28        = libx264 constant quality (~5–8 Mbps for 1080p talking-head)
+ * -g 25          = keyframe every 25 frames (1 s at 25 fps)
  * +faststart     = move index to front of file for fast initial seeks
  *
  * On macOS, VideoToolbox hardware encode is used (fast, ~1-2 min/hour of video).
@@ -34,10 +35,7 @@ function progressBar(pct, width = 20) {
 
 function encodeWithKeyframes(inputPath, outputPath) {
   return new Promise((resolve, reject) => {
-    const isAppleSilicon = process.platform === 'darwin';
-    const videoCodecArgs = isAppleSilicon
-      ? ['-c:v', 'h264_videotoolbox', '-g', '60']
-      : ['-c:v', 'libx264', '-preset', 'fast', '-g', '60'];
+    const videoCodecArgs = ['-c:v', 'libx264', '-crf', '28', '-preset', 'fast', '-g', '25'];
 
     const args = [
       '-i', inputPath,
@@ -89,7 +87,7 @@ function encodeWithKeyframes(inputPath, outputPath) {
 }
 
 /**
- * Re-encode each video in videoPaths with -g 60 -movflags +faststart in-place.
+ * Re-encode each video in videoPaths with -g 25 -movflags +faststart in-place.
  * Uses a temp file to avoid partial writes on failure.
  *
  * @param {string[]} videoPaths  Absolute paths to files to optimise
@@ -113,7 +111,6 @@ export async function optimizeForRemotion(videoPaths) {
 
 // ── CLI entrypoint ────────────────────────────────────────────────────────────
 
-import { fileURLToPath } from 'url';
 const _argv1 = (process.argv[1] || '').replace(/\\/g, '/');
 if (_argv1.endsWith('/optimize-for-remotion.js') || _argv1.endsWith('/optimize-for-remotion')) {
   const { videoPaths } = parseArgs();
