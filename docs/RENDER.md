@@ -53,6 +53,42 @@ When the render finishes, Ctrl-C the PowerShell window to restore normal sleep b
 
 ---
 
+## Resumable render with WARP detection
+
+If you have Cloudflare WARP installed, it can auto-connect mid-render and kill it. `render:episode:resume` handles this automatically: it renders in chunks, detects WARP turning on, kills the current chunk immediately (instead of waiting for the 5-minute timeout), and waits for you to disable WARP before retrying. Completed chunks are saved to disk, so the render also survives machine restarts.
+
+```sh
+caffeinate -dims npm run render:episode:resume
+```
+
+Progress is tracked in `public/renders/.chunks/progress.json`. If the render is interrupted for any reason, just re-run the same command — it skips already-completed chunks automatically.
+
+### Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--chunk-size <n>` | `20000` | Frames per chunk (~5.5 min of output @ 60 fps) |
+| `--total-frames <n>` | auto-detected | Skip the compositions query and use this value directly |
+| `--warp` | — | Enable WARP monitoring without prompting |
+| `--no-warp` | — | Disable WARP monitoring without prompting |
+| `--reset` | — | Discard saved progress and start fresh |
+
+All other flags (`--transcript`, `--out`, `--timeout`, etc.) work the same as `render:episode`.
+
+On first run the script checks whether `warp-cli` is installed. If found, it prompts once: `Enable WARP monitoring? [y/N]`. The answer is saved in the progress file so resuming never re-prompts. On machines without `warp-cli` the prompt is skipped silently and chunk rendering still runs for resilience against other network issues.
+
+### When WARP turns on mid-render
+
+The script polls `warp-cli` every 5 seconds. When WARP connects:
+
+1. The current chunk render is killed immediately
+2. The terminal prints: `Disable WARP and rendering will continue automatically.`
+3. Once you turn WARP off via the menu bar, the script detects it and resumes within ~7 seconds — no manual restart needed
+
+> **Note:** Use the menu bar toggle to *disconnect* WARP (not just pause it). The GUI pause leaves the status as `Disconnected / Reason: Paused`, which the script correctly reads as inactive.
+
+---
+
 ## Split render across multiple terminals
 
 Use the `--frames` flag to divide the work. Each terminal renders a non-overlapping range and writes to a separate file; you then stitch them together with ffmpeg.
