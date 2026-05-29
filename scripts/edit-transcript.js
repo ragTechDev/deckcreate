@@ -300,7 +300,14 @@ function buildTextWithCuts(seg) {
             continue;
           }
           if (norm === prevNorm && t.t_dtw === prevTdtw) continue; // dedupe BPE dups
-          words.push(stripPunctuation(t.text).trim());
+          // BPE continuation (no leading space) — merge into the previous word so the
+          // span round-trips through applyTextPartsToTokens. wordGroups also merges
+          // these, so "Bo"+"er" → "Boer" in both places and the re-match succeeds.
+          if (!t.text.startsWith(' ') && words.length > 0) {
+            words[words.length - 1] += stripPunctuation(t.text).trim();
+          } else {
+            words.push(stripPunctuation(t.text).trim());
+          }
           prevNorm = norm; prevTdtw = t.t_dtw;
         }
         return words.join(' ');
@@ -978,7 +985,17 @@ function applyTextPartsToTokens(rawText, tokens) {
 
   // Apply word-level text corrections: align visible (non-cut) words from doc
   // with non-cut, non-special tokens and update token.text so corrections persist.
-  const visibleWords = rawText.replace(/\{[^}]+\}/g, ' ').replace(/\s+/g, ' ').trim().split(/\s+/).filter(Boolean);
+  // Strip cut spans, collapse whitespace, then keep only tokens that contribute a
+  // real word (normalize !== '').  Pure-punctuation tokens like the leading "," in
+  // silence-heavy segments have normalize('')  — they are skipped by twg too, so
+  // including them here would cause a count mismatch that triggers the LCS synthesis
+  // path and spuriously creates synthetic comma tokens on every merge.
+  const visibleWords = rawText
+    .replace(/\{[^}]+\}/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(w => w && normalize(w) !== '');
 
   // Build word groups from non-cut, non-special tokens (BPE-aware, same approach as
   // wordGroups built for cut matching above). Each group represents one visible word.
