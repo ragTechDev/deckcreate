@@ -3,6 +3,7 @@
 import path from 'path';
 import fs from 'fs-extra';
 import { spawn } from 'child_process';
+import { checkMediaUrls } from './lib/checkMediaUrls.js';
 
 const FPS = 60;
 // Must match remotion/components/PodcastIntro.tsx
@@ -21,6 +22,7 @@ function parseArgs() {
     compositionId: 'ragTechVodcast',
     hookMusicSrc: 'sounds/jazz-cafe-music.mp3',
     overwrite: false,
+    skipUrlCheck: false,
     help: false,
   };
 
@@ -34,6 +36,7 @@ function parseArgs() {
     else if (a === '--hook-music'      && args[i + 1]) out.hookMusicSrc      = args[++i];
     else if (a === '--no-hook-music')                  out.hookMusicSrc      = '';
     else if (a === '--overwrite')                      out.overwrite         = true;
+    else if (a === '--skip-url-check')                 out.skipUrlCheck      = true;
     else if (a === '--help' || a === '-h')             out.help              = true;
   }
 
@@ -81,27 +84,41 @@ function run(cmd, args, cwd) {
   });
 }
 
+/** Matches isSpokenToken() in remotion/lib/tokens.ts — must stay in sync. */
 function isSpokenToken(token) {
   const trimmed = (token?.text || '').trim();
   if (trimmed === '' || /_[A-Z]+_/.test(trimmed)) return false;
   if (/^[.,?_\s]*$/.test(trimmed.replace(/ /g, ''))) return false;
-  return trimmed.replace(/^[^\w']+|[^\w']+$/g, '').toLowerCase() !== '';
+  return true;
 }
 
-/** Mirrors hookClipEnd() in Composition.tsx and getHookSubClips() in SegmentPlayer.tsx. */
+/**
+ * Mirrors hookClipEnd() in remotion/lib/hookTiming.ts — must stay in sync.
+ *
+ * Key difference from the old implementation:
+ *  - Uses t_end (word audio-tail end) instead of t_dtw (word start) for the
+ *    last-spoken-token extension. This accounts for the full duration of the
+ *    final word in the hook clip, giving ~0.5 s of additional coverage per hook.
+ *  - Extension applies to bounded hooks too (not only unbounded).
+ *  - Token lookup is scoped to [sourceStart, baseEnd], not the whole segment.
+ */
 function computeHookClipEnd(seg, nextHookStart) {
+  const sourceStart = seg.hookFrom ?? seg.start;
   const baseEnd = seg.hookTo ?? seg.end;
   const isBounded = seg.hookTo !== undefined && seg.hookTo !== null;
 
   let sourceEnd = baseEnd;
-  if (!isBounded) {
-    const latestSpoken = (seg.tokens || [])
-      .filter(isSpokenToken)
-      .reduce((max, t) => Math.max(max, t.t_dtw), -Infinity);
-    if (Number.isFinite(latestSpoken) && latestSpoken > baseEnd) {
-      const drift = latestSpoken - baseEnd;
-      sourceEnd = baseEnd + Math.min(1.5, drift + 0.4);
-    }
+
+  // Extend to cover the last spoken token's audio tail (t_end, not t_dtw).
+  const tokensInWindow = (seg.tokens || []).filter(
+    t => isSpokenToken(t) && t.t_dtw >= sourceStart && t.t_dtw <= baseEnd,
+  );
+  const lastSpokenToken = tokensInWindow.sort((a, b) => (b.t_end ?? 0) - (a.t_end ?? 0))[0];
+  if (lastSpokenToken?.t_end) {
+    const tEnd = nextHookStart !== undefined
+      ? Math.min(lastSpokenToken.t_end, nextHookStart)
+      : lastSpokenToken.t_end;
+    sourceEnd = Math.max(sourceEnd, tEnd);
   }
 
   const hasSpokenAfterEnd = (seg.tokens || []).some(
@@ -117,17 +134,37 @@ function computeHookClipEnd(seg, nextHookStart) {
   return nextHookStart !== undefined ? Math.min(withPad, nextHookStart) : withPad;
 }
 
+/**
+ * Builds de-overlapped hook sections and returns the total frame count.
+ * Mirrors buildHookSections() in remotion/lib/hookTiming.ts: if a section's
+ * trimBefore would fall before the previous section's trimAfter (caused by
+ * t_end extension or bridging), it is advanced to avoid a backward source seek.
+ */
 function computeHookDurationFrames(transcript) {
   const hookSegments = (transcript.segments || []).filter(s => s.hook && !s.cut);
   let totalFrames = 0;
+  let prevTrimAfter = -1;
+
   for (let i = 0; i < hookSegments.length; i++) {
     const seg = hookSegments[i];
     const next = hookSegments[i + 1];
     const nextHookStart = next ? (next.hookFrom ?? next.start) : undefined;
     const sourceStart = seg.hookFrom ?? seg.start;
     const sourceEnd = computeHookClipEnd(seg, nextHookStart);
-    totalFrames += Math.max(1, Math.ceil(sourceEnd * FPS) - Math.floor(sourceStart * FPS));
+
+    const rawTrimBefore = Math.floor(sourceStart * FPS);
+    const rawTrimAfter  = Math.max(Math.ceil(sourceEnd * FPS), rawTrimBefore + 1);
+
+    // De-overlap: advance trimBefore if this section would overlap the previous one.
+    const trimBefore = prevTrimAfter >= 0 ? Math.max(rawTrimBefore, prevTrimAfter) : rawTrimBefore;
+    if (trimBefore < rawTrimAfter) {
+      totalFrames += rawTrimAfter - trimBefore;
+      prevTrimAfter = rawTrimAfter;
+    }
+    // Sections where trimBefore >= trimAfter after de-overlap are zero-duration
+    // edge cases (two hooks whose source windows touch exactly); skip them.
   }
+
   return { hookSegments, totalFrames };
 }
 
@@ -154,6 +191,23 @@ async function main() {
 
   if (!await fs.pathExists(transcriptPath)) {
     throw new Error(`Transcript not found: ${transcriptPath}`);
+  }
+
+  if (!cli.skipUrlCheck) {
+    process.stdout.write('[render-hook-intro] Checking external media URLs...');
+    const urlIssues = await checkMediaUrls(transcriptPath);
+    if (urlIssues.length > 0) {
+      console.log(' FAILED\n');
+      console.error(`[render-hook-intro] ${urlIssues.length} URL(s) will be blocked during render:\n`);
+      for (const { url, reason } of urlIssues) {
+        console.error(`  [${reason}]`);
+        console.error(`  ${url}\n`);
+      }
+      console.error('[render-hook-intro] Fix: download blocked images to public/assets/ and update transcript references.');
+      console.error('[render-hook-intro] To skip this check: --skip-url-check\n');
+      process.exit(1);
+    }
+    console.log(' OK');
   }
 
   const transcript = await fs.readJson(transcriptPath);
