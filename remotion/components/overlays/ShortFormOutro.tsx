@@ -1,5 +1,5 @@
 import React from 'react';
-import { AbsoluteFill, useCurrentFrame, interpolate, staticFile } from 'remotion';
+import { AbsoluteFill, useCurrentFrame, interpolate, staticFile, Img } from 'remotion';
 import type { Brand } from '../../types/brand';
 
 const LOGO = staticFile('assets/logo/transparent-bg-logo.png');
@@ -68,7 +68,7 @@ interface Props {
 
 export const ShortFormOutro: React.FC<Props> = ({ brand }) => {
   const frame = useCurrentFrame();
-  const { colors, typography } = brand;
+  const { typography } = brand;
 
   const opacity = interpolate(frame, [0, 20], [0, 0.8], {
     extrapolateLeft: 'clamp',
@@ -107,7 +107,7 @@ export const ShortFormOutro: React.FC<Props> = ({ brand }) => {
           OUT NOW
         </span>
 
-        <img src={LOGO} style={{ height: 480, objectFit: 'contain', marginBottom: 12 }} />
+        <Img src={LOGO} style={{ height: 480, objectFit: 'contain', marginBottom: 12 }} />
 
         <div style={{ display: 'flex', flexDirection: 'row', gap: 40, alignItems: 'flex-start' }}>
           <Platform

@@ -1,5 +1,5 @@
 import React from 'react';
-import { useCurrentFrame, useVideoConfig, spring, interpolate, staticFile } from 'remotion';
+import { useCurrentFrame, useVideoConfig, spring, interpolate, staticFile, Img } from 'remotion';
 import type { Brand } from '../../../types/brand';
 
 const MONO = "'SF Mono', 'Monaco', 'Cascadia Code', 'Consolas', monospace";
@@ -213,7 +213,7 @@ export const ChapterMarker: React.FC<ChapterMarkerProps> = ({
         </div>
 
         {/* Logo — to the right of the terminal, overlapping */}
-        <img
+        <Img
           src={LOGO}
           alt=""
           style={{

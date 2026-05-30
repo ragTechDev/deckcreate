@@ -1,5 +1,5 @@
 import React from 'react';
-import { useCurrentFrame, useVideoConfig, spring, interpolate, AbsoluteFill, staticFile } from 'remotion';
+import { useCurrentFrame, useVideoConfig, spring, interpolate, AbsoluteFill, staticFile, Img } from 'remotion';
 import type { Brand } from '../../../types/brand';
 
 const MONO = "'SF Mono', 'Monaco', 'Cascadia Code', 'Consolas', monospace";
@@ -73,7 +73,7 @@ export const NameTitle: React.FC<NameTitleProps> = ({
       <>
         <span style={{ color: colors.primary }}>name</span>
         <span style={{ color: '#e6edf3' }}>: </span>
-        <span style={{ color: colors.secondary }}>"{name}"</span>
+        <span style={{ color: colors.secondary }}>{'"'}{name}{'"'}</span>
         <span style={{ color: '#e6edf3' }}>,</span>
       </>
     );
@@ -81,7 +81,7 @@ export const NameTitle: React.FC<NameTitleProps> = ({
       <>
         <span style={{ color: colors.primary }}>role</span>
         <span style={{ color: '#e6edf3' }}>: </span>
-        <span style={{ color: colors.secondary }}>"{title}"</span>
+        <span style={{ color: colors.secondary }}>{'"'}{title}{'"'}</span>
         <span style={{ color: '#e6edf3' }}>,</span>
       </>
     );
@@ -119,7 +119,7 @@ export const NameTitle: React.FC<NameTitleProps> = ({
         }}
       >
         {/* Techybara — overlaps the terminal's left edge */}
-        <img
+        <Img
           src={TECHYBARA}
           style={{
             height: 164,

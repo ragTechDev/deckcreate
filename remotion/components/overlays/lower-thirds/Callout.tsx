@@ -1,5 +1,5 @@
 import React from 'react';
-import { useCurrentFrame, useVideoConfig, spring, interpolate, staticFile } from 'remotion';
+import { useCurrentFrame, useVideoConfig, spring, interpolate, staticFile, Img } from 'remotion';
 import type { Brand } from '../../../types/brand';
 
 const MONO = "'SF Mono', 'Monaco', 'Cascadia Code', 'Consolas', monospace";
@@ -65,7 +65,7 @@ export const Callout: React.FC<CalloutProps> = ({
         }}
       >
         {/* Techybara holding from top — overlaps the terminal's top edge */}
-        <img
+        <Img
           src={TECHYBARA}
           alt=""
           style={{

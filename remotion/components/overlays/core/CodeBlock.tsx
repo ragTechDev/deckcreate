@@ -1,5 +1,5 @@
 import React from 'react';
-import { staticFile } from 'remotion';
+import { staticFile, Img } from 'remotion';
 import { BaseOverlay, type OverlayProps } from './BaseOverlay';
 import type { Brand } from '../../../types/brand';
 
@@ -30,7 +30,7 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
       <div style={{ display: 'flex', alignItems: 'flex-end' }}>
 
         {/* Techybara — overlaps the terminal's left edge */}
-        <img
+        <Img
           src={TECHYBARA}
           style={{
             height: 164,

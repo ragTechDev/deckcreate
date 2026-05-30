@@ -1,5 +1,5 @@
 import React from 'react';
-import { staticFile, useCurrentFrame, useVideoConfig, spring, interpolate } from 'remotion';
+import { staticFile, useCurrentFrame, useVideoConfig, spring, interpolate, Img } from 'remotion';
 import type { Brand } from '../../../../types/brand';
 
 const MONO = "'SF Mono', 'Monaco', 'Cascadia Code', 'Consolas', monospace";
@@ -83,7 +83,7 @@ export const RagtechOverlay: React.FC<RagtechOverlayProps> = ({ brand, durationI
       {/* Left side: Logo and Terminal */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 40 }}>
         {/* Logo */}
-        <img
+        <Img
           src={staticFile('assets/logo/transparent-bg-logo.png')}
           style={{
             height: 180,
@@ -161,7 +161,7 @@ export const RagtechOverlay: React.FC<RagtechOverlayProps> = ({ brand, durationI
         }}
       >
         {EPISODE_IMAGES.map((src, idx) => (
-          <img
+          <Img
             key={idx}
             src={staticFile(src)}
             style={{
