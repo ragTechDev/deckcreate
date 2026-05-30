@@ -181,6 +181,30 @@ async function renderChunk(config, chunk) {
   }
 }
 
+// ── Progress persistence ──────────────────────────────────────────────────────
+
+// Paths in progress.json are stored relative to PROJECT_ROOT so the file is
+// portable across machines. In memory, chunks always carry absolute paths.
+
+function resolveChunkPaths(progress) {
+  progress.chunks = progress.chunks.map(c => ({
+    ...c,
+    file: path.isAbsolute(c.file) ? c.file : path.resolve(PROJECT_ROOT, c.file),
+  }));
+  return progress;
+}
+
+async function saveProgress(progress) {
+  const serialisable = {
+    ...progress,
+    chunks: progress.chunks.map(c => ({
+      ...c,
+      file: path.relative(PROJECT_ROOT, c.file),
+    })),
+  };
+  await fs.writeJson(PROGRESS_FILE, serialisable, { spaces: 2 });
+}
+
 // ── Concatenation ─────────────────────────────────────────────────────────────
 
 async function concatenateChunks(chunks, outputFile) {
@@ -302,7 +326,7 @@ async function main() {
   // Load or initialise progress
   let progress;
   if (!cli.reset && await fs.pathExists(PROGRESS_FILE)) {
-    progress = await fs.readJson(PROGRESS_FILE);
+    progress = resolveChunkPaths(await fs.readJson(PROGRESS_FILE));
     const done = progress.chunks.filter(c => c.done).length;
     console.log(`[resume-render] Resuming: ${done}/${progress.chunks.length} chunks done`);
   } else {
@@ -319,7 +343,7 @@ async function main() {
         done: false,
       })),
     };
-    await fs.writeJson(PROGRESS_FILE, progress, { spaces: 2 });
+    await saveProgress(progress);
     console.log(`[resume-render] ${totalFrames} frames → ${totalChunks} chunks × ${cli.chunkSize}`);
   }
 
@@ -341,7 +365,7 @@ async function main() {
   }
   // warp-cli not found → warpMonitoringEnabled stays false, no message needed
   progress.warpMonitoring = warpMonitoringEnabled;
-  await fs.writeJson(PROGRESS_FILE, progress, { spaces: 2 });
+  await saveProgress(progress);
 
   const config = { entry: cli.entry, compositionId: cli.compositionId, props, timeout: cli.timeout, concurrency: cli.concurrency };
 
@@ -369,7 +393,7 @@ async function main() {
     console.log(`\n[resume-render] Chunk ${chunk.index + 1}/${progress.chunks.length}: frames ${chunk.startFrame}–${chunk.endFrame}`);
     await renderChunk(config, chunk);
     chunk.done = true;
-    await fs.writeJson(PROGRESS_FILE, progress, { spaces: 2 });
+    await saveProgress(progress);
     console.log(`[resume-render] Chunk ${chunk.index + 1}/${progress.chunks.length} saved`);
   }
 
