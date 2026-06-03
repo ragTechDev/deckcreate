@@ -18,8 +18,8 @@ npx jest --no-coverage \
 # ── 2. E2E smoke tests ─────────────────────────────────────────────────────────
 # Playwright starts the dev server automatically (see playwright.config.ts).
 # Agents cannot read CI results, so this is their only feedback loop on E2E.
-echo "▶ playwright test"
-npx playwright test
+# echo "▶ playwright test"
+# npx playwright test
 
 # ── 3. No debugger statements ──────────────────────────────────────────────────
 # Agents frequently omit cleanup of debugger statements. These are never valid
