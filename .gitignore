@@ -53,6 +53,15 @@ public/proxy/             # proxy-map.json (contains absolute paths, machine-spe
 # ── Pipeline intermediates (large/generated media) ────────────────────────────
 public/sync/              # synced video/audio working files
 public/transcribe/input/  # audio extracted for Whisper
+public/transcribe/input/*.wav
+public/transcribe/input/*.mp3
+public/transcribe/input/*.flac
+public/transcribe/input/*.m4a
+public/transcribe/input/*.ogg
+public/transcribe/input/*.aac
+public/transcribe/input/*.wma
+public/transcribe/input/*.aiff
+public/transcribe/input/*.alac
 public/transcribe/output/ # raw Whisper JSON + VTT
 public/thumbnail/         # candidate frames, cutouts, manifest
 public/renders/           # final rendered .mp4 files
@@ -70,8 +79,8 @@ public/camera/ → camera-profiles.json, frame snapshots, detections
 # the transcript doc without needing filesystem access.
 #
 # Uncomment to exclude (e.g. for a private or unreleased episode):
-public/edit/*
-public/camera/*
+# public/edit/*
+# public/camera/*
 
 # Whisper.cpp binary and models (downloaded on first run)
 /whisper.cpp/
