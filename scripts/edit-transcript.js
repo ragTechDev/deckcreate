@@ -421,7 +421,14 @@ function resolvePhraseToTimeRange(phrase, tokens, segEnd) {
       const shouldMergeShortNumericParts = bothNumeric
         && prevTrimmed.length <= 2
         && trimmed.length <= 2;
-      const shouldAttach = !t.text.startsWith(' ')
+      // A no-space token that has a distinct forward t_dtw (>10 ms ahead of the
+      // current group) is a separately-aligned word, not a BPE sub-token
+      // continuation. This handles tokenizers that omit leading spaces on real
+      // words (producing e.g. 'And','she','says' rather than ' And',' she').
+      const isNewAlignedWord = !t.text.startsWith(' ')
+        && t.t_dtw > 0
+        && t.t_dtw > wordGroups[wordGroups.length - 1].t_dtw + 0.01;
+      const shouldAttach = (!t.text.startsWith(' ') && !isNewAlignedWord)
         // Some Whisper variants emit contraction suffixes with a leading space
         // (e.g. " 's"). Keep them attached to the previous word.
         || isContractionSuffixTokenText(trimmed)
@@ -798,7 +805,9 @@ function parseCameraLine(line, tokens, segStart) {
   }
 
   const shot = target.toLowerCase() === 'wide' ? 'wide' : 'closeup';
-  return { shot, ...(shot === 'closeup' ? { speaker: target } : {}), at };
+  const result = { shot, ...(shot === 'closeup' ? { speaker: target } : {}), at };
+  if (kv.angle !== undefined) result.angle = kv.angle;
+  return result;
 }
 
 /**
@@ -807,8 +816,9 @@ function parseCameraLine(line, tokens, segStart) {
  */
 function buildCameraLine(cue, tokens, segStart) {
   const target = cue.shot === 'wide' ? 'wide' : cue.speaker;
+  const angleParam = cue.angle ? `  angle="${cue.angle}"` : '';
   if (!tokens.length || Math.abs(cue.at - segStart) < 0.05) {
-    return `> CAM ${target}`;
+    return `> CAM ${target}${angleParam}`;
   }
   const wordGroups = buildWordGroups(tokens);
   let atValue;
@@ -829,7 +839,7 @@ function buildCameraLine(cue, tokens, segStart) {
   } else {
     atValue = String(cue.at);
   }
-  return `> CAM ${target}  at=${atValue}`;
+  return `> CAM ${target}  at=${atValue}${angleParam}`;
 }
 
 function parseGraphicLine(line, tokens, segStart = 0) {
@@ -1581,7 +1591,7 @@ function buildSentencesSrt(segments, meta = {}) {
 // Must match remotion/components/PodcastIntro.tsx and PodcastOutro.tsx
 const INTRO_DURATION_SECS = 7;  // 420 frames @ 60fps
 // OUTRO_DURATION_SECS mirrors INTRO_DURATION_SECS but is not yet consumed here.
-const HOOK_TAIL_PAD_UNBOUNDED = 0.16;
+const HOOK_TAIL_PAD_UNBOUNDED = 0.50;
 const HOOK_TAIL_PAD_BOUNDED = 0.02;
 const HOOK_BRIDGE_MAX_GAP = 1.0;
 

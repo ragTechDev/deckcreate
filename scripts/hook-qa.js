@@ -5,7 +5,7 @@ import fs from 'fs-extra';
 import { spawn } from 'child_process';
 
 const FPS = 60;
-const HOOK_TAIL_PAD_UNBOUNDED_SECONDS = 0.16;
+const HOOK_TAIL_PAD_UNBOUNDED_SECONDS = 0.50;
 const HOOK_TAIL_PAD_BOUNDED_SECONDS = 0.02;
 const HOOK_BRIDGE_MAX_GAP_SECONDS = 1.0;
 const DEFAULT_DRIFT_THRESHOLD_MS = 180;
@@ -488,7 +488,7 @@ const ARCHITECTURE_HINTS = {
     description: 'Tokens missing near the end of a hook clip — the clip ends too early.',
     investigate: [
       'remotion/components/SegmentPlayer.tsx → getHookSubClips(): check sourceEnd calculation',
-      'HOOK_TAIL_PAD_BOUNDED_SECONDS (0.02) / HOOK_TAIL_PAD_UNBOUNDED_SECONDS (0.16) — may need increase',
+      'HOOK_TAIL_PAD_BOUNDED_SECONDS (0.02) / HOOK_TAIL_PAD_UNBOUNDED_SECONDS (0.50) — may need increase',
       'Check if segment.hookTo is set too early in transcript.doc.txt',
       'For unbounded hooks, verify last spoken token t_end is used (not just t_dtw)',
     ],

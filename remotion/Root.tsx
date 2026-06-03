@@ -26,8 +26,8 @@ export const RemotionRoot: React.FC = () => {
         component={MyComposition}
         durationInFrames={300}
         fps={60}
-        width={1920}
-        height={1080}
+        width={3840}
+        height={2160}
         defaultProps={{
             src: 'sync/output/synced-output-1.mp4',
             transcriptSrc: 'edit/transcript.json',
@@ -57,7 +57,8 @@ export const RemotionRoot: React.FC = () => {
               src: 'sync/output/synced-output-1.mp4',
               transcriptSrc: `shorts/${shortId}/transcript.json`,
               cameraProfilesSrc: 'shorts/camera-profiles.json',
-              brandId: 'ragtech',
+              brandSrc: 'brand.json',
+              hookMusicSrc: 'sounds/hook-music.mp3',
             }}
             calculateMetadata={calculateShortMetadata}
           />

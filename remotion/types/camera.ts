@@ -34,6 +34,8 @@ export type ColorCorrection = {
 };
 
 export type AngleConfig = {
+  /** Set to false to exclude this angle from rotation for all speakers. Defaults to true. */
+  enabled?: boolean;
   /** Path to the synced video file relative to /public (e.g. "sync/output/synced-output-2.mp4") */
   videoSrc: string;
   sourceWidth: number;
@@ -60,12 +62,12 @@ export type AngleConfig = {
    * increasing videoOffset by small steps (e.g. 0.1 s) until cuts line up.
    */
   videoOffset?: number;
-  /** When false, this angle is excluded from camera selection (treated as if absent). */
-  enabled?: boolean;
 };
 
 export type SpeakerProfile = {
   label: string;
+  /** Set to false to exclude this speaker+angle combination from rotation. Defaults to true. */
+  enabled?: boolean;
   /** Landscape close-up crop region */
   closeupViewport: CropViewport;
   /**
@@ -82,8 +84,6 @@ export type SpeakerProfile = {
    * Omit for single-angle workflows — existing behaviour is preserved.
    */
   angleName?: string;
-  /** When false, this speaker is excluded from camera selection (treated as if absent). */
-  enabled?: boolean;
 };
 
 export type CameraProfiles = {

@@ -972,6 +972,41 @@ async function main() {
     const profilePath = path.join(cwd, 'public', 'camera', 'camera-profiles.json');
     if (await fs.pathExists(profilePath)) {
       console.log(`  ✓ camera-profiles.json saved`);
+
+      // Offer angle enable/disable selection for multi-angle shoots
+      const profiles = await fs.readJson(profilePath);
+      const angleNames = profiles.angles ? Object.keys(profiles.angles) : [];
+      if (angleNames.length > 1) {
+        console.log('\n  ── Angle rotation selection ──────────────────────────');
+        console.log('  Which angles should appear in the camera rotation?');
+        angleNames.forEach((name, i) => {
+          const isEnabled = profiles.angles[name].enabled !== false;
+          const src = path.basename(profiles.angles[name].videoSrc || '');
+          console.log(`    ${i + 1}. ${name}  (${src})  [${isEnabled ? 'enabled' : 'disabled'}]`);
+        });
+        console.log('  Enter numbers to DISABLE (e.g. 2,3), or press Enter to keep all enabled:');
+        const disableInput = (await ask('  > ')).trim();
+        if (disableInput) {
+          const toDisable = new Set(
+            disableInput.split(',')
+              .map(s => parseInt(s.trim()) - 1)
+              .filter(n => !isNaN(n) && n >= 0 && n < angleNames.length)
+          );
+          angleNames.forEach((name, i) => {
+            if (toDisable.has(i)) {
+              profiles.angles[name].enabled = false;
+              console.log(`  ✗ ${name} disabled from rotation`);
+            } else {
+              delete profiles.angles[name].enabled; // absence = enabled (default)
+              console.log(`  ✓ ${name} enabled`);
+            }
+          });
+          await fs.writeJson(profilePath, profiles, { spaces: 2 });
+          console.log('  ✓ camera-profiles.json updated');
+        } else {
+          console.log('  (All angles kept enabled)');
+        }
+      }
     } else {
       console.log('  ⚠ camera-profiles.json not found — camera cuts will not be applied in Remotion');
     }
@@ -1001,7 +1036,6 @@ async function main() {
   }
 
   // ── STEP: Thumbnail frame selection (optional — skip for audio-only) ──────
-  const thumbnailOutputPath = path.join(cwd, 'public', 'output', 'thumbnail.png');
 
   async function runThumbnailSelection() {
     console.log('\n  ── Thumbnail frame selection ────────────────────────');

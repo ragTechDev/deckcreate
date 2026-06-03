@@ -460,6 +460,8 @@ export function buildCameraShots(
 
       const angleConfig = profiles.angles[angleName];
       if (!angleConfig) continue; // Angle doesn't exist
+      if (angleConfig.enabled === false) continue; // Angle disabled globally
+      if (profile.enabled === false) continue; // Speaker+angle disabled
 
       result.push({
         angleName,

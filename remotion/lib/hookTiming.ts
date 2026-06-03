@@ -12,7 +12,7 @@ import { isSpokenToken } from './tokens';
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 /** Extra seconds appended to unbounded hooks (no explicit hookTo). */
-export const HOOK_TAIL_PAD_UNBOUNDED_SECONDS = 0.16;
+export const HOOK_TAIL_PAD_UNBOUNDED_SECONDS = 0.50;
 
 /** Extra seconds appended to bounded hooks (explicit hookTo). */
 export const HOOK_TAIL_PAD_BOUNDED_SECONDS = 0.02;

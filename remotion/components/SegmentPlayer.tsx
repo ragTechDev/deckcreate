@@ -285,7 +285,7 @@ const SectionGroupPlayer: React.FC<{
         // Final render: keep strict timing.
         acceptableTimeShiftInSeconds={isStudio ? 0.35 : 0}
         // Give the compositor extra time for large seeks deep into a long video file.
-        delayRenderTimeoutInMilliseconds={120000}
+        delayRenderTimeoutInMilliseconds={600000}
         volume={muted ? 0 : effectiveVolume}
         style={{ opacity: groupFade }}
         onError={(err) => {

@@ -115,6 +115,13 @@ class Transcriber {
       model: this.model,
       tokenLevelTimestamps: true,
       printOutput: false,
+      // Prevent hallucination loops: disable fallback and suppress repetitions
+      // via entropy/logprob thresholds.
+      additionalArgs: [
+        '--no-fallback',
+        ['--entropy-thold', '2.4'],
+        ['--logprob-thold', '-1.0'],
+      ],
     });
   }
 
