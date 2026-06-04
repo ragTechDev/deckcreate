@@ -9,6 +9,12 @@ import fs from 'fs-extra';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createHelpers } from './shared/wizard-helpers.js';
+import CarouselGenerator from './carousel/CarouselGenerator.js';
+import {
+  replaceWithCarouselGuide, extractCarouselSegments,
+  resolveFrameSource, applyViewportAndResize,
+  extractFrameWithFFmpeg, resolveVideoPath,
+} from './carousel/carousel-helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const cwd = path.join(__dirname, '..');
@@ -16,9 +22,9 @@ const cwd = path.join(__dirname, '..');
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
 const {
-  ask, confirm, askYesNo, askQuestion,
-  spawnStep, runStep,
-  openFile,
+  ask, askYesNo, askQuestion,
+  spawnStep,
+  openFile, spinner,
 } = createHelpers(rl, cwd);
 
 // ── Detection logic ─────────────────────────────────────────────────────────
@@ -80,7 +86,7 @@ function formatDuration(seconds) {
 
 // ── Path A: Clip from longform ──────────────────────────────────────────────
 
-async function runPathA(fromLongform = false) {
+async function runPathA() {
   // 1. Load longform transcript
   const transcriptPath = path.join(cwd, 'public', 'edit', 'transcript.json');
   const docPath = path.join(cwd, 'public', 'edit', 'transcript.doc.txt');
@@ -284,7 +290,206 @@ async function runPathA(fromLongform = false) {
     await spawnStep('npm', ['run', 'remotion:studio']);
   }
 
+  // 10. Optional carousel from the same segment
+  const doCarousel = await askYesNo('\n  Create a carousel from this short segment?', false);
+  if (doCarousel) {
+    await createCarouselFromShort(clipId);
+  }
+
   console.log('\n  ✓ Clip workflow complete!\n');
+}
+
+// ── Carousel from short ─────────────────────────────────────────────────────
+
+/**
+ * Generate carousel slides from a completed short clip.
+ * Uses the short's merged transcript.json for timestamps and
+ * camera-profiles.json (longform) for per-speaker angle resolution.
+ */
+async function createCarouselFromShort(clipId) {
+  console.log('\n  ── Create carousel from short ────────────────────────');
+
+  const shortTranscriptPath = path.join(cwd, 'public', 'shorts', clipId, 'transcript.json');
+  const shortDocPath = path.join(cwd, 'public', 'shorts', clipId, 'transcript.doc.txt');
+
+  if (!await fs.pathExists(shortTranscriptPath)) {
+    console.log('  ✗ Merged transcript not found — run "Merge clip doc" first.');
+    return;
+  }
+
+  // Assign carousel ID (default: next carousel-N)
+  const carouselDir = path.join(cwd, 'public', 'carousel');
+  await fs.ensureDir(carouselDir);
+  const existingIds = (await fs.readdir(carouselDir))
+    .filter(d => /^carousel-\d+$/.test(d))
+    .map(d => parseInt(d.replace('carousel-', '')));
+  const nextId = existingIds.length > 0 ? Math.max(...existingIds) + 1 : 1;
+  const defaultId = `carousel-${nextId}`;
+  const idInput = (await askQuestion(`  Carousel ID [${defaultId}]: `)).trim();
+  const carouselId = idInput || defaultId;
+
+  const carouselDocPath = path.join(cwd, 'public', 'carousel', carouselId, 'transcript.doc.txt');
+  const carouselJsonPath = path.join(cwd, 'public', 'carousel', carouselId, 'transcript.json');
+  await fs.ensureDir(path.dirname(carouselDocPath));
+
+  // Copy the short's merged transcript.json (provides segment timestamps)
+  await fs.copy(shortTranscriptPath, carouselJsonPath);
+
+  // Strip Remotion directives from the short's doc and prepend carousel guide
+  const shortDocContent = await fs.readFile(shortDocPath, 'utf-8');
+  await fs.writeFile(carouselDocPath, replaceWithCarouselGuide(shortDocContent));
+  console.log(`  ✓ Created public/carousel/${carouselId}/transcript.doc.txt`);
+
+  openFile(carouselDocPath);
+  console.log('\n  Mark carousel slides with > CAROUSEL START / > CAROUSEL END.');
+  console.log('  Each consecutive pair of segments becomes one slide (top + bottom frame).');
+  await ask('  Press Enter when done editing...');
+
+  // Parse the marked segments
+  const editedContent = await fs.readFile(carouselDocPath, 'utf-8');
+  const carouselSegments = await extractCarouselSegments(editedContent, carouselJsonPath);
+
+  if (carouselSegments.length === 0) {
+    console.log('  ✗ No carousel segments found. Add > CAROUSEL START / > CAROUSEL END markers and retry.');
+    return;
+  }
+  console.log(`  ✓ ${carouselSegments.length} slide(s) configured`);
+
+  // Build slide objects with speaker labels for angle resolution
+  const slides = carouselSegments.map(pair => ({
+    topTimestamp: Math.floor((pair.top.start + pair.top.end) / 2 || pair.top.start || 0),
+    bottomTimestamp: Math.floor((pair.bottom.start + pair.bottom.end) / 2 || pair.bottom.start || 0),
+    topText: pair.top.text,
+    bottomText: pair.bottom.text,
+    topSpeaker: pair.top.speaker || null,
+    bottomSpeaker: pair.bottom.speaker || null,
+  }));
+
+  // Prefer longform camera-profiles.json for multi-angle resolution
+  const profilesPath = path.join(cwd, 'public', 'camera-profiles.json');
+  const hasProfiles = await fs.pathExists(profilesPath);
+  let cameraProfiles = null;
+  let localVideoPath = null;
+
+  if (hasProfiles) {
+    cameraProfiles = await fs.readJson(profilesPath);
+    const angleNames = Object.keys(cameraProfiles.angles || {});
+    console.log(`\n  Using camera-profiles.json (${angleNames.length} angle(s): ${angleNames.join(', ')})`);
+  } else {
+    const syncDir = path.join(cwd, 'public', 'sync', 'output');
+    let synced = [];
+    if (await fs.pathExists(syncDir)) {
+      const files = await fs.readdir(syncDir);
+      synced = files.filter(f => f.startsWith('synced-output-') && f.endsWith('.mp4'));
+    }
+    if (synced.length === 0) {
+      console.log('  ✗ No camera-profiles.json found and no synced videos in public/sync/output/.');
+      return;
+    }
+    if (synced.length === 1) {
+      localVideoPath = path.join(cwd, 'public', 'sync', 'output', synced[0]);
+      console.log(`  Using: ${synced[0]}`);
+    } else {
+      console.log('  Synced videos:');
+      synced.forEach((v, i) => console.log(`    ${i + 1}. ${v}`));
+      const choice = (await ask('  Select: ')).trim() || '1';
+      const idx = Math.max(0, Math.min(synced.length - 1, parseInt(choice) - 1 || 0));
+      localVideoPath = path.join(cwd, 'public', 'sync', 'output', synced[idx]);
+    }
+  }
+
+  // Save config so carousel-wizard can regenerate later
+  const configPath = path.join(cwd, 'public', 'carousel', carouselId, 'carousel-config.json');
+  await fs.writeJson(configPath, {
+    name: `${carouselId}-carousel`,
+    videoId: null,
+    localVideoPath,
+    cameraProfilesPath: hasProfiles ? profilesPath : null,
+    slides,
+    showLogo: true,
+  }, { spaces: 2 });
+
+  const doGenerate = await askYesNo('\n  Generate carousel images now?', true);
+  if (!doGenerate) {
+    console.log(`  Config saved to ${configPath}.`);
+    console.log('  Run npm run carousel:wizard to generate later.');
+    return;
+  }
+
+  const outputDir = path.join(cwd, 'public', 'output', `${carouselId}-carousel`);
+  await fs.ensureDir(outputDir);
+
+  const generator = new CarouselGenerator({
+    name: `${carouselId}-carousel`, slides, showLogo: true, returnBase64: false,
+  });
+  generator.outputDir = outputDir;
+
+  try {
+    await generator.init();
+    await generateCarouselSlides(generator, slides, outputDir, carouselId, cameraProfiles, localVideoPath);
+    console.log(`\n  ✅ Carousel complete! Output: ${outputDir}`);
+    console.log('  Run npm run carousel:wizard to add a CTA slide or compile to PDF.');
+  } catch (err) {
+    console.error(`\n  ✗ Carousel generation failed: ${err.message}`);
+  } finally {
+    await generator.close();
+  }
+}
+
+/**
+ * Core slide generation loop: extract frames, apply viewport crop, composite.
+ * Does not generate a CTA slide — use carousel:wizard for that.
+ */
+async function generateCarouselSlides(generator, slides, outputDir, carouselId, cameraProfiles, fallbackVideoPath) {
+  const { default: sharp } = await import('sharp');
+  const width = 1080, height = 1080, halfHeight = 540;
+  const fontData = await generator.loadNunitoFont();
+
+  for (let i = 0; i < slides.length; i++) {
+    const slide = slides[i];
+    const topSrc = resolveFrameSource(cameraProfiles, slide.topSpeaker, slide.topTimestamp, fallbackVideoPath, cwd);
+    const bottomSrc = resolveFrameSource(cameraProfiles, slide.bottomSpeaker, slide.bottomTimestamp, fallbackVideoPath, cwd);
+
+    if (!topSrc.videoPath || !bottomSrc.videoPath) {
+      throw new Error(`Slide ${i + 1}: no video source — check camera-profiles.json`);
+    }
+
+    console.log(`\n  Slide ${i + 1}/${slides.length}:`);
+    console.log(`    Top:    ${slide.topTimestamp}s${slide.topSpeaker ? ` (${slide.topSpeaker})` : ''}${topSrc.angleName ? ` → ${topSrc.angleName}` : ''}`);
+    console.log(`    Bottom: ${slide.bottomTimestamp}s${slide.bottomSpeaker ? ` (${slide.bottomSpeaker})` : ''}${bottomSrc.angleName ? ` → ${bottomSrc.angleName}` : ''}`);
+
+    const spin = spinner('Extracting frames...');
+    try {
+      const topFramePath = path.join(outputDir, `frame-${i}-top.png`);
+      const bottomFramePath = path.join(outputDir, `frame-${i}-bottom.png`);
+
+      await extractFrameWithFFmpeg(resolveVideoPath(topSrc.videoPath), topSrc.effectiveTimestamp, topFramePath, cwd);
+      await extractFrameWithFFmpeg(resolveVideoPath(bottomSrc.videoPath), bottomSrc.effectiveTimestamp, bottomFramePath, cwd);
+
+      spin.update('Compositing...');
+
+      const topFrame = await applyViewportAndResize(sharp, topFramePath, topSrc.viewport, topSrc.srcWidth, topSrc.srcHeight, width, halfHeight);
+      const bottomFrame = await applyViewportAndResize(sharp, bottomFramePath, bottomSrc.viewport, bottomSrc.srcWidth, bottomSrc.srcHeight, width, halfHeight);
+
+      const svgOverlay = generator.generateTextOverlaySVG(width, height, slide.topText, slide.bottomText, fontData, null);
+
+      const composited = await sharp({
+        create: { width, height, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 1 } },
+      }).composite([
+        { input: topFrame, top: 0, left: 0 },
+        { input: bottomFrame, top: halfHeight, left: 0 },
+        { input: Buffer.from(svgOverlay), top: 0, left: 0 },
+      ]).png().toBuffer();
+
+      await fs.writeFile(path.join(outputDir, `slide-${i + 1}.png`), composited);
+      await fs.remove(topFramePath);
+      await fs.remove(bottomFramePath);
+      spin.stop(`✓ slide-${i + 1}.png`);
+    } catch (err) {
+      spin.stop(`✗ Failed: ${err.message}`);
+      throw err;
+    }
+  }
 }
 
 // ── Shared per-clip steps ───────────────────────────────────────────────────
@@ -482,7 +687,7 @@ async function main() {
 
   // If launched from longform wizard, jump straight to Path A
   if (fromLongform) {
-    await runPathA(true);
+    await runPathA();
     rl.close();
     return;
   }

@@ -11,11 +11,13 @@ import readline from 'readline';
 import fs from 'fs-extra';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { spawn } from 'child_process';
 import { createHelpers } from '../shared/wizard-helpers.js';
-import { detectHDR, HDR_TONEMAP_VF, SDR_FORMAT_VF } from '../shared/hdr-detect.js';
 import CarouselGenerator from './CarouselGenerator.js';
-import CaptionExtractor from './CaptionExtractor.js';
+import {
+  replaceWithCarouselGuide, extractCarouselSegments,
+  resolveFrameSource, applyViewportAndResize,
+  extractFrameWithFFmpeg, resolveVideoPath,
+} from './carousel-helpers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const cwd = path.join(__dirname, '..', '..');
@@ -23,9 +25,9 @@ const cwd = path.join(__dirname, '..', '..');
 const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
 const {
-  ask, confirm, askYesNo, askQuestion,
-  spawnStep, openFile, findFileIn,
-  progressBar, spinner,
+  ask, askYesNo, askQuestion,
+  openFile, findFileIn,
+  spinner,
 } = createHelpers(rl, cwd);
 
 // ─── Detection Logic ───────────────────────────────────────────────────────
@@ -77,58 +79,10 @@ function formatDuration(seconds) {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-function buildCarouselGuide() {
-  return [
-    '════════════════════════════════════════════════════════════════',
-    '  CAROUSEL EDITOR  ─  Editing Guide',
-    '════════════════════════════════════════════════════════════════',
-    '',
-    '  MARK CAROUSEL SLIDES',
-    '    Use CAROUSEL START/END to define the slide range:',
-    '      > CAROUSEL START',
-    '      [8] First carousel slide segment...',
-    '      [12] Last carousel slide segment...',
-    '      > CAROUSEL END',
-    '',
-    '  EDIT TEXT',
-    '    Just retype any word. Changes are saved.',
-    '',
-    '  CUT WORDS (optional)',
-    '    Wrap in curly braces to exclude:  {um}  {you know}',
-    '',
-    '  RENAME SPEAKER',
-    '    Edit the name after the colon in SPEAKERS below.',
-    '',
-    '  THUMBNAIL',
-    '    Edit # THUMBNAIL section to customize the CTA slide:',
-    '      title="Carousel title for the CTA slide"',
-    '      extendedTitle="Longer title shown on CTA"',
-    '      episodeNumber="001"',
-    '',
-    '════════════════════════════════════════════════════════════════',
-    '',
-  ].join('\n');
-}
-
-function replaceWithCarouselGuide(content) {
-  // Find the end of the guide section (marked by # THUMBNAIL or # SPEAKERS)
-  const thumbnailMatch = content.match(/# THUMBNAIL/);
-  const speakersMatch = content.match(/# SPEAKERS/);
-
-  let contentStart = content.length;
-  if (thumbnailMatch) contentStart = Math.min(contentStart, thumbnailMatch.index);
-  if (speakersMatch) contentStart = Math.min(contentStart, speakersMatch.index);
-
-  // Get everything from # THUMBNAIL/# SPEAKERS onwards (keeping the transcript content)
-  const transcriptContent = content.slice(contentStart);
-
-  // Return new guide + original transcript content
-  return buildCarouselGuide() + transcriptContent;
-}
 
 // ─── Path A: Create carousel from longform ───────────────────────────────────
 
-async function runPathA(fromLongform = false) {
+async function runPathA() {
   // 1. Load longform transcript
   const transcriptPath = path.join(cwd, 'public', 'edit', 'transcript.json');
   const docPath = path.join(cwd, 'public', 'edit', 'transcript.doc.txt');
@@ -253,6 +207,7 @@ async function runPathA(fromLongform = false) {
 
   let videoId = null;
   let localVideoPath = null;
+  let cameraProfilesPath = null;
 
   if (useYouTube) {
     videoId = await askQuestion('  YouTube video ID: ');
@@ -261,40 +216,62 @@ async function runPathA(fromLongform = false) {
       process.exit(1);
     }
   } else {
-    if (syncedVideos.length === 1) {
-      localVideoPath = path.join(syncOutputDir, syncedVideos[0]);
-      console.log(`  Using: ${syncedVideos[0]}`);
-    } else if (syncedVideos.length > 1) {
-      console.log('  Available synced videos:');
-      syncedVideos.forEach((v, i) => console.log(`    ${i + 1}. ${v}`));
-      const choice = (await ask('  Select: ')).trim() || '1';
-      const idx = Math.max(0, Math.min(syncedVideos.length - 1, parseInt(choice) - 1 || 0));
-      localVideoPath = path.join(syncOutputDir, syncedVideos[idx]);
+    // Prefer camera-profiles.json when available (multi-angle, speaker-aware)
+    const profilesPath = path.join(cwd, 'public', 'camera-profiles.json');
+    const hasProfiles = await fs.pathExists(profilesPath);
+
+    if (hasProfiles) {
+      const profiles = await fs.readJson(profilesPath);
+      const angles = profiles.angles || {};
+      const angleNames = Object.keys(angles);
+      console.log(`\n  Found camera-profiles.json with ${angleNames.length} angle(s):`);
+      angleNames.forEach(n => {
+        const vf = path.basename(angles[n].videoSrc);
+        const speakers = Object.entries(profiles.speakers || {})
+          .filter(([, sp]) => sp.angleName === n).map(([name]) => name);
+        console.log(`    ${n}: ${vf}${speakers.length ? ` (${speakers.join(', ')})` : ''}`);
+      });
+      console.log('  Frames will be extracted from the matching angle for each speaker.');
+      cameraProfilesPath = profilesPath;
     } else {
-      console.log('  No synced videos found. Place video in input/video/');
-      const inputVideoDir = path.join(cwd, 'input', 'video');
-      await fs.ensureDir(inputVideoDir);
-      await ask('  Press Enter when video is ready...');
-      const videoExts = ['.mp4', '.mov', '.mkv'];
-      const found = await findFileIn(inputVideoDir, videoExts);
-      if (!found) {
-        console.error('  ✗ No video found');
-        process.exit(1);
+      // Single-video fallback
+      if (syncedVideos.length === 1) {
+        localVideoPath = path.join(syncOutputDir, syncedVideos[0]);
+        console.log(`  Using: ${syncedVideos[0]}`);
+      } else if (syncedVideos.length > 1) {
+        console.log('  Available synced videos:');
+        syncedVideos.forEach((v, i) => console.log(`    ${i + 1}. ${v}`));
+        const choice = (await ask('  Select: ')).trim() || '1';
+        const idx = Math.max(0, Math.min(syncedVideos.length - 1, parseInt(choice) - 1 || 0));
+        localVideoPath = path.join(syncOutputDir, syncedVideos[idx]);
+      } else {
+        console.log('  No synced videos found. Place video in input/video/');
+        const inputVideoDir = path.join(cwd, 'input', 'video');
+        await fs.ensureDir(inputVideoDir);
+        await ask('  Press Enter when video is ready...');
+        const videoExts = ['.mp4', '.mov', '.mkv'];
+        const found = await findFileIn(inputVideoDir, videoExts);
+        if (!found) {
+          console.error('  ✗ No video found');
+          process.exit(1);
+        }
+        localVideoPath = found;
       }
-      localVideoPath = found;
     }
   }
 
   // 8. Build slides and save config
   console.log('\n  ── Build carousel configuration ─────────────────────');
 
-  const slides = carouselSegments.map((pair, i) => ({
+  const slides = carouselSegments.map((pair) => ({
     // Use middle of segment for better visual-text alignment
     // Note: transcript timestamps are already in raw video time
     topTimestamp: Math.floor((pair.top.start + pair.top.end) / 2 || pair.top.start || 0),
     bottomTimestamp: Math.floor((pair.bottom.start + pair.bottom.end) / 2 || pair.bottom.start || 0),
     topText: pair.top.text,
     bottomText: pair.bottom.text,
+    topSpeaker: pair.top.speaker || null,
+    bottomSpeaker: pair.bottom.speaker || null,
   }));
 
   const configPath = path.join(cwd, 'public', 'carousel', carouselId, 'carousel-config.json');
@@ -302,6 +279,7 @@ async function runPathA(fromLongform = false) {
     name: `${carouselId}-carousel`,
     videoId: videoId,
     localVideoPath: localVideoPath,
+    cameraProfilesPath: cameraProfilesPath,
     slides: slides,
     showLogo: true,
   };
@@ -321,173 +299,13 @@ async function runPathA(fromLongform = false) {
   console.log('\n  ✓ Carousel workflow complete!\n');
 }
 
-// ─── Text cleaning for carousel segments ───────────────────────────────────
-
-function cleanSegmentText(text) {
-  if (!text) return '';
-  // Remove hesitation markers from Whisper: ", , , , ," or ". . . . ." patterns
-  // These appear as individual punctuation separated by spaces
-  return text
-    .replace(/\{\s*,(?:\s*,)*\s*\}/g, '')  // Remove {, , , ,} cut blocks
-    .replace(/\s*,(?:\s*,)+\s*/g, ' ')      // Collapse ", , , , ," to single space
-    .replace(/\s*\.(?:\s*\.)+\s*/g, ' ')    // Collapse ". . . . ." to single space
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-// ─── Extract carousel segments from edited doc ─────────────────────────────
-
-function parseSegmentLine(line) {
-  // Parse [123] text... format, applying cuts
-  const match = line.match(/^\[(\d+)\]\s*(.+)$/);
-  if (!match) return null;
-
-  const id = parseInt(match[1], 10);
-  let text = match[2].trim();
-
-  // Check for inline CUT marker
-  if (line.match(/^\[-\d+\]/)) return null; // Cut segment
-
-  // Apply cuts: remove {content} and clean up
-  text = text.replace(/\{[^}]*\}/g, '');  // Remove {cut content}
-  text = cleanSegmentText(text);           // Clean hesitation markers
-
-  return { id, text };
-}
-
-async function extractCarouselSegments(docContent, jsonPath) {
-  const transcript = await fs.readJson(jsonPath);
-  const segments = transcript.segments;
-
-  const lines = docContent.split('\n');
-  const pairs = [];
-  let inCarousel = false;
-  let selectedSegments = [];
-  let inHeader = true;  // Skip guide header until we hit transcript content
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-
-    // Detect end of header / start of transcript content
-    if (inHeader && (
-      trimmed.startsWith('# THUMBNAIL') ||
-      trimmed.startsWith('# SPEAKERS') ||
-      trimmed.startsWith('===') ||
-      /^\[\d+\]/.test(trimmed)
-    )) {
-      inHeader = false;
-    }
-
-    // Skip everything in the guide header
-    if (inHeader) continue;
-
-    // Carousel start markers
-    if (/^>\s*CAROUSEL\s*START/i.test(trimmed) || trimmed === '> CAROUSEL') {
-      inCarousel = true;
-      continue;
-    }
-
-    // Carousel end marker
-    if (/^>\s*CAROUSEL\s*END/i.test(trimmed)) {
-      inCarousel = false;
-      continue;
-    }
-
-    // Parse segment IDs and extract text from the line itself
-    const parsed = parseSegmentLine(trimmed);
-    if (parsed && inCarousel) {
-      // Get segment from transcript for timestamps
-      const seg = segments.find(s => s.id === parsed.id);
-      if (seg && !seg.cut) {
-        // Use text from doc (with cuts applied), timestamps from transcript
-        selectedSegments.push({
-          ...seg,
-          text: parsed.text
-        });
-      }
-    }
-  }
-
-  // Pair consecutive segments for top/bottom frames
-  for (let i = 0; i < selectedSegments.length; i += 2) {
-    if (selectedSegments[i + 1]) {
-      pairs.push({
-        top: selectedSegments[i],
-        bottom: selectedSegments[i + 1],
-      });
-    }
-  }
-
-  return pairs;
-}
-
-// ─── Path Helpers ──────────────────────────────────────────────────────────
-
-/**
- * Convert host paths to Docker container paths when running in Docker.
- * The input directory is mounted at /app/input in the container.
- */
-function resolveVideoPath(videoPath) {
-  if (!videoPath) return videoPath;
-
-  // If running in Docker, convert host absolute paths to container paths
-  if (process.env.DOCKER_ENV === 'true' || process.env.DOCKER_ENV === true) {
-    // Match patterns like /Users/.../deckcreate/input/video/file.MOV
-    const inputMatch = videoPath.match(/\/.*?\/deckcreate\/input\/(.*)$/);
-    if (inputMatch) {
-      return path.join('/app/input', inputMatch[1]);
-    }
-    // Match patterns like /home/.../deckcreate/input/video/file.MOV
-    const homeMatch = videoPath.match(/\/home\/.*?\/deckcreate\/input\/(.*)$/);
-    if (homeMatch) {
-      return path.join('/app/input', homeMatch[1]);
-    }
-    // Match patterns like /Users/.../deckcreate/public/sync/output/file.mp4
-    const syncMatch = videoPath.match(/\/.*?\/deckcreate\/public\/(.*)$/);
-    if (syncMatch) {
-      return path.join('/app/public', syncMatch[1]);
-    }
-    // If path already starts with /app, assume it's correct
-    if (videoPath.startsWith('/app/')) {
-      return videoPath;
-    }
-  }
-
-  return videoPath;
-}
+// ─── Segment parsing ───────────────────────────────────────────────────────
+// cleanSegmentText, parseSegmentLine, extractCarouselSegments
+// are imported from ./carousel-helpers.js
 
 // ─── Frame Extraction ─────────────────────────────────────────────────────
-
-async function extractFrameWithFFmpeg(videoPath, timestamp, outputPath) {
-  // Detect HDR and apply proper tonemapping (same as camera setup)
-  const isHDR = await detectHDR(videoPath);
-  const vf = isHDR ? HDR_TONEMAP_VF : SDR_FORMAT_VF;
-
-  if (isHDR) {
-    console.log(`    (HDR video detected, applying tonemapping)`);
-  }
-
-  return new Promise((resolve, reject) => {
-    const proc = spawn('ffmpeg', [
-      '-hide_banner',
-      '-loglevel', 'error',
-      '-ss', String(timestamp),
-      '-i', videoPath,
-      '-frames:v', '1',
-      '-vf', vf,
-      '-pix_fmt', 'rgb24',
-      '-y',
-      outputPath,
-    ], { stdio: ['ignore', 'ignore', 'pipe'], cwd });
-
-    let err = '';
-    proc.stderr.on('data', d => { err += d.toString(); });
-    proc.on('close', code => {
-      if (code === 0) resolve(outputPath);
-      else reject(new Error(`ffmpeg failed: ${err}`));
-    });
-  });
-}
+// resolveVideoPath, resolveFrameSource, applyViewportAndResize, extractFrameWithFFmpeg
+// are imported from ./carousel-helpers.js
 
 // ─── Carousel Generation ─────────────────────────────────────────────────────
 
@@ -504,9 +322,13 @@ async function generateCarousel(carouselId, config) {
     if (config.videoId) {
       // YouTube mode: use existing CarouselGenerator
       await generator.generateCarousel();
-    } else if (config.localVideoPath) {
-      // Local video mode
-      await generateFromLocalVideo(generator, config.localVideoPath, config.slides, outputDir, carouselId);
+    } else {
+      // Local video mode — with camera profiles (multi-angle) or single fallback video
+      let cameraProfiles = null;
+      if (config.cameraProfilesPath && await fs.pathExists(config.cameraProfilesPath)) {
+        cameraProfiles = await fs.readJson(config.cameraProfilesPath);
+      }
+      await generateFromLocalVideo(generator, config.slides, outputDir, carouselId, cameraProfiles, config.localVideoPath || null);
     }
 
     console.log(`\n  ✅ Carousel complete!`);
@@ -520,17 +342,21 @@ async function generateCarousel(carouselId, config) {
   }
 }
 
-async function generateFromLocalVideo(generator, videoPath, slides, outputDir, carouselId) {
+// cameraProfiles: parsed camera-profiles.json (or null for single-video mode)
+// fallbackVideoPath: used when cameraProfiles is absent or a speaker can't be matched
+async function generateFromLocalVideo(generator, slides, outputDir, carouselId, cameraProfiles, fallbackVideoPath) {
   const sharp = (await import('sharp')).default;
   const width = 1080;
   const height = 1080;
   const halfHeight = height / 2;
 
-  // Resolve path for Docker environment
-  const resolvedPath = resolveVideoPath(videoPath);
-  console.log(`\n  Extracting frames from: ${path.basename(resolvedPath)}`);
-  if (resolvedPath !== videoPath) {
-    console.log(`    (Docker path: ${resolvedPath})`);
+  if (cameraProfiles) {
+    const angleNames = Object.keys(cameraProfiles.angles || {});
+    console.log(`\n  Extracting frames from camera profiles (${angleNames.length} angle(s): ${angleNames.join(', ')})`);
+  } else {
+    const resolvedFallback = resolveVideoPath(fallbackVideoPath);
+    console.log(`\n  Extracting frames from: ${path.basename(resolvedFallback)}`);
+    if (resolvedFallback !== fallbackVideoPath) console.log(`    (Docker path: ${resolvedFallback})`);
   }
 
   const fontData = await generator.loadNunitoFont();
@@ -548,7 +374,7 @@ async function generateFromLocalVideo(generator, videoPath, slides, outputDir, c
       const brandPath = path.join(cwd, 'public', 'brand.json');
       const brand = await fs.readJson(brandPath);
       brandColor = brand.colors?.primary || brandColor;
-    } catch (brandErr) {
+    } catch {
       console.log(`  (Using default brand color)`);
     }
     
@@ -570,9 +396,17 @@ async function generateFromLocalVideo(generator, videoPath, slides, outputDir, c
 
   for (let i = 0; i < slides.length; i++) {
     const slide = slides[i];
+
+    const topSrc = resolveFrameSource(cameraProfiles, slide.topSpeaker, slide.topTimestamp, fallbackVideoPath, cwd);
+    const bottomSrc = resolveFrameSource(cameraProfiles, slide.bottomSpeaker, slide.bottomTimestamp, fallbackVideoPath, cwd);
+
+    if (!topSrc.videoPath || !bottomSrc.videoPath) {
+      throw new Error(`Slide ${i + 1}: no video source — check camera-profiles.json or provide a fallback video`);
+    }
+
     console.log(`\n  Slide ${i + 1}/${slides.length}:`);
-    console.log(`    Top: ${slide.topTimestamp}s`);
-    console.log(`    Bottom: ${slide.bottomTimestamp}s`);
+    console.log(`    Top:    ${slide.topTimestamp}s${slide.topSpeaker ? ` (${slide.topSpeaker})` : ''}${topSrc.angleName ? ` → ${topSrc.angleName}` : ''}`);
+    console.log(`    Bottom: ${slide.bottomTimestamp}s${slide.bottomSpeaker ? ` (${slide.bottomSpeaker})` : ''}${bottomSrc.angleName ? ` → ${bottomSrc.angleName}` : ''}`);
 
     const spin = spinner('Extracting frames...');
 
@@ -580,20 +414,17 @@ async function generateFromLocalVideo(generator, videoPath, slides, outputDir, c
       const topFramePath = path.join(outputDir, `frame-${i}-top.png`);
       const bottomFramePath = path.join(outputDir, `frame-${i}-bottom.png`);
 
-      await extractFrameWithFFmpeg(resolvedPath, slide.topTimestamp, topFramePath);
-      await extractFrameWithFFmpeg(resolvedPath, slide.bottomTimestamp, bottomFramePath);
+      await extractFrameWithFFmpeg(resolveVideoPath(topSrc.videoPath), topSrc.effectiveTimestamp, topFramePath, cwd);
+      await extractFrameWithFFmpeg(resolveVideoPath(bottomSrc.videoPath), bottomSrc.effectiveTimestamp, bottomFramePath, cwd);
 
       spin.update('Compositing...');
 
-      const topFrame = await sharp(topFramePath)
-        .resize(width, halfHeight, { fit: 'cover', position: 'center' })
-        .png()
-        .toBuffer();
-
-      const bottomFrame = await sharp(bottomFramePath)
-        .resize(width, halfHeight, { fit: 'cover', position: 'center' })
-        .png()
-        .toBuffer();
+      const topFrame = await applyViewportAndResize(
+        sharp, topFramePath, topSrc.viewport, topSrc.srcWidth, topSrc.srcHeight, width, halfHeight
+      );
+      const bottomFrame = await applyViewportAndResize(
+        sharp, bottomFramePath, bottomSrc.viewport, bottomSrc.srcWidth, bottomSrc.srcHeight, width, halfHeight
+      );
 
       const textOverlaySvg = generator.generateTextOverlaySVG(
         width, height, slide.topText, slide.bottomText, fontData, headerConfig
@@ -766,7 +597,7 @@ async function runContinueCarousel(carouselId) {
         }
 
         // Build slides from segments
-        const slides = carouselSegments.map((pair, i) => ({
+        const slides = carouselSegments.map((pair) => ({
           topTimestamp: Math.floor((pair.top.start + pair.top.end) / 2 || pair.top.start || 0),
           bottomTimestamp: Math.floor((pair.bottom.start + pair.bottom.end) / 2 || pair.bottom.start || 0),
           topText: pair.top.text,
@@ -784,15 +615,20 @@ async function runContinueCarousel(carouselId) {
         config.name = `${carouselId}-carousel`;
 
         // If no video source set, prompt for one
-        if (!config.videoId && !config.localVideoPath) {
+        if (!config.videoId && !config.localVideoPath && !config.cameraProfilesPath) {
+          const profilesPath = path.join(cwd, 'public', 'camera-profiles.json');
+          const hasProfiles = await fs.pathExists(profilesPath);
           console.log('\n  No video source configured. Choose source:');
           console.log('    1. YouTube video');
-          console.log('    2. Local video');
+          console.log('    2. Local synced video');
+          if (hasProfiles) console.log('    3. Camera profiles (multi-angle)');
           const vchoice = (await ask('  > ')).trim() || '1';
           if (vchoice === '1') {
             config.videoId = await askQuestion('  YouTube video ID: ');
+          } else if (vchoice === '3' && hasProfiles) {
+            config.cameraProfilesPath = profilesPath;
+            console.log('  ✓ Using camera-profiles.json');
           } else {
-            console.log('  Place video in input/video/ or use synced video');
             const syncDir = path.join(cwd, 'public', 'sync', 'output');
             if (await fs.pathExists(syncDir)) {
               const files = await fs.readdir(syncDir);
@@ -847,22 +683,44 @@ async function runContinueCarousel(carouselId) {
           break;
         }
         const config = await fs.readJson(configPath);
+        const profilesPath = path.join(cwd, 'public', 'camera-profiles.json');
+        const hasProfiles = await fs.pathExists(profilesPath);
         console.log('    1. YouTube video');
-        console.log('    2. Local video');
+        console.log('    2. Local synced video (single file)');
+        if (hasProfiles) console.log('    3. Camera profiles (multi-angle, speaker-aware)');
         const choice2 = (await ask('  > ')).trim() || '1';
         if (choice2 === '1') {
           config.videoId = await askQuestion('  YouTube video ID: ');
           config.localVideoPath = null;
+          config.cameraProfilesPath = null;
+        } else if (choice2 === '3' && hasProfiles) {
+          config.cameraProfilesPath = profilesPath;
+          config.localVideoPath = null;
+          config.videoId = null;
+          console.log('  ✓ Using camera-profiles.json');
         } else {
-          console.log('  Place video in input/video/');
-          await ask('  Press Enter when ready...');
-          const inputVideoDir = path.join(cwd, 'input', 'video');
-          const videoExts = ['.mp4', '.mov', '.mkv'];
-          const found = await findFileIn(inputVideoDir, videoExts);
-          if (found) {
-            config.localVideoPath = found;
-            config.videoId = null;
+          const syncDir = path.join(cwd, 'public', 'sync', 'output');
+          let synced = [];
+          if (await fs.pathExists(syncDir)) {
+            const files = await fs.readdir(syncDir);
+            synced = files.filter(f => f.startsWith('synced-output-') && f.endsWith('.mp4'));
           }
+          if (synced.length > 0) {
+            console.log('  Synced videos:');
+            synced.forEach((f, i) => console.log(`    ${i + 1}. ${f}`));
+            const schoice = (await ask('  Select [1]: ')).trim() || '1';
+            const sidx = Math.max(0, Math.min(synced.length - 1, parseInt(schoice) - 1 || 0));
+            config.localVideoPath = path.join(cwd, 'public', 'sync', 'output', synced[sidx]);
+          } else {
+            console.log('  No synced videos found. Place video in input/video/');
+            await ask('  Press Enter when ready...');
+            const inputVideoDir = path.join(cwd, 'input', 'video');
+            const videoExts = ['.mp4', '.mov', '.mkv'];
+            const found = await findFileIn(inputVideoDir, videoExts);
+            if (found) config.localVideoPath = found;
+          }
+          config.videoId = null;
+          config.cameraProfilesPath = null;
         }
         await fs.writeJson(configPath, config, { spaces: 2 });
         console.log('  ✓ Updated config');
