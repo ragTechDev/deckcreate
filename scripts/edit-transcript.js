@@ -375,6 +375,7 @@ function resolvePhraseToFirstTokenIndex(phrase, tokens) {
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
     if (isSpecialToken(t) || normalize(t.text) === '') continue;
+    if (t.cut) continue;
     if (wordGroups.length === 0 || t.text.startsWith(' ')) {
       wordGroups.push({ text: t.text, firstRawIdx: i });
     } else {

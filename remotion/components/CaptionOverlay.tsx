@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { AbsoluteFill, useCurrentFrame, useVideoConfig, interpolate } from 'remotion';
+import { AbsoluteFill, useCurrentFrame, useVideoConfig } from 'remotion';
 import { createTikTokStyleCaptions } from '@remotion/captions';
 import type { Caption } from '@remotion/captions';
 import type { Segment, Token } from '../types/transcript';
@@ -51,6 +51,7 @@ function buildCaptions(
   for (let i = tokens.length - 1; i >= 0; i--) {
     const t = tokens[i];
     if (!isSpokenToken(t)) continue;
+    if (t.cut) continue;
     const key = `${t.t_dtw}|${t.text.trim().toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -225,14 +226,19 @@ export const CaptionOverlay: React.FC<Props> = ({
   segments,
   videoStart: videoStartProp,
   videoEnd: videoEndProp,
-  totalHookFrames: totalHookFramesProp,
   brand,
   hookSections: hookSectionsProp,
   mainSections: mainSectionsProp,
 }) => {
-  // Support both old interface (hookSegments/mainSegments) and new interface (segments + totalHookFrames)
-  const hookSegments = hookSegmentsProp ?? segments?.filter(s => s.hook && !s.cut) ?? [];
-  const mainSegments = mainSegmentsProp ?? segments?.filter(s => !s.hook) ?? [];
+  // Support both old interface (hookSegments/mainSegments) and new interface (segments)
+  const hookSegments = useMemo(
+    () => hookSegmentsProp ?? segments?.filter(s => s.hook && !s.cut) ?? [],
+    [hookSegmentsProp, segments],
+  );
+  const mainSegments = useMemo(
+    () => mainSegmentsProp ?? segments?.filter(s => !s.hook) ?? [],
+    [mainSegmentsProp, segments],
+  );
   const videoStart = videoStartProp;
   const videoEnd = videoEndProp;
   const frame = useCurrentFrame();
@@ -247,7 +253,8 @@ export const CaptionOverlay: React.FC<Props> = ({
   );
 
   // Map frame to source time using sections for accurate jump-cut sync
-  const { active, sourceTime, currentMs } = useMemo(() => {
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization
+  const { active, currentMs } = useMemo(() => {
     if (!useSections) {
       // Legacy path: use calculated timings
       const t = timings.find(t => frame >= t.outputStartFrame && frame < t.outputEndFrame) ?? null;
