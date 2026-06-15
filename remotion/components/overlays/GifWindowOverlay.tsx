@@ -66,12 +66,22 @@ export const GifWindowOverlay: React.FC<GifWindowOverlayProps> = ({
   const scale = isClosing ? closeScale : openScale;
   const translateY = isClosing ? closeTranslateY : openTranslateY;
 
-  const opacity = interpolate(
-    frame,
-    [0, 3, durationInFrames - 3, durationInFrames],
-    [0, 1, 1, 0],
-    { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
-  );
+  const FADE = 3;
+  let opacity: number;
+  if (durationInFrames <= 2) {
+    opacity = 1;
+  } else if (durationInFrames <= FADE * 2) {
+    const mid = Math.floor(durationInFrames / 2);
+    opacity = interpolate(frame, [0, mid, durationInFrames], [0, 1, 0], {
+      extrapolateLeft: 'clamp',
+      extrapolateRight: 'clamp',
+    });
+  } else {
+    opacity = interpolate(frame, [0, FADE, durationInFrames - FADE, durationInFrames], [0, 1, 1, 0], {
+      extrapolateLeft: 'clamp',
+      extrapolateRight: 'clamp',
+    });
+  }
 
   const displayTitle = title ?? src;
 
