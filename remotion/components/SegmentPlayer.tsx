@@ -161,12 +161,20 @@ export function buildSections(
   fps: number,
   videoStart?: number,
   videoEnd?: number,
+  includeHooksInMain?: boolean,
 ): SplitSections {
   const hookSegments = segments.filter(s => s.hook && !s.cut);
   // Delegate to shared hook timing lib — single source of truth for hook sections.
   const hookSections = buildHookSections(hookSegments, fps);
 
-  const allMainSegments = segments.filter(s => !s.hook);
+  // When includeHooksInMain is true (longform), hook segments also play at their
+  // chronological position in the main content — the hook is a teaser, not an
+  // extraction. Deduplicate by id and sort by start so buildMainSubClips sees a
+  // clean chronological sequence.
+  const allMainSegments = includeHooksInMain
+    ? [...new Map(segments.map(s => [s.id, s])).values()]
+        .sort((a, b) => a.start - b.start)
+    : segments.filter(s => !s.hook);
   const mainSubClips = buildMainSubClips(allMainSegments, videoStart, videoEnd);
   const rawMainSections = toSections(mainSubClips, fps);
 

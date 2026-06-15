@@ -148,7 +148,7 @@ const TranscriptComposition: React.FC<TranscriptCompositionProps> = ({
   }, [transcript, hookSegments]);
 
   const { hookSections, mainSections } = useMemo(
-    () => buildSections(orderedSegments, fps, transcript.meta.videoStart, transcript.meta.videoEnd),
+    () => buildSections(orderedSegments, fps, transcript.meta.videoStart, transcript.meta.videoEnd, true),
     [orderedSegments, fps, transcript.meta.videoStart, transcript.meta.videoEnd],
   );
 
