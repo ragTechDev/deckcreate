@@ -471,18 +471,22 @@ Steps:
 **Doc:** `docs/implementation-guides/REFACTOR_P1_HARDWARE.md`
 **Goal:** Use the hardware you have.
 
+> **Prerequisite — Issue #83 must land before this phase begins.**
+> Pipeline scripts currently run inside Docker via `docker-compose`. Docker on macOS runs in a Linux VM with no access to Metal, VideoToolbox, or Core ML — `detectHardware()` will always return CPU-only inside that VM. Issue #83 replaces Docker with native macOS execution and splits requirements into `requirements.txt` (MPS) and `requirements.nvidia.txt` (CUDA). All status checks below assume scripts run natively on the target machine.
+
 Steps:
 1. `scripts/config/hardware.ts` — `detectHardware(): Promise<HardwareProfile>`; detects M3 / NVIDIA / CPU
 2. `scripts/lib/ffmpeg.ts` — `buildFfmpegCommand(profile, task)` typed wrapper; NVENC, NVDEC, `scale_cuda`, `scale_metal` paths
 3. Replace all inline `ffmpeg` spawn calls with `buildFfmpegCommand()`
-4. Update `Dockerfile`: `ARG CUDA_ENABLED=false`; install GPU PyTorch when enabled
+4. Update `Dockerfile`: `ARG CUDA_ENABLED=false`; install GPU PyTorch from `requirements.nvidia.txt` when enabled. **Docker is the NVIDIA/Linux path only — macOS runs scripts natively (see Issue #83).**
 5. `detect-faces.py`: branch to Core ML on arm64 Darwin; CPU MediaPipe otherwise
 6. `transcribe-audio.ts`: use faster-whisper when CUDA available; whisper.cpp otherwise
 
 **Status checks:**
-- On M3: `npm run video:optimize` ffmpeg command contains `h264_videotoolbox`
-- On NVIDIA Docker: command contains `h264_nvenc`
+- On M3 (native, not Docker): `npm run video:optimize` ffmpeg command contains `h264_videotoolbox`
+- On NVIDIA Linux (Docker): command contains `h264_nvenc`
 - `grep -r "process.platform" scripts/` → only appears in `hardware.ts`
+- `python3 -c "import torch; print(torch.backends.mps.is_available())"` → `True` on M3 native env
 
 ---
 
@@ -653,7 +657,8 @@ Steps:
 ```
 Phase 0   (project file + determinism)
 Phase 0.5 (brand abstraction)          ← can run in parallel with Phase 0
-  └── Phase 1 (hardware + GPU)         ← independent of brand work
+Issue #83 (native macOS execution)     ← prerequisite for Phase 1; can run in parallel with Phase 0 and 0.5
+  └── Phase 1 (hardware + GPU)         ← requires #83; independent of brand work
       └── Phase 2 (pipeline DAG)
           └── Phase 3 (scripts TS)
               └── Phase 4 (scripts tests)
