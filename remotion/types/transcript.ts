@@ -104,6 +104,8 @@ export type TranscriptMeta = {
   episodeNumber?: string;
   /** Title from first hook segment — displayed during hooks section */
   hookTitle?: string;
+  /** Vertical placement of the hook title: 'upper' = top 20% (default), 'middle' = above captions */
+  hookTitlePlacement?: 'upper' | 'middle';
   /** Thumbnail configuration for portrait shorts */
   thumbnail?: {
     bg?: string | string[];

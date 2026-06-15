@@ -199,6 +199,7 @@ const TranscriptComposition: React.FC<TranscriptCompositionProps> = ({
           title={transcript.meta.hookTitle}
           startFrame={0}
           endFrame={totalHookFrames}
+          placement={transcript.meta.hookTitlePlacement}
         />
       )}
 

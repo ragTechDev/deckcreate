@@ -9,6 +9,8 @@ interface HookTitleProps {
   startFrame: number;
   /** Frame when hooks section ends (for fade out) */
   endFrame: number;
+  /** Vertical placement: 'upper' = top 20% (default), 'middle' = above captions (~58%) */
+  placement?: 'upper' | 'middle';
 }
 
 export const HookTitle: React.FC<HookTitleProps> = ({
@@ -16,6 +18,7 @@ export const HookTitle: React.FC<HookTitleProps> = ({
   title,
   startFrame,
   endFrame,
+  placement = 'upper',
 }) => {
   const frame = useCurrentFrame();
   const { typography } = brand;
@@ -46,12 +49,16 @@ export const HookTitle: React.FC<HookTitleProps> = ({
     { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
   );
 
+  // 'upper' → 20% from top (~384 / 1920px)
+  // 'middle' → 58% from top (~1114 / 1920px), which sits above the 1300px caption band
+  const topPosition = placement === 'middle' ? '43%' : '20%';
+
   return (
     <AbsoluteFill style={{ pointerEvents: 'none' }}>
       <div
         style={{
           position: 'absolute',
-          top: '20%',
+          top: topPosition,
           left: '5%',
           right: '5%',
           display: 'flex',

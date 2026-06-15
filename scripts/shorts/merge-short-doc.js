@@ -14,7 +14,7 @@
 import fs from 'fs-extra';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { mergeDocIntoTranscript, autoCutPauses } from '../edit-transcript.js';
+import { mergeDocIntoTranscript, autoCutPauses, deriveCuts } from '../edit-transcript.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const cwd = path.join(__dirname, '../..');
@@ -64,20 +64,29 @@ async function main() {
   // mergeDocIntoTranscript handles > START / > END and sets meta.videoStart / videoEnd
   let transcript = mergeDocIntoTranscript(baseTranscript, docContent);
 
+  // Re-derive cuts[] time ranges from token cut flags (same as main merge flow)
+  transcript = {
+    ...transcript,
+    segments: transcript.segments.map(seg => ({ ...seg, cuts: deriveCuts(seg) })),
+  };
+
   // Clear all existing hook markers - shorts define their own hooks fresh
   transcript = {
     ...transcript,
     segments: transcript.segments.map(s => ({ ...s, hook: false, hookPhrase: undefined, hookFrom: undefined, hookTo: undefined, hookTitle: undefined })),
+    meta: { ...transcript.meta, hookTitle: undefined, hookTitlePlacement: undefined },
   };
 
   // Process > HOOK markers in the doc - mark corresponding segments as hooks
   // Only processes hooks between > START and > END cues
-  // Syntax: > HOOK                           (entire segment)
-  //         > HOOK "phrase"                  (specific phrase within segment)
-  //         > HOOK "phrase" title="My Title" (with title for first hook)
+  // Syntax: > HOOK                                                    (entire segment)
+  //         > HOOK "phrase"                                           (specific phrase)
+  //         > HOOK "phrase" title="My Title"                          (with title)
+  //         > HOOK "phrase" title="My Title" placement="upper|middle" (with placement)
   const docLines = docContent.split('\n');
   let pendingHookSegId = null;
   let firstHookTitle = null;
+  let firstHookTitlePlacement = null;
   let insideClipRange = false;
 
   for (const line of docLines) {
@@ -99,16 +108,18 @@ async function main() {
       pendingHookSegId = parseInt(segMatch[1], 10);
     }
 
-    // Match: > HOOK, optionally "phrase", optionally title="..."
+    // Match: > HOOK, optionally "phrase", optionally title="...", optionally placement="upper|middle"
     // Only process if inside START/END range
-    const hookMatch = trimmed.match(/^>\s*HOOK\b(?:\s+"([^"]+)")?(?:\s+title="([^"]+)")?/i);
+    const hookMatch = trimmed.match(/^>\s*HOOK\b(?:\s+"([^"]+)")?(?:\s+title="([^"]+)")?(?:\s+placement="(upper|middle)")?/i);
     if (hookMatch && pendingHookSegId !== null && insideClipRange) {
-      const phrase = hookMatch[1]; // undefined if no phrase quoted
-      const title = hookMatch[2];    // undefined if no title specified
+      const phrase     = hookMatch[1]; // undefined if no phrase quoted
+      const title      = hookMatch[2]; // undefined if no title specified
+      const placement  = hookMatch[3]; // undefined if no placement specified
 
-      // Store first hook title for video title display
+      // Store first hook title (and placement) for video title display
       if (title && !firstHookTitle) {
         firstHookTitle = title;
+        firstHookTitlePlacement = placement || null;
       }
 
       transcript.segments = transcript.segments.map(s => {
@@ -182,10 +193,14 @@ async function main() {
     }
   }
 
-  // Store first hook title in transcript meta for easy access
+  // Store first hook title (and placement) in transcript meta for easy access
   if (firstHookTitle) {
     transcript.meta.hookTitle = firstHookTitle;
     console.log(`  First hook title: "${firstHookTitle}"`);
+    if (firstHookTitlePlacement) {
+      transcript.meta.hookTitlePlacement = firstHookTitlePlacement;
+      console.log(`  Hook title placement: "${firstHookTitlePlacement}"`);
+    }
   }
 
   if (args.cutPauses) {
