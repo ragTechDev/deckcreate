@@ -26,10 +26,17 @@ Extract the following from `$ARGUMENTS`:
 |-------|-----------------|----------|
 | **Title** | First heading or first sentence | Ask the user |
 | **Branch name** | Explicit branch field in issue, or derive from title | See naming rules below |
+| **User story** | "User story" section | Derive from description |
+| **Background** | "Background" section | The full prompt context |
 | **Description** | Body of the issue | The full prompt |
-| **Acceptance criteria** | "Acceptance Criteria" / "AC" / "Definition of Done" section | Derive them yourself (Step 2) |
+| **Acceptance criteria** | "Acceptance Criteria" / "AC" / "Happy path" / "Error path" / "Definition of Done" sections | Derive them yourself (Step 2) |
+| **Out of scope** | "Out of scope" section | Assume nothing is explicitly excluded |
+| **Technical context** | "Technical context" section | Identify from description |
+| **Implementation details** | "Implementation details" section | Derive from description |
+| **Additional test scenarios** | "Additional test scenarios" section | None beyond ACs |
+| **Hard constraints** | "Hard constraints" section | No additional constraints |
+| **Dependency issues** | "Dependency issues" section | None |
 | **Affected files / scope** | "Files", "Scope", or "Touches" section | Identify from description |
-| **Test requirements** | "Testing" section | Follow project defaults |
 
 **Branch naming rules** (in priority order):
 1. Use the branch name explicitly stated in the issue (e.g. `refactor/p0-project-file`)
@@ -149,6 +156,74 @@ Write the acceptance criteria to a TodoWrite task list so you can track them as 
 
 ---
 
+## Step 2.5 — Extract scope boundaries and constraints
+
+Before writing a single line of code, record the guardrails from the issue.
+
+### Out of scope
+
+List every item from the "Out of scope" section verbatim. These are things the implementation **must NOT do**:
+
+```
+Out of scope (must NOT implement):
+- <item 1>
+- <item 2>
+```
+
+If the section is missing or empty, write "None stated — use judgement."
+
+Add a TodoWrite task: `SCOPE GUARD: do not implement — <comma-separated list>`.
+
+### Hard constraints
+
+List every item from the "Hard constraints" section verbatim. These are non-negotiable requirements — every commit must satisfy them:
+
+```
+Hard constraints (must satisfy):
+- <constraint 1>
+- <constraint 2>
+```
+
+If the section is missing or empty, write "None stated beyond project defaults."
+
+Add a TodoWrite task: `CONSTRAINT CHECK: verify before each commit — <comma-separated list>`.
+
+### Additional test scenarios
+
+List any items from "Additional test scenarios" beyond the acceptance criteria. These become additional test stubs in Step 2.6.
+
+---
+
+## Step 2.6 — Derive test plan from acceptance criteria
+
+Before writing any implementation code, produce a complete test-to-AC mapping. Consult `docs/TESTING_STANDARDS.md` to determine the correct test type for each criterion.
+
+```
+Test plan (derived from ACs):
+
+Happy path:
+  AC #1 — <criterion text>
+    → Test type: unit | integration | e2e | react
+    → File: <where the test will live>
+    → Stub: <one sentence describing what the test asserts>
+
+Error path / edge cases:
+  AC #N — <criterion text>
+    → Test type: unit | integration | e2e | react
+    → File: <where the test will live>
+    → Stub: <one sentence describing what the test asserts>
+
+Additional test scenarios:
+  TS #1 — <scenario>
+    → Test type: unit | integration | e2e | react
+    → File: <where the test will live>
+    → Stub: <one sentence describing what the test asserts>
+```
+
+Add each test stub as a TodoWrite task so you can track which tests are written and which ACs they cover. **No implementation commit may be started until all test stubs for its ACs are written and failing correctly.**
+
+---
+
 ## Step 3 — Implementation plan
 
 Before writing any code, plan the atomic commits you will make. Each commit should:
@@ -190,18 +265,29 @@ Identify which test types are needed for this issue and note them.
 
 For each commit in your plan:
 
-### 5a. Write the test(s) first (or alongside the implementation)
+### 5a. Write the tests for this commit's acceptance criteria (must precede implementation)
 
-- Follow the exact file locations from `docs/TESTING_STANDARDS.md`
+Locate the test stubs from Step 2.6 that correspond to the ACs this commit satisfies. For each stub:
+
+- Follow the exact file locations recorded in the stub (from `docs/TESTING_STANDARDS.md`)
 - Use the patterns from the standards doc (dependency injection, pure function tests, render-and-assert, page object model)
-- Every new pure function: at least one happy-path test + one edge-case test
+- Write the full test body — not just a placeholder; the test must be specific enough to fail if the implementation is wrong
+- Every new pure function: at least one happy-path test + one error-path test matching the AC
 - Every new React component: at least one smoke render test
-- Run only the related tests to confirm they fail correctly before implementing:
+- Run only the related tests to confirm they **fail** correctly before implementing:
+
 ```bash
 npx jest --testPathPattern="<test-file>" --no-coverage
 ```
 
 ### 5b. Write the implementation
+
+Before writing code, verify this commit stays within scope and satisfies constraints:
+
+1. Check every file you plan to touch against the out-of-scope list from Step 2.5 — if a change would implement a scoped-out feature, skip it.
+2. Confirm every hard constraint from Step 2.5 will still be satisfied after this change.
+
+Then implement:
 
 - Stay within the scope of this commit — do not touch unrelated files
 - No hardcoded paths; use shared path helpers from `scripts/config/paths.ts` if they exist

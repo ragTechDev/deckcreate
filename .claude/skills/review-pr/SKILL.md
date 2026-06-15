@@ -152,7 +152,10 @@ gh pr list --head "$(git branch --show-current)" --json number,title,body,url --
 If a PR is found, extract:
 - **PR number and URL**
 - **Summary / description**
-- **Acceptance criteria** (look for "Acceptance Criteria", "AC", "Definition of Done" sections)
+- **Acceptance criteria** (look for "Acceptance Criteria", "AC", "Definition of Done", "Happy path", "Error path" sections — record each happy-path and error-path criterion separately)
+- **Out of scope** (look for "Out of scope" section — things the PR must NOT implement)
+- **Hard constraints** (look for "Hard constraints" section — non-negotiable requirements)
+- **Additional test scenarios** (look for "Additional test scenarios" section)
 - **Test plan** (look for "Test plan", "Testing", "QA" sections)
 - **Linked issues** (look for `Closes #N`, `Fixes #N`, `Resolves #N`)
 
@@ -177,7 +180,10 @@ Print a summary of what was found:
 ```
 PR context:
   PR:                  #<N> — <title> (<url>) | NONE
-  Acceptance criteria: found (<N> items) | not found
+  Acceptance criteria: found (<N> items: <H> happy path, <E> error path) | not found
+  Out of scope:        found (<N> items) | not found
+  Hard constraints:    found (<N> items) | not found
+  Additional tests:    found (<N> items) | not found
   Test plan:           found | not found
   Linked issues:       #N, #M | none
 ```
@@ -398,6 +404,76 @@ For each such test, record:
   Verdict: WARNING — replace with a behavioural assertion.
 ```
 
+### 5e — Per-acceptance-criterion test coverage
+
+For each acceptance criterion collected in Step 2 (happy path, error path, and additional test scenarios), verify that at least one test in the diff — or in the existing test suite — exercises that specific path.
+
+To find candidate tests:
+
+```bash
+# Search for test descriptions referencing the AC's key behaviour
+grep -rn "<keyword from AC>" --include="*.test.ts" --include="*.test.tsx" \
+  tests/ scripts/ app/ remotion/
+```
+
+For each AC with no corresponding test, record:
+
+```
+[COVERAGE] Acceptance criterion not covered by a test
+  AC:      <criterion text — label as happy path / error path / additional scenario>
+  Gap:     No test exercises this specific path.
+  Verdict: BLOCKER — add a test that can falsify this criterion before merging.
+```
+
+### 5f — Out-of-scope adherence check
+
+If "Out of scope" items were extracted in Step 2, compare them against the diff:
+
+```bash
+git diff origin/main...HEAD -- '*.ts' '*.tsx' '*.js' '*.jsx'
+```
+
+For each out-of-scope item, check whether the diff introduces code that implements it. Signs to look for:
+- New functions, routes, or components whose names match the scoped-out feature
+- New data fields or schema additions that belong to the excluded scope
+- Imports or references to systems the issue explicitly excluded
+
+For each out-of-scope item found in the diff, record:
+
+```
+[SCOPE] Out-of-scope feature implemented
+  Item:    <out-of-scope item text>
+  Found:   <file>:<line> — <description of what was implemented>
+  Verdict: BLOCKER — remove this change; it was explicitly excluded from the issue scope.
+```
+
+If no out-of-scope items were found in the PR context, note "Out of scope: not specified — skipping check."
+
+### 5g — Hard constraint satisfaction check
+
+If "Hard constraints" were extracted in Step 2, verify each one against the implementation.
+
+For each constraint, derive a specific check to confirm it is satisfied:
+
+| Constraint type | Check approach |
+|-----------------|----------------|
+| Security property (e.g. "must be server-side") | Search diff for client-side implementation patterns |
+| Performance ceiling (e.g. "must not block main thread") | Look for synchronous I/O or blocking calls |
+| API compatibility (e.g. "must not change public API") | Check exported signatures in the diff |
+| Env var naming (e.g. "must use prefix RAGTECH_") | `grep -n "process\.env\." <changed-files>` |
+| Idempotency | Look for state mutations not guarded by existence checks |
+
+For each unsatisfied constraint, record:
+
+```
+[CONSTRAINT] Hard constraint violated
+  Constraint: <constraint text>
+  Violation:  <file>:<line> — <description of how it is violated>
+  Verdict:    BLOCKER — the constraint is non-negotiable; fix before merging.
+```
+
+If no hard constraints were found in the PR context, note "Hard constraints: not specified — skipping check."
+
 ---
 
 ## Step 6 — Build and test suite
@@ -487,9 +563,9 @@ APPROVED | APPROVED WITH SUGGESTIONS | CHANGES REQUESTED
 <2–3 sentences: what the PR does, what the main risk areas are>
 
 ## Blockers (must fix before merge)
-<!-- One entry per BLOCKER finding -->
+<!-- One entry per BLOCKER finding. Types: QUALITY | COVERAGE | BUILD | TEST | SCOPE | CONSTRAINT -->
 ### B1 — <short title>
-- **Type:** QUALITY | COVERAGE | BUILD | TEST
+- **Type:** QUALITY | COVERAGE | BUILD | TEST | SCOPE | CONSTRAINT
 - **File:** <path>
 - **Finding:** <description>
 - **Fix:** <specific remediation>
@@ -511,6 +587,18 @@ APPROVED | APPROVED WITH SUGGESTIONS | CHANGES REQUESTED
 |------|--------|-------|
 | npm test passes | PASS / FAIL / NOT RUN | |
 | ...  | | |
+
+## Acceptance criterion coverage
+<!-- One row per AC from the issue (happy path + error path + additional scenarios) -->
+| Criterion | Type | Test file | Status |
+|-----------|------|-----------|--------|
+| <AC text> | happy path / error path / additional | <test file path or MISSING> | COVERED / MISSING |
+
+## Out-of-scope adherence
+<!-- CLEAN if nothing out-of-scope was implemented; list violations if any. N/A if no out-of-scope items specified. -->
+
+## Hard constraint satisfaction
+<!-- SATISFIED / VIOLATED for each constraint, with evidence. N/A if none specified. -->
 
 ## Patterns observed
 <!-- Reserved for Step 8 — leave blank here -->
@@ -622,6 +710,10 @@ Test suite:   npm test — PASS | FAIL
               npm run test:react — PASS | FAIL | SKIPPED
               npm run test:e2e — PASS | FAIL | SKIPPED
 TypeScript:   CLEAN | <N> errors
+
+AC coverage:  <N>/<M> criteria covered | all covered | N/A (no ACs found)
+Out of scope: CLEAN | <N> violations | N/A (not specified)
+Constraints:  SATISFIED | <N> violations | N/A (not specified)
 
 Findings doc: docs/review-findings/YYYY-MM-DD-<branch-name>.md
 New patterns: <N> added to SKILL.md | none

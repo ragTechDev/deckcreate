@@ -122,11 +122,41 @@ After rewording, re-run /pre-push-audit.
 
 **BLOCK the push.** Do not proceed to Step 3 until all commit messages are valid.
 
-**If all messages are valid:** print a summary and continue to Step 3.
+**If all messages are valid:** print a summary and continue to Step 2.5.
 
 ```
 ✓ Commit messages: N commit(s) — all conform to semantic convention
 ```
+
+---
+
+## Step 2.5 — Pull issue context
+
+Attempt to retrieve out-of-scope items, hard constraints, and additional test scenarios from the originating issue or PR. This context is used in Steps 4d and 4e.
+
+Try these sources in order, stopping at the first that yields content:
+
+```bash
+# 1. Find a linked issue number from branch name or commit messages
+git log --format="%s %b" origin/main..HEAD | grep -oE '#[0-9]+' | head -1
+# If found: gh issue view <N> --json body --jq '.body'
+
+# 2. If a PR already exists for this branch, pull its body
+gh pr list --head "$(git branch --show-current)" --json body --state open --jq '.[0].body'
+```
+
+From whichever source is found, extract:
+- **Out of scope** — items from the "Out of scope" section (things that must NOT be in the diff)
+- **Hard constraints** — items from the "Hard constraints" section (non-negotiable requirements)
+- **Additional test scenarios** — items from the "Additional test scenarios" section (used in Step 5a)
+
+If no issue or PR body is found, or neither section exists in the body, print:
+
+```
+Issue context: not found — skipping scope and constraint checks (Steps 4d, 4e).
+```
+
+And continue to Step 3. Do not block.
 
 ---
 
@@ -208,26 +238,21 @@ Test coverage gaps:
 └─────────────────────────────────────────────┴──────────────────┴───────────────────────────────────────┘
 ```
 
-If there are **no gaps**, print "All changed source files have corresponding tests." and skip to Step 4c.
+If there are **no gaps**, print "All changed source files have corresponding tests." and continue to Step 4b-2.
 
-If there are gaps, **write the missing tests now** before continuing. Follow `docs/TESTING_STANDARDS.md` patterns exactly:
-- Pure function → dependency-injection unit test
-- React component → `render(...)` smoke test (using `@testing-library/react`)
-- Remotion component → mock `remotion` module, then render
-- Integration → temp dir + real pipeline stage
+If there are gaps, **BLOCK the push**:
 
-After writing each test file, add a commit:
-
-```bash
-git add <test-file>
-git commit -m "$(cat <<'EOF'
-test(<scope>): add missing tests for <subject>
-
-Pre-push audit identified these tests were absent. Added:
-- <brief list of what each test covers>
-EOF
-)"
 ```
+✗ PUSH BLOCKED — test coverage gaps
+The following source files have no corresponding test:
+
+<gap table>
+
+Go back and add tests per docs/TESTING_STANDARDS.md (implement-issue Step 5a) before pushing.
+Re-run /pre-push-audit after adding the tests.
+```
+
+Stop. Do not proceed until the gaps are resolved.
 
 ### 4b-2 — Scope verification (lint-staged side effects)
 
@@ -249,38 +274,7 @@ Compare this list against the file scope described in the PR body (from Step 0).
   Verdict: WARNING — squash or drop this change; it obscures the PR's actual diff.
 ```
 
-### 4c — Type specification check
-
-For each new or modified `type` or `interface` in the diff, verify it matches `docs/PRODUCTION_REFACTOR_PLAN.md` exactly. Downstream phase steps reference type field names by name — divergence breaks future phases silently.
-
-```bash
-# Find new or changed type/interface declarations in the diff
-git diff origin/main...HEAD -- '*.ts' '*.tsx' | grep '^\+' | grep -E '^\+\s*(export\s+)?(type|interface)\s+' | grep -v '^+++'
-```
-
-For each type name found, search the refactor plan:
-
-```bash
-grep -n "<TypeName>" docs/PRODUCTION_REFACTOR_PLAN.md
-```
-
-Compare field by field:
-- Field names (exact match — `videoSrc` ≠ `src`)
-- Required vs optional (`field:` vs `field?:`)
-- Field types
-
-If the implementation diverges from the spec **without a corresponding spec update in this same diff**, record:
-
-```
-[QUALITY] Type diverges from PRODUCTION_REFACTOR_PLAN.md spec
-  Type:     <TypeName>
-  File:     <implementation file>
-  Spec:     docs/PRODUCTION_REFACTOR_PLAN.md:<line>
-  Divergence: <field name / type / optionality that differs>
-  Verdict: BLOCKER — update the spec first, then align the implementation.
-```
-
-### 4d — Run the full test suite
+### 4c — Run the full test suite
 
 ```bash
 npm test
@@ -304,6 +298,53 @@ npm run test:e2e
 ```
 
 **BLOCK the push if any test runner exits non-zero.** Report which suite failed and why.
+
+### 4d — Out-of-scope adherence check
+
+If out-of-scope items were extracted in Step 2.5, verify the diff does not implement any of them.
+
+```bash
+git diff origin/main...HEAD -- '*.ts' '*.tsx' '*.js' '*.jsx'
+```
+
+For each out-of-scope item, scan the diff for:
+- New functions, routes, or components whose names match the scoped-out feature
+- New data fields or schema additions that belong to the excluded scope
+- New imports into systems the issue explicitly excluded
+
+For each violation, **BLOCK the push**:
+
+```
+✗ PUSH BLOCKED — out-of-scope feature implemented
+  Item:  <out-of-scope text from issue>
+  Found: <file>:<line> — <description>
+  Fix:   revert this change or move it to a separate branch before pushing.
+```
+
+If no out-of-scope items were found in Step 2.5, print "Out of scope: not specified — skipping." and continue.
+
+### 4e — Hard constraint satisfaction check
+
+If hard constraints were extracted in Step 2.5, verify each one against the implementation. Use the check approach that fits the constraint type:
+
+| Constraint type | Check approach |
+|-----------------|----------------|
+| Security property (e.g. "must be server-side") | Search diff for client-side implementation patterns |
+| Performance ceiling (e.g. "must not block main thread") | Look for synchronous I/O or blocking calls |
+| API compatibility (e.g. "must not change public API") | Check exported signatures in the diff |
+| Env var naming (e.g. "must use prefix RAGTECH_") | `grep -n "process\.env\." <changed-files>` |
+| Idempotency | Look for state mutations not guarded by existence checks |
+
+For each violated constraint, **BLOCK the push**:
+
+```
+✗ PUSH BLOCKED — hard constraint violated
+  Constraint: <constraint text>
+  Violation:  <file>:<line> — <description>
+  Fix:        <specific remediation>
+```
+
+If no hard constraints were found in Step 2.5, print "Hard constraints: not specified — skipping." and continue.
 
 ---
 
@@ -347,9 +388,24 @@ Manual testing required before push:
   Affected: scripts/edit-transcript.js
 ```
 
-Save this checklist — it feeds directly into the PR template in Step 7.
+If additional test scenarios were extracted in Step 2.5, check whether each one is covered by a test in the diff or existing suite:
 
-If **no manual testing is required** (only config, docs, assets, or API routes changed), print "No manual testing required." and skip to Step 6.
+```bash
+grep -rn "<keyword from scenario>" --include="*.test.ts" --include="*.test.tsx" \
+  tests/ scripts/ app/ remotion/
+```
+
+For each additional test scenario with **no corresponding automated test**, add it to the checklist:
+
+```
+□ [MANUAL-SCENARIO] <additional test scenario text>
+  No automated test exists for this scenario — verify manually before pushing.
+  Source: issue "Additional test scenarios"
+```
+
+Save this checklist — it feeds directly into the PR template in Step 8.
+
+If **no manual testing is required** (only config, docs, assets, or API routes changed, and no uncovered additional test scenarios), print "No manual testing required." and skip to Step 6.
 
 ### 5c — Block and wait for human confirmation
 
