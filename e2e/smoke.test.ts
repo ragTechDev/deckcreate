@@ -7,14 +7,28 @@
  */
 import { test, expect } from '@playwright/test';
 
-test('root redirects to login or renders app shell', async ({ page }) => {
+test('root renders app shell', async ({ page }) => {
   const response = await page.goto('/');
+  expect(response?.status()).toBeLessThan(500);
+});
+
+test('carousel route is reachable', async ({ page }) => {
+  const response = await page.goto('/carousel');
+  expect(response?.status()).toBeLessThan(500);
+});
+
+test('get-youtube-captions route is reachable', async ({ page }) => {
+  const response = await page.goto('/get-youtube-captions');
+  expect(response?.status()).toBeLessThan(500);
+});
+
+test('about route is reachable', async ({ page }) => {
+  const response = await page.goto('/about');
   expect(response?.status()).toBeLessThan(500);
 });
 
 test('editor route is reachable', async ({ page }) => {
   const response = await page.goto('/editor');
-  // Allow redirect to login (302) or page render (200) but not server errors
   expect(response?.status()).toBeLessThan(500);
 });
 
