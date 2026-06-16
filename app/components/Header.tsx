@@ -17,13 +17,12 @@ import {
   Button,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import { IconSun, IconMoon, IconPhoto, IconFileText, IconInfoCircle, IconWand, IconLogin, IconLogout } from '@tabler/icons-react';
+import { IconSun, IconMoon, IconPhoto, IconFileText, IconInfoCircle, IconLogin, IconLogout } from '@tabler/icons-react';
 import { useAuth } from '../context/AuthContext';
 
 const NAV_LINKS = [
   { href: '/carousel', label: 'Carousel', icon: IconPhoto, pro: false },
   { href: '/transcribe', label: 'Transcription', icon: IconFileText, pro: false },
-  { href: '/auto-carousel', label: 'Auto Carousel', icon: IconWand, pro: true },
   { href: '/about', label: 'About', icon: IconInfoCircle, pro: false },
 ];
 
