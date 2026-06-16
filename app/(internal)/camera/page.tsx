@@ -201,6 +201,7 @@ function CameraPageContent() {
   const isShorts = searchParams.get('mode') === 'shorts';
   const isThumbnail = searchParams.get('mode') === 'thumbnail';
   const isPortraitMode = isShorts;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const outputDims = isShorts ? { w: 1080, h: 1920 } : null;
 
   // ── Load data ───────────────────────────────────────────────────────────────
@@ -402,6 +403,7 @@ function CameraPageContent() {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drag.mode, getNorm]);
 
   // ── SVG interaction ──────────────────────────────────────────────────────────
@@ -768,6 +770,7 @@ function CameraPageContent() {
             )}
 
             <Box style={{ position: 'relative' }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
               key={frameSrc}
               src={frameSrc}

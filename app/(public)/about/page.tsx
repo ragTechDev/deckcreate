@@ -21,7 +21,7 @@ import {
   IconLeaf,
   IconUsers,
 } from '@tabler/icons-react';
-import { Header } from '../components/Header';
+import { Header } from '../../components/Header';
 
 export default function AboutPage() {
   return (
