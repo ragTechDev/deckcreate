@@ -95,7 +95,7 @@ export default function Home() {
                   <Badge size="xs" variant="dot" color="primary">Timestamps</Badge>
                   <Badge size="xs" variant="dot" color="secondary">Filler removal</Badge>
                 </Group>
-                <Anchor href="/transcribe" underline="never">
+                <Anchor href="/get-youtube-captions" underline="never">
                   <Button
                     fullWidth
                     size="md"

@@ -1,6 +1,6 @@
 'use client';
 
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import {
   Container,
   Group,
@@ -14,15 +14,13 @@ import {
   UnstyledButton,
   Text,
   Badge,
-  Button,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import { IconSun, IconMoon, IconPhoto, IconFileText, IconInfoCircle, IconWand, IconLogin, IconLogout } from '@tabler/icons-react';
-import { useAuth } from '../context/AuthContext';
+import { IconSun, IconMoon, IconPhoto, IconFileText, IconInfoCircle, IconWand } from '@tabler/icons-react';
 
 const NAV_LINKS = [
   { href: '/carousel', label: 'Carousel', icon: IconPhoto, pro: false },
-  { href: '/transcribe', label: 'Transcription', icon: IconFileText, pro: false },
+  { href: '/get-youtube-captions', label: 'Transcription', icon: IconFileText, pro: false },
   { href: '/auto-carousel', label: 'Auto Carousel', icon: IconWand, pro: true },
   { href: '/about', label: 'About', icon: IconInfoCircle, pro: false },
 ];
@@ -30,8 +28,6 @@ const NAV_LINKS = [
 export function Header() {
   const { colorScheme, toggleColorScheme } = useMantineColorScheme();
   const pathname = usePathname();
-  const router = useRouter();
-  const { user, logout } = useAuth();
   const [drawerOpened, { toggle: toggleDrawer, close: closeDrawer }] = useDisclosure(false);
 
   return (
@@ -95,27 +91,6 @@ export function Header() {
                   </Anchor>
                 );
               })}
-              {user ? (
-                <Button
-                  variant="subtle"
-                  size="compact-sm"
-                  color="dimmed"
-                  leftSection={<IconLogout size={14} />}
-                  onClick={() => { logout(); router.push('/'); }}
-                >
-                  Sign Out
-                </Button>
-              ) : (
-                <Button
-                  variant="subtle"
-                  size="compact-sm"
-                  color="dimmed"
-                  leftSection={<IconLogin size={14} />}
-                  onClick={() => router.push('/login')}
-                >
-                  Sign In
-                </Button>
-              )}
               <ActionIcon
                 variant="subtle"
                 size="lg"
@@ -194,31 +169,6 @@ export function Header() {
               </Anchor>
             );
           })}
-          {user ? (
-            <Button
-              variant="subtle"
-              size="sm"
-              color="dimmed"
-              leftSection={<IconLogout size={16} />}
-              onClick={() => { logout(); closeDrawer(); router.push('/'); }}
-              fullWidth
-              justify="flex-start"
-            >
-              Sign Out
-            </Button>
-          ) : (
-            <Button
-              variant="subtle"
-              size="sm"
-              color="dimmed"
-              leftSection={<IconLogin size={16} />}
-              onClick={() => { closeDrawer(); router.push('/login'); }}
-              fullWidth
-              justify="flex-start"
-            >
-              Sign In
-            </Button>
-          )}
         </Stack>
       </Drawer>
     </>
