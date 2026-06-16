@@ -47,7 +47,7 @@ export default function Home() {
           </Stack>
 
           {/* Tool Cards */}
-          <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="lg">
+          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="lg">
 
             {/* Carousel Generator Card */}
             <Paper p="xl" withBorder radius="lg" style={{ display: 'flex', flexDirection: 'column' }}>
