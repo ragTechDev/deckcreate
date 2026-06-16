@@ -24,70 +24,75 @@ import {
   carouselDoc,
   thumbnailCameraProfiles,
 } from './paths';
+import path from 'path';
 
 const ROOT = '/project/root';
 
+function expectNormalizedPath(actual: string, expectedPosixPath: string) {
+  expect(actual).toBe(path.normalize(expectedPosixPath));
+}
+
 describe('project / artifact', () => {
   it('projectFile', () => {
-    expect(projectFile(ROOT)).toBe('/project/root/.ragtech/project.json');
+    expectNormalizedPath(projectFile(ROOT), '/project/root/.ragtech/project.json');
   });
 
   it('artifactDir', () => {
-    expect(artifactDir(ROOT)).toBe('/project/root/.ragtech/artifacts');
+    expectNormalizedPath(artifactDir(ROOT), '/project/root/.ragtech/artifacts');
   });
 });
 
 describe('transcribe pipeline', () => {
   it('transcribeInput', () => {
-    expect(transcribeInput(ROOT)).toBe('/project/root/public/transcribe/input');
+    expectNormalizedPath(transcribeInput(ROOT), '/project/root/public/transcribe/input');
   });
 
   it('transcriptRaw', () => {
-    expect(transcriptRaw(ROOT)).toBe('/project/root/public/transcribe/output/raw/transcript.raw.json');
+    expectNormalizedPath(transcriptRaw(ROOT), '/project/root/public/transcribe/output/raw/transcript.raw.json');
   });
 
   it('diarizationOutput', () => {
-    expect(diarizationOutput(ROOT)).toBe('/project/root/public/transcribe/output/raw/diarization.json');
+    expectNormalizedPath(diarizationOutput(ROOT), '/project/root/public/transcribe/output/raw/diarization.json');
   });
 
   it('hookQaDir', () => {
-    expect(hookQaDir(ROOT)).toBe('/project/root/public/transcribe/output/hook-qa');
+    expectNormalizedPath(hookQaDir(ROOT), '/project/root/public/transcribe/output/hook-qa');
   });
 });
 
 describe('edit / longform output', () => {
   it('transcriptOutput', () => {
-    expect(transcriptOutput(ROOT)).toBe('/project/root/public/edit/transcript.json');
+    expectNormalizedPath(transcriptOutput(ROOT), '/project/root/public/edit/transcript.json');
   });
 
   it('transcriptDoc', () => {
-    expect(transcriptDoc(ROOT)).toBe('/project/root/public/edit/transcript.doc.txt');
+    expectNormalizedPath(transcriptDoc(ROOT), '/project/root/public/edit/transcript.doc.txt');
   });
 });
 
 describe('sync pipeline', () => {
   it('syncVideoDir', () => {
-    expect(syncVideoDir(ROOT)).toBe('/project/root/public/sync/video');
+    expectNormalizedPath(syncVideoDir(ROOT), '/project/root/public/sync/video');
   });
 
   it('syncAudioDir', () => {
-    expect(syncAudioDir(ROOT)).toBe('/project/root/public/sync/audio');
+    expectNormalizedPath(syncAudioDir(ROOT), '/project/root/public/sync/audio');
   });
 
   it('syncOutputDir', () => {
-    expect(syncOutputDir(ROOT)).toBe('/project/root/public/sync/output');
+    expectNormalizedPath(syncOutputDir(ROOT), '/project/root/public/sync/output');
   });
 
   it('syncedVideo', () => {
-    expect(syncedVideo(ROOT)).toBe('/project/root/public/sync/output/synced-output.mp4');
+    expectNormalizedPath(syncedVideo(ROOT), '/project/root/public/sync/output/synced-output.mp4');
   });
 
   it('syncedVideoAngle — index 1', () => {
-    expect(syncedVideoAngle(1, ROOT)).toBe('/project/root/public/sync/output/synced-output-1.mp4');
+    expectNormalizedPath(syncedVideoAngle(1, ROOT), '/project/root/public/sync/output/synced-output-1.mp4');
   });
 
   it('syncedVideoAngle — index 2', () => {
-    expect(syncedVideoAngle(2, ROOT)).toBe('/project/root/public/sync/output/synced-output-2.mp4');
+    expectNormalizedPath(syncedVideoAngle(2, ROOT), '/project/root/public/sync/output/synced-output-2.mp4');
   });
 
   it('syncedVideoAngle — index 0 throws', () => {
@@ -101,33 +106,33 @@ describe('sync pipeline', () => {
 
 describe('camera', () => {
   it('cameraProfiles', () => {
-    expect(cameraProfiles(ROOT)).toBe('/project/root/public/camera/camera-profiles.json');
+    expectNormalizedPath(cameraProfiles(ROOT), '/project/root/public/camera/camera-profiles.json');
   });
 });
 
 describe('shorts pipeline', () => {
   it('shortsDir', () => {
-    expect(shortsDir(ROOT)).toBe('/project/root/public/shorts');
+    expectNormalizedPath(shortsDir(ROOT), '/project/root/public/shorts');
   });
 
   it('shortClipDir', () => {
-    expect(shortClipDir('clip-01', ROOT)).toBe('/project/root/public/shorts/clip-01');
+    expectNormalizedPath(shortClipDir('clip-01', ROOT), '/project/root/public/shorts/clip-01');
   });
 
   it('shortTranscript', () => {
-    expect(shortTranscript('clip-01', ROOT)).toBe('/project/root/public/shorts/clip-01/transcript.json');
+    expectNormalizedPath(shortTranscript('clip-01', ROOT), '/project/root/public/shorts/clip-01/transcript.json');
   });
 
   it('shortDoc', () => {
-    expect(shortDoc('clip-01', ROOT)).toBe('/project/root/public/shorts/clip-01/transcript.doc.txt');
+    expectNormalizedPath(shortDoc('clip-01', ROOT), '/project/root/public/shorts/clip-01/transcript.doc.txt');
   });
 
   it('shortsCameraProfiles', () => {
-    expect(shortsCameraProfiles(ROOT)).toBe('/project/root/public/shorts/camera-profiles.json');
+    expectNormalizedPath(shortsCameraProfiles(ROOT), '/project/root/public/shorts/camera-profiles.json');
   });
 
   it('shortsTranscriptRaw', () => {
-    expect(shortsTranscriptRaw(ROOT)).toBe(
+    expectNormalizedPath(shortsTranscriptRaw(ROOT),
       '/project/root/public/shorts/transcribe/output/raw/transcript.raw.json',
     );
   });
@@ -135,21 +140,21 @@ describe('shorts pipeline', () => {
 
 describe('carousel pipeline', () => {
   it('carouselClipDir', () => {
-    expect(carouselClipDir('ep-42', ROOT)).toBe('/project/root/public/carousel/ep-42');
+    expectNormalizedPath(carouselClipDir('ep-42', ROOT), '/project/root/public/carousel/ep-42');
   });
 
   it('carouselTranscript', () => {
-    expect(carouselTranscript('ep-42', ROOT)).toBe('/project/root/public/carousel/ep-42/transcript.json');
+    expectNormalizedPath(carouselTranscript('ep-42', ROOT), '/project/root/public/carousel/ep-42/transcript.json');
   });
 
   it('carouselDoc', () => {
-    expect(carouselDoc('ep-42', ROOT)).toBe('/project/root/public/carousel/ep-42/transcript.doc.txt');
+    expectNormalizedPath(carouselDoc('ep-42', ROOT), '/project/root/public/carousel/ep-42/transcript.doc.txt');
   });
 });
 
 describe('thumbnail pipeline', () => {
   it('thumbnailCameraProfiles', () => {
-    expect(thumbnailCameraProfiles(ROOT)).toBe('/project/root/public/thumbnail/camera-profiles.json');
+    expectNormalizedPath(thumbnailCameraProfiles(ROOT), '/project/root/public/thumbnail/camera-profiles.json');
   });
 });
 
@@ -157,7 +162,7 @@ describe('cwd defaults', () => {
   it('uses process.cwd() as root when cwd is omitted', () => {
     const result = transcriptOutput();
     expect(result.startsWith(process.cwd())).toBe(true);
-    expect(result.endsWith('/public/edit/transcript.json')).toBe(true);
+    expect(result.endsWith(path.normalize('/public/edit/transcript.json'))).toBe(true);
   });
 });
 
