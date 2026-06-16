@@ -212,7 +212,6 @@ ty    = (0.5 - vp.cy) × 100%
 | `app/camera/page.tsx` | Camera GUI (face box editor, angle tabs) | |
 | `app/editor/page.tsx` | Transcript editor | Add PreviewPlayer + scroll-sync (Phase 8) |
 | `app/editor/Timeline.tsx` | Timeline component (630 lines) | Decompose + add waveform (Phase 8) |
-| `app/components/AutoCarouselForm.tsx` | Carousel generator (810 lines) | Decompose (Phase 8) |
 | `app/context/AuthContext.tsx` | Auth context with hardcoded credentials | Fix (Phase 7) |
 | `vscode-transcript-language/src/extension.js` | VSCode transcript extension | Add Wrap-in-cut command (Phase 0.5) |
 
