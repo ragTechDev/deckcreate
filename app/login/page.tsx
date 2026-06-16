@@ -13,7 +13,6 @@ import {
   Stack,
   Alert,
   Code,
-  Group,
   ThemeIcon,
   Divider,
 } from '@mantine/core';
@@ -31,7 +30,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (user) {
-      router.push('/auto-carousel');
+      router.push('/carousel');
     }
   }, [user, router]);
 
@@ -46,7 +45,7 @@ export default function LoginPage() {
     setIsLoading(false);
 
     if (result.success) {
-      router.push('/auto-carousel');
+      router.push('/carousel');
     } else {
       setError(result.error || 'Login failed');
     }
@@ -64,7 +63,7 @@ export default function LoginPage() {
               </ThemeIcon>
               <Title order={3}>Sign in to Deckcreate Pro</Title>
               <Text size="sm" c="dimmed">
-                Access AI-powered auto bulk carousel generation
+                Sign in to access Deckcreate Pro features
               </Text>
             </Stack>
 
@@ -111,9 +110,7 @@ export default function LoginPage() {
             <Divider label="Why sign in?" labelPosition="center" />
 
             <Text size="xs" c="dimmed" ta="center">
-              The Auto Bulk Carousel feature uses a local LLM (Ollama) to intelligently
-              select the best segments from your video for carousel content. This premium
-              feature is available to subscribers.
+              Sign in to access Deckcreate Pro features.
             </Text>
           </Stack>
         </Paper>

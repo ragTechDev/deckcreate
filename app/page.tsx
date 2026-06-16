@@ -1,5 +1,5 @@
-import { Container, Title, Text, Stack, Group, Paper, Button, Badge, ThemeIcon, SimpleGrid, Box, Anchor } from '@mantine/core';
-import { IconPhoto, IconFileText, IconLeaf, IconSparkles, IconArrowRight, IconBrandYoutube, IconWand, IconLock } from '@tabler/icons-react';
+import { Container, Title, Text, Stack, Group, Paper, Button, Badge, ThemeIcon, SimpleGrid, Anchor } from '@mantine/core';
+import { IconPhoto, IconFileText, IconLeaf, IconSparkles, IconArrowRight, IconBrandYoutube } from '@tabler/icons-react';
 import { Header } from './components/Header';
 import { InstagramEmbed } from './components/InstagramEmbed';
 
@@ -47,7 +47,7 @@ export default function Home() {
           </Stack>
 
           {/* Tool Cards */}
-          <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="lg">
+          <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="lg">
 
             {/* Carousel Generator Card */}
             <Paper p="xl" withBorder radius="lg" style={{ display: 'flex', flexDirection: 'column' }}>
@@ -108,54 +108,6 @@ export default function Home() {
               </Stack>
             </Paper>
 
-            {/* Auto Carousel Pro Card */}
-            <Paper
-              p="xl"
-              withBorder
-              radius="lg"
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                borderColor: 'var(--mantine-color-violet-4)',
-                position: 'relative',
-                overflow: 'hidden',
-              }}
-            >
-              <Badge
-                color="violet"
-                variant="filled"
-                size="sm"
-                style={{ position: 'absolute', top: 12, right: 12 }}
-              >
-                Pro
-              </Badge>
-              <Stack gap="md" style={{ flex: 1 }}>
-                <Group>
-                  <ThemeIcon size={48} radius="md" variant="light" color="violet">
-                    <IconWand size={24} />
-                  </ThemeIcon>
-                </Group>
-                <Title order={4}>Auto Bulk Carousel</Title>
-                <Text size="sm" c="dimmed" style={{ flex: 1 }}>
-                  Paste a link and let our LLM analyze the transcript to auto-generate
-                  multiple carousels with hooks and CTA slides.
-                </Text>
-                <Group gap="xs" wrap="wrap">
-                  <Badge size="xs" variant="dot" color="violet">LLM-powered</Badge>
-                  <Badge size="xs" variant="dot" color="violet">CTA slides</Badge>
-                </Group>
-                <Anchor href="/auto-carousel" underline="never">
-                  <Button
-                    fullWidth
-                    size="md"
-                    color="violet"
-                    rightSection={<IconLock size={16} />}
-                  >
-                    Try Auto Carousel
-                  </Button>
-                </Anchor>
-              </Stack>
-            </Paper>
           </SimpleGrid>
 
           {/* Example Carousel */}
@@ -178,16 +130,12 @@ export default function Home() {
               </ThemeIcon>
               <Title order={3}>Built different. On purpose.</Title>
               <Text size="sm" c="dimmed" maw={520}>
-                Our <strong>Carousel Generator</strong> and <strong>Transcription</strong> tools use <strong>zero AI</strong>.
+                Our tools use <strong>zero AI</strong>.
                 We extract what&apos;s already there — your words, your frames, your content. No large
                 language models burning through energy to rephrase what you already said perfectly.
-              </Text>
-              <Text size="sm" c="dimmed" maw={520}>
-                Our <strong>Auto Bulk Carousel</strong> uses AI minimally — only to analyze transcripts
-                and suggest segments. The actual content extraction remains AI-free. This approach keeps
-                our tools <strong>fast, deterministic, and sustainable</strong>. You get exactly what&apos;s
-                in your video — nothing hallucinated, nothing rewritten. Just your authentic content,
-                repurposed for every platform.
+                This keeps our tools <strong>fast, deterministic, and sustainable</strong>. You get
+                exactly what&apos;s in your video — nothing hallucinated, nothing rewritten. Just your
+                authentic content, repurposed for every platform.
               </Text>
             </Stack>
           </Paper>
