@@ -220,6 +220,22 @@ Additional test scenarios:
     → Stub: <one sentence describing what the test asserts>
 ```
 
+### Classification rules for additional test scenarios
+
+Use this table to assign a test type to each additional test scenario **before** deciding anything needs manual testing. Most scenarios that appear manual are actually automatable:
+
+| Scenario pattern | Test type | Example |
+|---|---|---|
+| "X does/does not contain link/text/element Y" | `react` — render the component and query the DOM | "Header nav does not contain a /login link" |
+| "Page does not link to /X" | `react` — render the page component, assert no `a[href="/X"]` | "Landing page does not link to /login" |
+| "Build completes without errors" | Run `npm run build` in Step 5c — not a test file | "npm run build completes without errors" |
+| "Route /X returns HTTP N" | `e2e` — add to `e2e/smoke.test.ts` | "/login returns 404" |
+| "Route /X renders correctly at its URL" | `e2e` — add to `e2e/smoke.test.ts` | "/carousel resolves correctly" |
+| "Function f() returns/throws X" | `unit` — next to the source file | any pure function assertion |
+| "UI interaction produces visible result" | `e2e` — only if it requires a real running server | "clicking Save shows a confirmation" |
+
+**Default to automated.** Only classify a scenario as requiring manual testing if it tests subjective visual quality (layout, animation, colour accuracy) that cannot be captured by a headless assertion. Link presence/absence, route reachability, and build success are always automatable.
+
 Add each test stub as a TodoWrite task so you can track which tests are written and which ACs they cover. **No implementation commit may be started until all test stubs for its ACs are written and failing correctly.**
 
 ---

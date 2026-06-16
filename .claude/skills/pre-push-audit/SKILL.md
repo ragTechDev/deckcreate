@@ -395,11 +395,39 @@ grep -rn "<keyword from scenario>" --include="*.test.ts" --include="*.test.tsx" 
   tests/ scripts/ app/ remotion/
 ```
 
-For each additional test scenario with **no corresponding automated test**, add it to the checklist:
+For each additional test scenario with **no corresponding automated test**, classify it using this table:
+
+| Scenario pattern | Automatable? | Test type |
+|---|---|---|
+| "X does/does not contain link/text/element Y" | **Yes** | `react` — render the component, query the DOM |
+| "Page does not link to /X" | **Yes** | `react` — render the page component, assert `a[href="/X"]` absent |
+| "Build completes without errors" | **Yes** | Run `npm run build` in Step 4c — not a test file |
+| "Route /X returns HTTP N" / "resolves correctly" | **Yes** | `e2e` — add to `e2e/smoke.test.ts` |
+| "Function/command produces output Y" | **Yes** | `unit` or `integration` |
+| "Layout/animation/colour looks correct" | No | Manual browser check |
+| "Video renders correctly in Remotion studio" | No | Manual studio check |
+
+**If automatable:** write the test now and commit it before pushing. Do not add it to the manual checklist — it must be an automated test.
+
+```bash
+# After writing the test file:
+npm test  # or npm run test:react / npm run test:e2e — whichever applies
+git add <test-file>
+git commit -m "test(<scope>): automate scenario from issue #<N> — <short description>"
+```
+
+Announce what you wrote:
+```
+[AUTO-TEST] Wrote missing automated test for scenario: "<scenario text>"
+  Test: <file>
+  Committed as: <commit hash>
+```
+
+**If genuinely not automatable** (visual quality, animation, Remotion studio output), add it to the manual checklist:
 
 ```
 □ [MANUAL-SCENARIO] <additional test scenario text>
-  No automated test exists for this scenario — verify manually before pushing.
+  No automated test can cover this — verify manually before pushing.
   Source: issue "Additional test scenarios"
 ```
 
