@@ -1,147 +1,182 @@
-# DeckCreate — User Personas & Editing Packages
+# poddedit — Target Market & Editing Packages
+
+Updated to reflect the final 19 Jun 2026 slides.
 
 ---
 
-## User Personas
+## Target Market
 
-### Hobby
-**Who they are:** Individuals who decided to start a podcast for fun — a passion project, side hobby, or experiment. Not monetising. Audience is small and personal (friends, niche community).
+poddedit is positioned for creators and teams who publish consistently and need a repeatable content workflow, not casual hobby-only use cases.
 
-**Goals:** Get a watchable, listenable episode up with minimal effort. Doesn't need it to look like a production studio.
+### Singapore Potential Client Size (Assumption-Based)
 
-**Pain point:** Recording multi-camera and getting everything synced is technical. They can cut their own clips and do light editing but not the technical setup.
+This is a bottom-up planning model for commercial strategy, not a claim of total market census.
 
-**Willingness to pay:** Low — budget-conscious. Treats this as a discretionary expense, not a business cost. Likely a one-off or low-frequency engagement.
+Market anchors from Poddster page (19 Jun 2026):
+- "Trusted by 2k+ podcasters, creators and brands"
+- "Created 3K+ videos"
+- 6 studios in Singapore
 
-**Minimum threshold:** Synced cameras, speaker-switching, their own intro/outro dropped in, subtitles so it's accessible.
+How to interpret:
+- 2k+ is best treated as cumulative served accounts over time, not active monthly demand.
+- For planning, active recurring demand is a smaller subset that publishes at least monthly.
 
----
+Practical serviceable market scenarios for poddedit (Singapore):
 
-### Hobby Plus
-**Who they are:** Same as Hobby, but they've seen their peers get traction on TikTok and Reels and want to experiment with short-form without investing heavily.
+| Scenario | Assumption | Serviceable recurring accounts |
+|---|---|---:|
+| Conservative | 5% of 2,000 cumulative are active and fit for recurring post-production | ~100 |
+| Base case | 8% active recurring fit | ~160 |
+| Upside | 12% active recurring fit | ~240 |
 
-**Goals:** Get a couple of social clips out of each episode without learning a new tool.
+Interpretation for growth planning:
+- At 100 to 240 recurring accounts in-market, poddedit only needs a small share to build a strong recurring base.
+- A 5% share of the base-case scenario is ~8 recurring accounts.
+- A 10% share of the base-case scenario is ~16 recurring accounts.
 
-**Pain point:** Clipping manually takes time they don't have. Captioning is tedious.
+### Who is most likely to buy long-term
 
-**Willingness to pay:** Slightly more than Hobby — still budget-conscious but willing to pay for the clip-cutting they'd otherwise skip entirely.
+| Segment | Why they buy | Typical cadence | Partnership potential |
+|---|---|---|---|
+| Creator-led shows | Need consistency across YouTube, Shorts, Reels, LinkedIn | Weekly or bi-weekly | Medium to high |
+| Founder/B2B thought leadership | Content supports pipeline and brand authority | Weekly | High |
+| Studios/agencies | Need scalable post-production capacity | Weekly across multiple shows | Very high |
 
-**Minimum threshold:** Hobby deliverables + ready-to-post short clips with captions.
+### Willingness to pay: setup-based examples
 
----
+Examples below use only published Poddster prices and poddedit listed prices.
 
-### Growth
-**Who they are:** Podcast creators who have found their audience and are starting to treat the podcast as a serious channel. May have sponsorships, a growing following, or a brand attached. Looking to outsource so they can focus on content.
+Example A: Creator currently on studio + edit only
+- Current setup: S$273 recording + S$280 standard edit = S$553 per cycle
+- Pain: still needs clips and social outputs separately
+- poddedit angle: Essential or Growth gives predictable episode-based packaging with faster multi-format handoff
 
-**Goals:** Scale episode output without scaling time spent. Want consistent visual branding and a social presence per episode.
+Example B: Thought-leadership show needing discoverability assets
+- Current setup equivalent: S$273 recording + S$280 edit + S$453 subtitles + S$280 highlights = S$1,286
+- Pain: line-item stacking and coordination overhead
+- poddedit angle: Growth/Premium consolidate core outputs into one operating package
 
-**Pain point:** Production quality is becoming a differentiator. Doing it all themselves is no longer sustainable. They need episode-level polish — thumbnails, chapter markers, speaker titles, branded overlays, and clips — delivered reliably.
+Example C: Team with recurring distribution requirements
+- Current setup equivalent: S$1,286 + S$292 distribution = S$1,578
+- Pain: fragmented workflow and slower campaign execution across formats
+- poddedit angle: Premium + recurring plan for integrated long-form and short-form outputs
 
-**Willingness to pay:** Medium. Sees editing as a business investment. Likely on a regular per-episode cadence.
+Willingness-to-pay implication:
+- Buyers already paying line-item totals above S$1,000 per cycle are typically value-driven by speed, consistency, and team bandwidth, not just lowest price.
+- This supports a partnership model centered on throughput and outcome reliability.
 
-**Minimum threshold:** Full branded episode (hooks, speaker titles, chapter markers, overlays), thumbnail, and social clips with captions and branding.
+### Independent and Creator-Led Podcasts
+**Who they are:** Solo hosts and small creator teams building a consistent channel on YouTube/Spotify/TikTok.
 
----
+**Goals:** Publish on schedule, keep branding consistent, and repurpose each episode into multiple formats.
 
-### Professional
-**Who they are:** Established independent podcasters, B2B company podcasts, or thought-leadership shows where the podcast is a core content marketing or brand-building asset. Episodes are planned around key messages, guest appearances, and distribution strategy.
+**Pain point:** Editing, clipping, captioning, and formatting across platforms takes too much time.
 
-**Goals:** Maximum content leverage from every recording. Each episode should produce a full episode, multiple short clips, and written assets (articles, carousels) for LinkedIn and newsletters — all on-brand and at a high production standard.
+### Business and Thought-Leadership Podcasts
+**Who they are:** Founder-led, B2B, and company podcasts where episodes support brand, demand generation, or community growth.
 
-**Pain point:** At this tier, generic templates aren't enough. They need custom overlays, curated b-roll, and animations that reflect brand identity. Content repurposing is a significant workload that justifies delegation.
+**Goals:** Turn each recording into polished long-form and social assets without managing a large in-house post-production team.
 
-**Willingness to pay:** High. Podcast production is a line item in their content or marketing budget.
+**Pain point:** They need reliable quality and fast turnaround with minimal back-and-forth.
 
-**Minimum threshold:** Everything in Growth, custom branded production, curated b-roll and animations, short-form clips, and carousels for LinkedIn.
+### Podcast Studios and Agency Partners
+**Who they are:** Studios that run production for multiple podcast clients.
+
+**Goals:** Expand service capacity and margins with a repeatable post-production partner.
+
+**Pain point:** Manual multi-camera editing and repurposing does not scale as client volume grows.
+
+### Long-Term Partnership Model
+
+1. Start with one show for 4 to 6 episodes to establish baseline quality and turnaround.
+2. Move to monthly retainer with expected output mix by tier.
+3. Set a recurring content rhythm: weekly publish date, fixed review window, fixed final delivery window.
+4. Add quarterly planning checkpoints for format mix, hooks, carousel strategy, and channel performance.
+5. Expand within account: additional hosts, sister shows, and campaign-specific Premium outputs.
 
 ---
 
 ## Packages
 
-### Hobby · S$85 / episode
+### Essential
+
+Reliable baseline editing.
+
+Pricing:
+- S$179 (up to 30 minutes)
+- S$229 (31 to 60 minutes)
 
 Deliverables:
-- Multi-camera sync (up to 2 cameras)
-- Automated multicam switching by speaker
-- Client-provided intro and outro inserted
-- Basic logo watermark
-- Automated subtitle file (SRT)
+- Transcript and subtitle file
+- Multi-camera angle editing
+- Speaker labels and logo watermark
+- Intro and outro insertion
+- 1080p output
 
 ---
 
-### Hobby Plus · S$120–150 / episode
+### Growth (Most Popular)
 
-Everything in Hobby, plus:
-- 2 short-form clips (9:16 portrait)
-- Captions on each clip
-- Logo watermark on clips
+Consistent branded publishing.
 
----
+Pricing:
+- S$279 (up to 30 minutes)
+- S$399 (31 to 60 minutes)
 
-### Growth · S$320–400 / episode
-
-Deliverables:
-- Multi-camera sync (up to 3 cameras)
-- Automated multicam switching by speaker
-- Client-provided intro and outro inserted
-- Proofread subtitle file (SRT)
-- Hook teaser before intro
-- Episode thumbnail
-- Speaker name title overlays
-- Chapter markers
-- Graphic overlays using templates — client choice of colour and font
-- 3 short-form clips (9:16 portrait) + 1 teaser clip
-- Captions, hook title, and branding on all clips
-- 1 carousel (PNG and PDF) — template-based, client choice of colour and font
+Everything in Essential, plus:
+- Custom thumbnail
+- Hook intro and one free teaser clip
+- 1 carousel post
+- 2 short-form clips with captions
+- 4K output
 
 ---
 
-### Professional · S$700–850 / episode
+### Premium
+
+Maximum quality and customization.
+
+Pricing:
+- S$499 (up to 30 minutes)
+- S$749 (31 to 60 minutes)
 
 Everything in Growth, plus:
-- Custom graphic overlays and animations (not templates)
-- Curated b-roll and stock media
-- Quote, concept explainer, and term overlays
-- 5 short-form clips (9:16 portrait)
-- 2 carousels per episode — delivered as PNG and PDF, formatted for LinkedIn
-- Captions, hook title, branding, curated b-roll, and animations on all clips
-- Unlimited revisions
+- Custom overlays, b-roll/stock footage, and concept explainers
+- +3 short-form clips
+- +2 carousel posts
+- Priority delivery
 
 ---
 
 ## Add-Ons
 
+Aligned to items included in the final slides.
+
 | Add-On | Description | Price (SGD) |
 |---|---|---|
-| Episode summary article | 400–600 word write-up for newsletters and blog posts, structured from episode content | S$60–80 |
-| LinkedIn episode summary | Short-form text post with key takeaways, formatted for LinkedIn | S$35–50 |
-| Custom branding — intro & outro | Bespoke animated intro and outro built to brand spec (one-time) | S$350–500 |
-| Podcast website | Multi-page website with episode listing, show notes, and subscribe links (one-time) | S$900–1,500 |
+| Extra short-form clip | Additional 9:16 Reel/Short/TikTok with captions, hook, and reaction cuts | +S$30 per clip |
+| Extra carousel | Additional 6 to 9 slide carousel with on-brand fonts, screenshots, and captions | +S$50 per carousel |
+| Rush delivery (<24h) | Expedited turnaround applied to the selected package | +25% on package price |
+| Chapter markers | Timestamped chapter markers for easier navigation | S$29 per episode |
+| Custom branding (intro/outro) | Bespoke animated intro and outro built to brand spec | S$299++ one-time |
+| Annual retainer | Commitment discount model | 1 month free |
 
 ---
 
 ## Package Summary
 
-| | **Hobby** | **Hobby Plus** | **Growth** | **Professional** |
-|---|---|---|---|---|
-| Price / episode | S$85 | S$120–150 | S$320–400 | S$700–850 |
-| Multi-camera sync | ✓ (2 cam) | ✓ (2 cam) | ✓ (3 cam) | ✓ (3 cam) |
-| Multicam switching by speaker | ✓ | ✓ | ✓ | ✓ |
-| Client intro / outro | ✓ | ✓ | ✓ | ✓ |
-| Logo watermark | ✓ | ✓ | ✓ | ✓ |
-| Subtitle file — automated (SRT) | ✓ | ✓ | ✓ | ✓ |
-| Subtitle file — proofread | — | — | ✓ | ✓ |
-| Hook teaser before intro | — | — | ✓ | ✓ |
-| Episode thumbnail | — | — | ✓ | ✓ |
-| Speaker name title overlays | — | — | ✓ | ✓ |
-| Chapter markers | — | — | ✓ | ✓ |
-| Template overlays (colour/font choice) | — | — | ✓ | — |
-| Custom overlays and animations | — | — | — | ✓ |
-| B-roll / stock media | — | — | — | ✓ |
-| Quote / concept / term overlays | — | — | — | ✓ |
-| Short-form clips (9:16) | — | 1 clip | 3 clips + 1 teaser | 5 clips + 1 teaser
-| Captions on clips | — | ✓ | ✓ | ✓ |
-| Hook title on clips | — | — | ✓ | ✓ |
-| Branding on clips | — | — | ✓ | ✓ |
-| B-roll / animations on clips | — | — | — | ✓ |
-| **Carousel (PNG + PDF for LinkedIn)** | — | **1** | **1** | **2** |
+| | **Essential** | **Growth** | **Premium** |
+|---|---|---|---|
+| Price (up to 30 min) | S$179 | S$279 | S$499 |
+| Price (31 to 60 min) | S$229 | S$399 | S$749 |
+| Transcript and subtitle file | ✓ | ✓ | ✓ |
+| Multi-camera angle editing | ✓ | ✓ | ✓ |
+| Speaker labels + logo watermark | ✓ | ✓ | ✓ |
+| Intro and outro insertion | ✓ | ✓ | ✓ |
+| Hook intro | — | ✓ | ✓ |
+| Custom thumbnail | — | ✓ | ✓ |
+| Short-form clips with captions | — | 2 + teaser | 5 + teaser |
+| Carousel posts | — | 1 | 3 |
+| Custom overlays/b-roll/concept explainers | — | — | ✓ |
+| Output quality | 1080p | 4K | 4K |
+| Priority delivery | — | — | ✓ |

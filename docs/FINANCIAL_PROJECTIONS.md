@@ -1,6 +1,6 @@
-# DeckCreate — Financial Projections
+# poddedit — Financial Projections
 
-Working backwards from income replacement to understand the episode volume and client base required.
+Working backwards from income replacement using the final Essential/Growth/Premium pricing.
 
 ---
 
@@ -14,154 +14,140 @@ Working backwards from income replacement to understand the episode volume and c
 
 ---
 
+## Pricing Inputs Used
+
+| Tier | Up to 30 min | 31 to 60 min | Blended midpoint |
+|---|---:|---:|---:|
+| Essential | S$179 | S$229 | S$204 |
+| Growth | S$279 | S$399 | S$339 |
+| Premium | S$499 | S$749 | S$624 |
+
+---
+
 ## Time Estimates Per Package
 
-DeckCreate automates sync, multicam switching, transcription, subtitle export, captions, and carousel generation. Hands-on time is creative and review work only — not technical labour.
+Hands-on time excludes automated sync/transcription baseline and focuses on review + creative decisions.
 
-| Package | Price | Hands-on time | Notes |
-|---|---|---|---|
-| Hobby | S$85 | ~35 min | Run pipeline, review output, insert intro/outro, export SRT |
-| Hobby Plus | S$135 | ~50 min | Hobby + clip selection + caption review |
-| Growth | S$320–400 | ~2.5 h | Hook selection, thumbnail, overlays config, clip curation, carousel review |
-| Professional | S$700–850 | ~6 h | Growth + custom overlay design, b-roll curation, quote/concept overlays, animations, second carousel |
+| Tier | Blended price | Hands-on time | Implied rate |
+|---|---:|---:|---:|
+| Essential | S$204 | ~1.0 h | S$204/h |
+| Growth | S$339 | ~2.0 h | S$170/h |
+| Premium | S$624 | ~4.0 h | S$156/h |
 
-### Growth breakdown
-
-| Task | Time |
-|---|---|
-| Sync + multicam setup review | 15 min |
-| Intro/outro insert | 5 min |
-| Hook selection + teaser config | 20 min |
-| Thumbnail design | 30 min |
-| Speaker title overlays | 10 min |
-| Chapter marker writing | 15 min |
-| Template overlay configuration | 15 min |
-| Clip selection + configure (3 + 1 teaser) | 20 min |
-| Caption/hook title/branding review on clips | 10 min |
-| Carousel generation + review | 15 min |
-| Final review + delivery | 10 min |
-| **Total** | **~2.5 h** |
-
-### Professional additions (on top of Growth)
-
-| Task | Time |
-|---|---|
-| Custom overlay design | 1.5 h |
-| B-roll research + curation | 1 h |
-| Quote / concept / term overlays | 45 min |
-| Additional clips (5+1 vs 3+1) | 15 min |
-| Second carousel (custom) | 40 min |
-| Animations review | 30 min |
-| Final review + delivery | 15 min |
-| **Additional total** | **~5 h** |
+Even after adding admin/revision overhead, all three tiers maintain healthy effective hourly returns.
 
 ---
 
-## Implied Hourly Rate
+## Per-Person Revenue Scenarios
 
-| Package | Price (mid) | Hands-on time | Rate |
-|---|---|---|---|
-| Hobby | S$85 | 35 min | **S$146 / h** |
-| Hobby Plus | S$135 | 50 min | **S$162 / h** |
-| Growth | S$360 | 2.5 h | **S$144 / h** |
-| Professional | S$775 | 6 h | **S$129 / h** |
+### Scenario A — Conservative Mix
 
-All tiers clear S$125/h. Hobby is intentionally priced for affordability and volume — the rate holds because the pipeline makes it fast. Growth and Professional carry the bulk of the financial targets.
+| Tier | Episodes / month | Revenue | Time |
+|---|---:|---:|---:|
+| Essential | 10 | S$2,040 | 10 h |
+| Growth | 8 | S$2,712 | 16 h |
+| Premium | 1 | S$624 | 4 h |
+| **Total** | **19** | **S$5,376** | **30 h / month** |
 
-Compared to a typical Singapore freelance video editor billing S$35–80/h for traditional editing, the implied rates here reflect the value of multi-deliverable output per session, not just edit time.
+Near target with moderate volume.
 
----
+### Scenario B — Target Mix (Growth-led)
 
-## Working Backwards: Episodes Needed Per Person
+| Tier | Episodes / month | Revenue | Time |
+|---|---:|---:|---:|
+| Essential | 5 | S$1,020 | 5 h |
+| Growth | 10 | S$3,390 | 20 h |
+| Premium | 2 | S$1,248 | 8 h |
+| **Total** | **17** | **S$5,658** | **33 h / month** |
 
-At ~S$145/h blended average, hitting S$5,500/month requires **~38 billable hours/month**. Accounting for admin, client communication, and revisions at ~70% efficiency, this implies **~13 working hours/week** — comfortably part-time during a transition period.
+Clears the midpoint target with manageable weekly hours.
 
-All scenarios below are **per person**. See the Team Summary at the bottom for combined figures.
+### Scenario C — Premium-Weighted
 
-### Scenario A — Conservative (early clients, mixed tiers)
+| Tier | Episodes / month | Revenue | Time |
+|---|---:|---:|---:|
+| Growth | 6 | S$2,034 | 12 h |
+| Premium | 6 | S$3,744 | 24 h |
+| **Total** | **12** | **S$5,778** | **36 h / month** |
 
-| Package | Episodes / month | Revenue | Time |
-|---|---|---|---|
-| Hobby Plus | 12 | S$1,620 | 10 h |
-| Growth | 8 | S$2,880 | 20 h |
-| Professional | 2 | S$1,550 | 12 h |
-| **Total** | **22** | **S$6,050** | **~42 h / month** |
-
-Already clears S$6,000 in the first months. ~10 h/week.
-
----
-
-### Scenario B — Target (Growth-anchored)
-
-| Package | Episodes / month | Revenue | Time |
-|---|---|---|---|
-| Hobby Plus | 4 | S$540 | 3.5 h |
-| Growth | 12 | S$4,320 | 30 h |
-| Professional | 3 | S$2,325 | 18 h |
-| **Total** | **19** | **S$7,185** | **~51 h / month** |
-
-Steady-state for a studio-focused operation. Exceeds the S$6,000 target with headroom. ~13 h/week.
+Fewer accounts needed, but requires stronger trust and case studies.
 
 ---
 
-### Scenario C — Optimistic (Professional-heavy, established reputation)
+## Target Market Model (Singapore)
 
-| Package | Episodes / month | Revenue | Time |
-|---|---|---|---|
-| Growth | 5 | S$1,800 | 12.5 h |
-| Professional | 6 | S$4,650 | 36 h |
-| **Total** | **11** | **S$6,450** | **~49 h / month** |
+Primary motion is B2B/B2Creator: creator teams, business podcasts, and studio partners.
 
-11 episodes/month at ~12 h/week. Comfortably above target with fewer clients. Requires a track record to command Professional retainers.
+### Anchor signals from market leader activity
 
----
+Reference source: https://singapore.poddster.com/professional-podcast-editing
 
-## Realistic Client Model
+- Trusted by 2k+ podcasters, creators and brands
+- Created 3K+ videos
+- 6 studios in Singapore
 
-The service is sold to **podcast studios**, not individual podcasters directly. A studio typically manages multiple clients.
+These are treated as market activity signals. For financial planning, we model only the recurring subset likely to buy monthly post-production.
 
-| Studio clients | Podcasters per studio | Frequency | Episodes / month per editor |
-|---|---|---|---|
-| 1 studio | 4 podcasters | bi-weekly | 8 |
-| 2 studios | 4 podcasters each | bi-weekly | 16 |
-| 2 studios | 4 podcasters each | weekly | 32 |
+### Serviceable recurring client scenarios
 
-**Target scenario (Scenario B) requires ~2 studio clients per editor.** Across the team of 3, that is **6 studio accounts** with ~3–4 active podcasters each on bi-weekly schedules.
+| Scenario | Assumption applied to 2,000 cumulative accounts | Estimated recurring accounts |
+|---|---|---:|
+| Conservative | 5% are active recurring and fit for ongoing post-production | ~100 |
+| Base case | 8% active recurring fit | ~160 |
+| Upside | 12% active recurring fit | ~240 |
 
----
+### Segment behavior and volume impact
 
-## Add-On Revenue Potential
+| Client type | Typical active shows | Typical cadence | Episode volume impact |
+|---|---:|---|---|
+| Creator team | 1 to 2 shows | Weekly or bi-weekly | 4 to 8 ep/month |
+| Business podcast | 1 show | Weekly | 4 ep/month |
+| Studio partner | 3 to 6 shows | Weekly or bi-weekly | 12+ ep/month |
 
-Add-ons close the gap to the S$6,000 ceiling without adding full episodes.
+A single studio partner or two to three business/creator clients can cover target monthly volume per editor.
 
-| Add-On | Price (mid) | If 50% of clients take it (Scenario B, 19 ep) | Monthly uplift |
-|---|---|---|---|
-| Episode summary article | S$70 | ~10 episodes | +S$700 |
-| LinkedIn episode summary | S$42 | ~10 episodes | +S$420 |
-| **Combined uplift** | | | **+S$1,120 / month** |
+### Willingness to pay (setup-based)
 
-With add-ons, Scenario B reaches **S$8,305/month per person** — well above the S$6,000 target.
+Using published Poddster line items as baseline spend expectations:
 
----
+| Current setup archetype | Poddster line-item total | Buyer mindset |
+|---|---:|---|
+| Recording + standard edit | S$273 + S$280 = S$553 | Cost-aware but quality-seeking |
+| Recording + edit + subtitles + highlights | S$273 + S$280 + S$453 + S$280 = S$1,286 | Growth-oriented, needs distribution outputs |
+| Same as above + distribution | S$1,286 + S$292 = S$1,578 | Team with recurring campaign needs |
 
-## Ramp Timeline (Per Person)
-
-| Month | Activity | Est. Episodes / month | Est. Revenue |
-|---|---|---|---|
-| 1–2 | Onboard first studio, establish workflow | 6–8 | S$1,500–2,500 |
-| 3–4 | Second studio, optimise pipeline | 12–15 | S$3,800–5,000 |
-| 5–6 | Upgrade mix toward Growth/Professional | 16–19 | S$5,500–7,200 |
-| 7+ | Steady state with add-ons | 19 + add-ons | S$7,000–8,000+ |
-
-Income replacement is realistic within **5–6 months** of consistent client acquisition — faster if any of the three already has warm studio contacts.
+Implication for poddedit:
+- Buyers already operating in S$553 to S$1,578 cycles are usually buying for consistency and speed, not just one-off cheapest edits.
+- This supports retainer-first packaging and long-term partnerships with predictable output SLAs.
 
 ---
 
-## Team Summary (3 Cohosts Combined)
+## Add-On Revenue Uplift
+
+Only add-ons present in the final slides are included.
+
+Assumptions on Scenario B volume (17 episodes/month):
+- 30% take one extra clip (+S$30)
+- 20% take one extra carousel (+S$50)
+- 15% take rush (+25% on package, assumed S$339 avg)
+- 25% take chapter markers (S$29)
+
+Estimated monthly uplift:
+- Extra clips: 5 x S$30 = S$150
+- Extra carousels: 3 x S$50 = S$150
+- Rush: 3 x (0.25 x S$339) = S$254
+- Chapter markers: 4 x S$29 = S$116
+- **Total uplift: ~S$670/month per person**
+
+Scenario B with add-ons becomes approximately **S$6,328/month per person**.
+
+---
+
+## Team Summary (3 People)
 
 | Scenario | Episodes / month | Revenue / month | Revenue / year |
-|---|---|---|---|
-| Conservative | 66 | S$18,150 | S$217,800 |
-| Target | 57 | S$21,555 | S$258,660 |
-| Optimistic | 33 | S$19,350 | S$232,200 |
-| Target + add-ons | 57 | S$24,915 | S$298,980 |
+|---|---:|---:|---:|
+| Conservative | 57 | S$16,128 | S$193,536 |
+| Target | 51 | S$16,974 | S$203,688 |
+| Premium-weighted | 36 | S$17,334 | S$208,008 |
+| Target + add-ons | 51 | S$18,984 | S$227,808 |
