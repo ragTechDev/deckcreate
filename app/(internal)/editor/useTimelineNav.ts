@@ -91,7 +91,8 @@ export function useTimelineNav({
     if (preset === 'full') { fitAll(); return; }
     if (preset === 'clips') { fitContent(); return; }
     // 'frames': maximum zoom centred on current time
-    setNav(prev => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    setNav(_prev => {
       const z = MAX_ZOOM;
       const visDur = total / z;
       return { zoom: z, pan: clamp(currentTime - visDur * 0.35, 0, Math.max(0, total - visDur)) };
@@ -101,6 +102,7 @@ export function useTimelineNav({
   // ── Auto-follow: keep playhead at 35% during playback ─────────────────────
   useEffect(() => {
     if (!isPlaying) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setNav(prev => {
       const visDur = total / prev.zoom;
       const ratio = (currentTime - prev.pan) / visDur;

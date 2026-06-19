@@ -1,7 +1,7 @@
 import { Container, Stack, Title, Text } from '@mantine/core';
-import { Header } from '../components/Header';
-import { CarouselForm } from '../components/CarouselForm';
-import { InstagramEmbed } from '../components/InstagramEmbed';
+import { Header } from '../../components/Header';
+import { CarouselForm } from '../../components/CarouselForm';
+import { InstagramEmbed } from '../../components/InstagramEmbed';
 
 export default function CarouselPage() {
   return (
