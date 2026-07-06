@@ -83,24 +83,49 @@ export type LineCaptionsMeta = { title: string; duration: number; fps: number; v
 export type LineCaptionsDoc = { meta: LineCaptionsMeta; lines: CaptionLine[] };
 ```
 
+Whisper tokens are BPE sub-word pieces, not whole words (`Transcriber.js:213-218`
+puts raw whisper.cpp token text straight into `token.tokens[]`, no word
+reconstruction) — a "word" like "jinx" can arrive as two tokens (`" j"`,
+`"inx"`), and punctuation can arrive as its own token. Chunking raw tokens by
+count-of-3 would split lines mid-word. `CaptionOverlay.tsx:43-103` already
+solves this for its own rendering path with a `wordGroups` merge step; port a
+trimmed version of the same merge (BPE-continuation attach, contraction-suffix
+attach, punctuation attach — skip the reverse-iteration hook-overlap dedup,
+which doesn't apply to a fresh non-overlapping transcript) into
+`scripts/line-captions/chunkLines.js`, since this runs in plain Node
+(`scripts/`) rather than the TS/browser `remotion/` runtime the existing
+implementations live in.
+
 Add `scripts/line-captions/chunkLines.js` exporting
 `chunkIntoLines(segments, wordsPerLine = 3)`:
-- Filters each segment's tokens to spoken, non-cut tokens using a local
-  `isSpokenToken(token)` port of the regex in `remotion/lib/tokens.ts` (kept
-  as a plain-JS duplicate here, matching the existing precedent of
-  `isSpecialToken` being duplicated across `align-transcript.js` and
-  `edit-transcript.js` rather than shared).
-- Buckets spoken tokens into runs of exactly `wordsPerLine`, never spanning a
-  segment boundary. A trailing partial run stands alone.
-- `startMs = firstToken.t_dtw * 1000`. `endMs` = the next run's start time
+- `buildWordGroups(tokens)`: drops `isSpecialToken` tokens (imported from
+  `../edit-transcript.js`, exported at `edit-transcript.js:2104`) and `cut`
+  tokens; for each remaining token, attaches it to the previous group's text
+  when it's a BPE continuation (`!t.text.startsWith(' ')`), a contraction
+  suffix (`/^'(m|s|t|re|ve|ll|d)$/i`), or punctuation-only
+  (`/^[^\w\s']+$/`); otherwise starts a new group with `{ text: trimmed,
+  t_dtw: t.t_dtw, t_end: t.t_end }`. Continuation/suffix attaches append the
+  trimmed token text directly (no separator); a later attach's `t_end`
+  overwrites the group's `t_end` so the group's end time tracks its last
+  token.
+- `chunkIntoLines`: runs `buildWordGroups` per segment (skipping `cut`
+  segments), buckets the resulting whole-word groups into runs of exactly
+  `wordsPerLine`, never spanning a segment boundary — a trailing partial run
+  (1-2 words) stands alone.
+- `startMs = run[0].t_dtw * 1000`. `endMs` = the next run's `t_dtw * 1000`
   within the same segment, or for the last run in a segment:
-  `(lastToken.t_end ?? segment.end) * 1000`.
+  `(run[run.length - 1].t_end ?? segment.end) * 1000`.
+- Line text = `run.map(g => g.text).join(' ')`.
 - Assigns sequential `id` starting at 1 across the whole transcript.
 - `speaker` comes from `segment.speaker`.
 
 Add `scripts/line-captions/chunkLines.test.js` covering:
-- An exact multiple of 3 spoken tokens → one line per 3 words.
+- An exact multiple of 3 word-groups → one line per 3 words.
 - A non-multiple → trailing partial line of 1-2 words.
+- A word split across two BPE tokens (no leading space on the second) is
+  reconstructed as one word, not counted as two.
+- A punctuation-only token attaches to the preceding word instead of
+  starting its own group.
 - Two adjacent segments with different speakers → no line spans both.
 - `cut: true` tokens/segments are excluded entirely.
 - A token without `t_end` falls back to `segment.end` for the last run.
