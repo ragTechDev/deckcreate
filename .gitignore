@@ -67,6 +67,7 @@ public/thumbnail/         # candidate frames, cutouts, manifest
 public/renders/           # final rendered .mp4 files
 public/output/            # carousel exports
 public/shorts/
+public/line-captions/
 public/sync/output
 
 # ── Editable pipeline outputs (text/JSON) ─────────────────────────────────────

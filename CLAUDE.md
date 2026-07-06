@@ -105,6 +105,27 @@ segments[]
 
 `CropViewport`: `cx/cy` = normalised centre (0–1), `w/h` = crop dimensions (0–1).
 
+### lines.json
+
+Standalone artifact for the line-caption shorts pipeline (`public/line-captions/{id}/lines.json`) — not part of `transcript.json`; no segments/tokens/cuts.
+
+```
+meta
+  title:      string
+  duration:   number     total video duration in seconds
+  fps:        60
+  videoSrc?:  string     path relative to /public
+
+lines[]
+  id:       number       sequential across the whole clip
+  speaker:  string
+  text:     string       exactly wordsPerLine (default 3) whole words
+  startMs:  number       milliseconds from start of source video
+  endMs:    number
+```
+
+A line never spans a segment/speaker boundary. Produced by `chunkIntoLines()` (`scripts/line-captions/chunkLines.js`); human-edited via `lines.doc.txt` (`captions:create` / `captions:merge`) which only rewrites `text` — `startMs`/`endMs`/`speaker` are untouched by edits.
+
 ---
 
 ## Rendering Model
@@ -215,6 +236,13 @@ ty    = (0.5 - vp.cy) × 100%
 | `app/components/AutoCarouselForm.tsx` | Carousel generator (810 lines) | Decompose (Phase 8) |
 | `app/context/AuthContext.tsx` | Auth context with hardcoded credentials | Fix (Phase 7) |
 | `vscode-transcript-language/src/extension.js` | VSCode transcript extension | Add Wrap-in-cut command (Phase 0.5) |
+| `remotion/types/lineCaptions.ts` | `CaptionLine`, `LineCaptionsMeta`, `LineCaptionsDoc` | — |
+| `remotion/components/LineCaptionOverlay.tsx` | Renders the active fixed-window `CaptionLine`; speaker-tinted via `brand.colors.palette` | — |
+| `remotion/LineCaptionClip.tsx` | Raw video pass-through + `LineCaptionOverlay`; registered per clip in `Root.tsx` as `LineCaptionClip-{id}` | — |
+| `scripts/line-captions/chunkLines.js` | `chunkIntoLines()` — merges BPE tokens into whole words, buckets into fixed-size (default 3) caption lines, never spanning a segment/speaker boundary | — |
+| `scripts/line-captions/create-line-captions.js` | Raw portrait video → audio extract → transcribe → align → diarize (if `--num-speakers > 1`) → `lines.json` + `lines.doc.txt` | — |
+| `scripts/line-captions/merge-line-captions.js` | Re-parses `lines.doc.txt`, overwrites `text` on matching `lines.json` entries by `[id]` | — |
+| `scripts/line-captions/render-line-captions.js` | Renders `LineCaptionClip-{id}` to `public/renders/` | — |
 
 ---
 
