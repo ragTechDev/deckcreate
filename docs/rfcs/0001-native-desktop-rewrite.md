@@ -23,6 +23,20 @@ The current pipeline (Node.js/TypeScript + Next.js + Remotion, documented in the
 
 ---
 
+## Why Not Stay in TypeScript/Python?
+
+**Not feasible for the piece that actually matters — the render/composite core.** The bottleneck isn't that the TypeScript orchestration code is slow; it's that the render step delegates to a browser engine (headless Chromium via Puppeteer) with no GPU-compositing path and per-frame IPC/serialization overhead by design (Context #1). Every line of orchestration code could be rewritten in flawless idiomatic TypeScript and the 2–5fps ceiling would not move, because the ceiling lives in the browser engine underneath Remotion, not in the code around it.
+
+**Dropping Remotion but staying in Node doesn't avoid the underlying work.** The natural objection is "drop Remotion, write our own compositor, stay in Node" — but Node's runtime has no native GPU-texture or hardware-codec APIs. A real fix means either a native Node addon (N-API) wrapping FFmpeg/wgpu/VideoToolbox/NVENC in C, C++, or Rust, or shelling out to an external native binary. Either way, a compiled-language core gets written and maintained regardless — "staying in TypeScript" just hides that same native code behind an extra Node/FFI boundary, adding a second language and a process hop without removing the actual work. This is already visible in the current codebase: `scripts/config/hardware.ts` can't do real GPU capability probing from pure JS — it falls back to guessing from `process.platform`/`process.arch` strings (Context #2), because querying actual hardware requires native code or shelling out, which is exactly the inconsistency this rewrite exists to fix.
+
+**Python has the same shape of problem, for a different reason.** The GIL prevents true parallel frame processing, and Python has no native cross-platform GPU/codec layer of its own — every fast Python video/ML library (PyAV, PyTorch+CUDA) is a thin wrapper around the same C/C++ libraries a rewrite would call directly. Using Python for the compositor would mean shipping an interpreter plus a per-platform native-extension matrix across Mac ARM/Intel and Windows — arguably a worse consistency problem than the one described in Context #3.
+
+**So "stay in the current stack" isn't a third option distinct from "move to a compiled language" — it's the same native-code requirement wearing a thinner disguise.** The real decision is where the compiled-language boundary sits: a subprocess/native-addon bolted onto unchanged Node/Python orchestration, or a first-class native application that owns the hot path directly and treats Python as a subordinate subprocess purely for pretrained models (Decision §4 — Python doesn't disappear, it stops being the orchestrator).
+
+**Why the field narrows to Rust and C++.** Once the hot path has to be compiled/native, the requirements are: direct FFI to platform codec APIs (VideoToolbox, NVENC/CUDA), real multi-threading without an interpreter lock, and a single shipped binary instead of an interpreter-plus-extensions matrix per platform. Rust and C++ are the two languages with mature ecosystems on all three axes for this category of application (video compositing/NLE) — which is why the decision below is Rust vs. C++, not a broader language survey.
+
+---
+
 ## Decision
 
 ### 1. Language: Rust, not C++
