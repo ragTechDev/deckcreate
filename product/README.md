@@ -1,6 +1,10 @@
-# Product Founding Docs
+# Product Founding Docs — poddedit
 
-This directory is the product/discovery half of the native-rewrite planning work — the companion to [`docs/rfcs/0001-native-desktop-rewrite.md`](../docs/rfcs/0001-native-desktop-rewrite.md), which is the *technical* half. That RFC justifies the rewrite from engineering pain (Remotion's render ceiling, hardware inconsistency). This directory exists to justify it from **customer** pain, and to build the artifacts that turn "we personally find this painful" into engineering issues grounded in evidence beyond the three of us.
+**Naming note:** ragTech is the podcast/team. **poddedit** is the name of the product being built — the native rewrite described in the technical RFC, plus the editing-service business built on top of it. Use "poddedit" when referring to the product itself in these docs; "ragTech" refers to the team/podcast specifically.
+
+This directory is the product/discovery half of the poddedit planning work — the companion to [`docs/rfcs/0001-native-desktop-rewrite.md`](../docs/rfcs/0001-native-desktop-rewrite.md), which is the *technical* half. That RFC justifies the rewrite from engineering pain (Remotion's render ceiling, hardware inconsistency). This directory exists to justify it from **customer** pain, and to build the artifacts that turn "we personally find this painful" into engineering issues grounded in evidence beyond the three of us.
+
+Related, deal-specific collateral currently lives on the `editing-services` branch (`docs/PRICING_TIERS.md`, `docs/EDITING_PACKAGES.md`, `docs/FINANCIAL_PROJECTIONS.md`) — written to negotiate the podcast-studio partnership. The concrete pricing/market figures from that work have been folded into `01-lean-canvas.md` below; see that branch for the full negotiation-specific detail.
 
 It's designed to be portable: when the new repo is created, copy this whole `product/` folder over as-is. Nothing in here depends on the current codebase.
 
