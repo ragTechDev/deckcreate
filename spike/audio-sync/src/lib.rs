@@ -199,7 +199,7 @@ mod tests {
         let corr = make_corr(1024, 724, 1.0);
         let lag = find_best_lag(&corr, 8000);
         assert!(lag < 0.0, "peak at index > N/2 should yield a negative lag, got {lag}");
-        let expected = ((-300.0_f64) * 30.0 / 8000.0).round() / 30.0;
+        let expected = ((-300.0_f64) * 30.0 / 8000.0 + 0.5).floor() / 30.0;
         assert_eq!(lag, expected);
     }
 
@@ -210,7 +210,7 @@ mod tests {
         corr[50] = 1.0;
         corr[200] = 1.0;
         let lag = find_best_lag(&corr, 8000);
-        let expected = (50.0_f64 * 30.0 / 8000.0).round() / 30.0;
+        let expected = (50.0_f64 * 30.0 / 8000.0 + 0.5).floor() / 30.0;
         assert_eq!(lag, expected, "tie-break should select earliest candidate (index 50)");
     }
 
