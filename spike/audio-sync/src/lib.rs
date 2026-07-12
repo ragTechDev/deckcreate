@@ -13,6 +13,9 @@ pub fn next_power_of_two(n: usize) -> usize {
 /// Replicates `computeCrossCorrelation` from `scripts/sync/AudioSyncer.js` L145–186.
 /// The division by N matches the JS formula: `correlation[i] = result[2*i] / N`.
 /// rustfft's inverse transform does not normalize, so the division is applied explicitly here.
+///
+/// # Preconditions
+/// Both slices must be non-empty. An empty slice causes `len_a + len_b - 1` to underflow.
 pub fn compute_cross_correlation(samples_a: &[f32], samples_b: &[f32]) -> Vec<f64> {
     let len_a = samples_a.len();
     let len_b = samples_b.len();
@@ -67,6 +70,9 @@ mod tests {
 
         let corr = compute_cross_correlation(&a, &b);
         let n = corr.len();
+
+        // next_power_of_two(64 + 64 - 1) = 128
+        assert_eq!(n, 128, "output length should be next_power_of_two(len_a + len_b - 1)");
 
         let peak_idx = corr
             .iter()
