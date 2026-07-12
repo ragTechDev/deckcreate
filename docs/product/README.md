@@ -26,9 +26,23 @@ Do these roughly in sequence — each one narrows/grounds the next. Don't skip s
 | 6 | [`05-personas.md`](05-personas.md) | 1–2 lightweight personas distilled from interview clusters | after interviews |
 | 7 | [`06-opportunities/`](06-opportunities/) | One doc per opportunity surfaced above — the direct bridge to epics/issues in the new repo | ongoing |
 
-## What "done" looks like before writing the first engineering issue in the new repo
+## What "done" looks like at each phase
 
-- Lean Canvas has been revised at least once based on real interview feedback (not just your own assumptions).
-- At least 5 interviews with people outside ragTech, synthesized (not just raw transcripts sitting unread).
-- A journey map that names specific pain points with evidence (a quote, a timing observation), not just "editing is slow."
-- Each opportunity doc traces back to a specific journey-map pain point or interview finding — if you can't point to the evidence, it's not ready to become an epic yet.
+### Phase 1 — internal dogfooding (current phase)
+
+The tool stays internal; what we sell externally is the editing service, not the app. Engineering issues can begin once:
+
+- Opportunity docs exist in `06-opportunities/` for each area of work, with evidence explicitly labeled (internal dogfooding, RFC analysis, or financial modeling — not just "we find this annoying").
+- Each opportunity doc links to the RFC section or product doc that grounds it — if that link doesn't exist, it's a hypothesis without a paper trail, not a ready opportunity.
+- The journey map (`04-journey-map.md`) is filled in from ragTech's own pipeline experience, with pain points tied to observed time costs or named failure modes.
+
+Interviews and external validation are **not** a gate for Phase 1. The studio-rental partnership (Lean Canvas §2, Segment 1) is the one near-term external relationship that matters; it may produce real-usage feedback, but it does not replace the internal dogfooding track.
+
+### Phase 2 — before scaling externally / self-serve product
+
+When we are satisfied with the product internally (multiple videos, multiple brands, stable quality) and want to begin serving external customers directly — not just fulfilling via the studio partner — the following should be true before treating any new opportunity as validated:
+
+- At least 5 interviews with people outside ragTech, synthesized in `03-customer-interviews/synthesis.md`.
+- The journey map revised at least once based on real interview findings — not just ragTech's own pipeline.
+- Lean Canvas revised at least once based on real interview feedback.
+- Each new opportunity doc cites a specific journey-map pain point or interview quote as evidence — if it can't, it stays labeled "hypothesis."

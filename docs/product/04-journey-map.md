@@ -1,8 +1,8 @@
 # Customer Journey Map
 
-Build this **after** the first round of interviews (`03-customer-interviews/synthesis.md`) — it should reflect what a target customer's workflow actually looks like, not just ragTech's own pipeline. Use your own dogfooding (the technical stages are already documented in `docs/rfcs/0001-native-desktop-rewrite.md` and the root `CLAUDE.md`) as one data point, not the only one.
+Build this from ragTech's own pipeline experience first — the technical stages are already documented in `docs/rfcs/0001-native-desktop-rewrite.md` and the root `CLAUDE.md`, and the time costs and failure modes are directly observed. Label each pain point's evidence source honestly (internal dogfooding, RFC analysis, financial modeling). When external interviews happen (Phase 2 per `README.md`), revise the relevant rows and update the evidence trail — don't wait to fill this in.
 
-Map one representative persona/segment at a time — if you have multiple segments with meaningfully different workflows (e.g. solo creator vs. small team), do a separate map for each rather than averaging them into a mushy composite.
+Map one representative persona/segment at a time — if you have multiple segments with meaningfully different workflows (e.g. ragTech operator vs. external solo creator), do a separate map for each rather than averaging them into a mushy composite.
 
 ## Persona / segment for this map
 
