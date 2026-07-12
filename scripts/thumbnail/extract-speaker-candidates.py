@@ -141,7 +141,12 @@ def find_viewport_at_time(speaker_profile: dict, timestamp: float) -> Optional[d
 
 
 def _detect_face_bbox(img):
-    """Return (face_top_px, face_bottom_px, n_faces) or None on error."""
+    """Return (face_top_px, face_bottom_px, n_faces) or None on error.
+
+    When multiple faces are detected, picks the one nearest the horizontal
+    centre of the crop — the viewport is already centred on the target
+    speaker, so the closest face to cx=0.5 belongs to them.
+    """
     try:
         import mediapipe as mp
         import numpy as np
@@ -156,7 +161,14 @@ def _detect_face_bbox(img):
             n = len(results.detections) if results.detections else 0
             if n == 0:
                 return (0, crop_h, 0)
-            det = results.detections[0]
+            if n == 1:
+                det = results.detections[0]
+            else:
+                # Multiple faces — pick the one closest to the horizontal centre.
+                def face_cx(d):
+                    bb = d.location_data.relative_bounding_box
+                    return bb.xmin + bb.width / 2
+                det = min(results.detections, key=lambda d: abs(face_cx(d) - 0.5))
             bb = det.location_data.relative_bounding_box
             face_top = int(max(0, bb.ymin * crop_h))
             face_bottom = int(min(crop_h, (bb.ymin + bb.height) * crop_h))
@@ -194,8 +206,13 @@ def crop_to_speaker(img, viewport: dict):
 
     if bbox is not None:
         face_top, face_bottom, n_faces = bbox
-        if n_faces != 1:
-            return initial_crop, False
+        if n_faces == 0:
+            # Detection ran but found no faces — use raw viewport crop.
+            vp_y1 = int(max(0, (cy - h / 2) * src_h))
+            vp_y2 = int(min(src_h, (cy + h / 2) * src_h))
+            return img.crop((x1, vp_y1, x2, vp_y2)), True
+        # 1 face: normal path. N>1 faces: _detect_face_bbox already picked the
+        # closest face to viewport centre — proceed the same way.
         head_h = face_bottom - face_top
         new_top = max(0, face_top - int(0.7 * head_h))
         new_bottom = min(crop_h, face_bottom + int(1.5 * head_h))
@@ -306,7 +323,7 @@ def process_speaker_angle(
             crop, face_detected = crop_to_speaker(img, vp)
 
             if not face_detected:
-                sys.stderr.write(f'    Frame at {ts:.2f}s: multiple/no faces — skipping\n')
+                sys.stderr.write(f'    Frame at {ts:.2f}s: no usable face — skipping\n')
                 continue
 
             # Save candidate preview

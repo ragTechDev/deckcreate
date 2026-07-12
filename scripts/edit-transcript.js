@@ -638,6 +638,10 @@ function buildInstructionsBlock() {
     '                    > START "we need"',
     '                    [12] ...that is all for today.',
     '                    > END "for today"',
+    '                  merge-doc writes back the resolved timestamp so you can fine-tune it:',
+    '                    > START "we need" 42.150',
+    '                    > END "for today" 187.320',
+    '                  Edit the number directly — it overrides phrase resolution on the next merge.',
     '',
     '  THUMBNAIL       Edit # THUMBNAIL section frontmatter to override thumbnail:',
     '                    bg="assets/episodes/ep01-bg.jpg"',
@@ -702,15 +706,12 @@ function buildDoc(transcript) {
 
     // Write > START when videoStart falls within this segment's time range
     if (videoStart !== undefined && videoStart >= seg.start && videoStart <= seg.end) {
-      // Find the word at videoStart to preserve phrase-based START markers
-      let startPhrase = '';
-      for (const t of seg.tokens) {
-        if (t.t_dtw >= videoStart && !isSpecialToken(t)) {
-          startPhrase = t.text.trim();
-          break;
-        }
-      }
-      lines.push(startPhrase ? `> START "${startPhrase}"` : '> START');
+      // Use the phrase the user originally wrote (stored in meta) — never re-derive it from tokens,
+      // as that would silently replace the user's phrase with whichever token happens to sit at that timestamp.
+      const startPhrase = transcript.meta.videoStartPhrase ?? null;
+      lines.push(startPhrase
+        ? `> START "${startPhrase}" ${videoStart.toFixed(3)}`
+        : `> START ${videoStart.toFixed(3)}`);
     }
 
     const text = cleanCaptionText(buildTextWithCuts(seg));
@@ -740,15 +741,11 @@ function buildDoc(transcript) {
 
     // Write > END when videoEnd falls within this segment's time range
     if (videoEnd !== undefined && videoEnd >= seg.start && videoEnd <= seg.end) {
-      // Find the word at videoEnd to preserve phrase-based END markers
-      let endPhrase = '';
-      for (const t of seg.tokens) {
-        if (t.t_dtw >= videoEnd && !isSpecialToken(t)) {
-          endPhrase = t.text.trim();
-          break;
-        }
-      }
-      lines.push(endPhrase ? `> END "${endPhrase}"` : '> END');
+      // Use the phrase the user originally wrote (stored in meta) — never re-derive from tokens.
+      const endPhrase = transcript.meta.videoEndPhrase ?? null;
+      lines.push(endPhrase
+        ? `> END "${endPhrase}" ${videoEnd.toFixed(3)}`
+        : `> END ${videoEnd.toFixed(3)}`);
     }
   }
 
@@ -1196,6 +1193,8 @@ function mergeDocIntoTranscript(transcript, docContent) {
   let pendingSpeakerSplits = [];
   let videoStart = transcript.meta.videoStart;
   let videoEnd = transcript.meta.videoEnd;
+  let videoStartPhrase = transcript.meta.videoStartPhrase ?? null;
+  let videoEndPhrase   = transcript.meta.videoEndPhrase   ?? null;
   let nextSegIsVideoStart = false;
   let pendingStartPhrase = null; // Store phrase when START appears before segment
 
@@ -1223,6 +1222,17 @@ function mergeDocIntoTranscript(transcript, docContent) {
         const range = resolvePhraseToTimeRange(hookPhrase, pendingSeg.tokens, pendingSeg.end);
         if (range) { hookFrom = range.from; hookTo = range.to; }
         else console.warn(`  ⚠ HOOK phrase not found in segment [${pendingSeg.id}]: "${hookPhrase}" — hooking full segment`);
+      } else {
+        // Bare HOOK (no phrase, no timing): derive bounds from segment token edges
+        // so the timing is written back to the doc and can be fine-tuned.
+        const realTokens = pendingSeg.tokens.filter(t => !isSpecialToken(t));
+        const firstTok = realTokens[0];
+        const lastTok  = realTokens[realTokens.length - 1];
+        hookFrom = firstTok ? firstTok.t_dtw : pendingSeg.start;
+        const wordEnd = lastTok
+          ? (lastTok.t_end ?? (lastTok.t_dtw + WORD_DURATION_ESTIMATE))
+          : pendingSeg.end;
+        hookTo = Math.max(pendingSeg.end, wordEnd);
       }
     }
     byId[pendingSeg.id] = { ...pendingSeg, hook, hookPhrase, hookFrom, hookTo, hookChar, hookGraphic, graphics, cameraCues, visualCuts: pendingVisualCuts.length ? [...pendingVisualCuts] : (pendingSeg.visualCuts ?? []) };
@@ -1291,43 +1301,62 @@ function mergeDocIntoTranscript(transcript, docContent) {
       continue;
     }
 
-    // Special trim markers: > START / > END (optionally with phrase for exact trim)
-    const startMatch = trimmed.match(/^>\s*START(?:\s+"([^"]+)")?$/);
-    const endMatch   = trimmed.match(/^>\s*END(?:\s+"([^"]+)")?$/);
+    // Special trim markers: > START / > END (optionally with phrase and/or explicit timestamp)
+    // Formats: > START  |  > START "phrase"  |  > START "phrase" 123.456  |  > START 123.456
+    const startMatch = trimmed.match(/^>\s*START(?:\s+"([^"]+)")?(?:\s+(\d+(?:\.\d+)?))?$/);
+    const endMatch   = trimmed.match(/^>\s*END(?:\s+"([^"]+)")?(?:\s+(\d+(?:\.\d+)?))?$/);
     if (startMatch) {
-      const phrase = startMatch[1];
-      if (phrase && pendingSeg) {
-        // START after segment: resolve immediately
+      const phrase       = startMatch[1];
+      const explicitTime = startMatch[2] !== undefined ? parseFloat(startMatch[2]) : undefined;
+      if (explicitTime !== undefined) {
+        // Explicit timestamp overrides phrase resolution — used for fine-tuning
+        videoStart       = explicitTime;
+        videoStartPhrase = phrase ?? videoStartPhrase; // preserve user's phrase if supplied
+        console.log(`  START explicit → ${videoStart.toFixed(3)}s`);
+      } else if (phrase && pendingSeg) {
+        // START after segment: resolve phrase immediately
         const range = resolvePhraseToTimeRange(phrase, pendingSeg.tokens, pendingSeg.end);
         if (range) {
-          videoStart = range.from;
+          videoStart       = range.from;
+          videoStartPhrase = phrase;
           console.log(`  START phrase "${phrase}" → ${videoStart.toFixed(3)}s`);
         } else {
           console.warn(`  ⚠ START phrase not found: "${phrase}"`);
           nextSegIsVideoStart = true;
+          videoStartPhrase = null;
         }
       } else if (phrase) {
         // START before segment: defer resolution until segment is parsed
         pendingStartPhrase = phrase;
       } else {
         nextSegIsVideoStart = true;
+        videoStartPhrase = null;
       }
       continue;
     }
     if (endMatch) {
-      const phrase = endMatch[1];
-      if (phrase && pendingSeg) {
+      const phrase       = endMatch[1];
+      const explicitTime = endMatch[2] !== undefined ? parseFloat(endMatch[2]) : undefined;
+      if (explicitTime !== undefined) {
+        // Explicit timestamp overrides phrase resolution — used for fine-tuning
+        videoEnd       = explicitTime;
+        videoEndPhrase = phrase ?? videoEndPhrase; // preserve user's phrase if supplied
+        console.log(`  END explicit → ${videoEnd.toFixed(3)}s`);
+      } else if (phrase && pendingSeg) {
         // Find exact time of phrase end within current segment
         const range = resolvePhraseToTimeRange(phrase, pendingSeg.tokens, pendingSeg.end);
         if (range) {
-          videoEnd = range.to;
+          videoEnd       = range.to;
+          videoEndPhrase = phrase;
           console.log(`  END phrase "${phrase}" → ${videoEnd.toFixed(3)}s`);
         } else {
           console.warn(`  ⚠ END phrase not found: "${phrase}"`);
-          videoEnd = pendingSeg.end; // fallback to segment end
+          videoEnd       = pendingSeg.end; // fallback to segment end
+          videoEndPhrase = null;
         }
       } else if (pendingSeg) {
-        videoEnd = pendingSeg.end;
+        videoEnd       = pendingSeg.end;
+        videoEndPhrase = null;
       }
       continue;
     }
@@ -1389,7 +1418,8 @@ function mergeDocIntoTranscript(transcript, docContent) {
       const speaker = inlineSpeaker ?? currentSpeaker ?? seg.speaker;
 
       if (nextSegIsVideoStart) {
-        videoStart = seg.start;
+        videoStart       = seg.start;
+        videoStartPhrase = null;
         nextSegIsVideoStart = false;
       }
 
@@ -1397,11 +1427,13 @@ function mergeDocIntoTranscript(transcript, docContent) {
       if (pendingStartPhrase) {
         const range = resolvePhraseToTimeRange(pendingStartPhrase, tokens, seg.end);
         if (range) {
-          videoStart = range.from;
+          videoStart       = range.from;
+          videoStartPhrase = pendingStartPhrase;
           console.log(`  START phrase "${pendingStartPhrase}" → ${videoStart.toFixed(3)}s`);
         } else {
           console.warn(`  ⚠ START phrase not found: "${pendingStartPhrase}" — using segment start`);
-          videoStart = seg.start;
+          videoStart       = seg.start;
+          videoStartPhrase = null;
         }
         pendingStartPhrase = null;
       }
@@ -1427,7 +1459,13 @@ function mergeDocIntoTranscript(transcript, docContent) {
   }
   return {
     ...transcript,
-    meta: { ...transcript.meta, videoStart, videoEnd, ...(thumbnail !== null ? { thumbnail } : {}) },
+    meta: {
+      ...transcript.meta,
+      videoStart, videoEnd,
+      ...(videoStartPhrase !== null ? { videoStartPhrase } : { videoStartPhrase: undefined }),
+      ...(videoEndPhrase   !== null ? { videoEndPhrase   } : { videoEndPhrase:   undefined }),
+      ...(thumbnail !== null ? { thumbnail } : {}),
+    },
     segments: outSegments,
   };
 }
@@ -2060,6 +2098,8 @@ async function main() {
         start: Math.max(0, seg.start - off),
         end: Math.max(0, seg.end - off),
         tokens: seg.tokens.map(t => ({ ...t, t_dtw: Math.max(0, t.t_dtw - off) })),
+        cameraCues: (seg.cameraCues ?? []).map(cue => ({ ...cue, at: Math.max(0, cue.at - off) })),
+        graphics: (seg.graphics ?? []).map(g => ({ ...g, at: Math.max(0, g.at - off) })),
       })),
     };
     console.log(`Applied timestamp offset: -${off}s`);

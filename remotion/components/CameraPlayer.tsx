@@ -742,15 +742,15 @@ function collectCameraOverrides(
   profiles: CameraProfiles,
   fps: number,
   mainSections: Section[],
+  hookSections: Section[],
 ): OverrideEvent[] {
   const events: OverrideEvent[] = [];
 
-  // Pre-compute hook total frames to anchor main-segment cue positions.
-  const hookSegs = activeSegments.filter(s => s.hook && !s.cut);
-  let hookTotalFrames = 0;
-  for (let i = 0; i < hookSegs.length; i++) {
-    hookTotalFrames += Math.round(getOutputDuration(hookSegs[i]) * fps);
-  }
+  // Derive hookTotalFrames from hookSections — the same source buildCameraShots uses.
+  // Using getOutputDuration() per hook segment gives a different value because it does
+  // not apply the bridging logic inside buildHookSections, shifting all main-content
+  // override frames by seconds and placing them in the wrong segment.
+  const hookTotalFrames = hookSections.reduce((sum, s) => sum + s.trimAfter - s.trimBefore, 0);
 
   let hookCumFrame = 0; // used only for hook segments
 
@@ -857,7 +857,7 @@ export const CameraPlayer: React.FC<Props> = ({ src, hookSections, mainSections,
   // the composition-frame lookup stays in sync with the actual playback position.
   const shots = useMemo(() => {
     const pacing    = buildCameraShots(segments, profiles, fps, mainSections, hookSections, isShortForm);
-    const overrides = collectCameraOverrides(segments, profiles, fps, mainSections);
+    const overrides = collectCameraOverrides(segments, profiles, fps, mainSections, hookSections);
     const applied   = applyOverrides(pacing, overrides);
     if (mainOffset === 0) return applied;
     // Split any shot that straddles the hook/main boundary so the main portion

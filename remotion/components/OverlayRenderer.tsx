@@ -54,7 +54,7 @@ const SHORTFORM_COMPONENT_MAP: Record<string, React.FC<any>> = {
 };
 
 // Overlay types that should NOT appear during hook playback (but will appear in main video)
-const HOOK_EXCLUDED_OVERLAYS = new Set(['Callout', 'ConceptExplainer', 'QuoteCard', 'NameTitle', 'ImageWindow', 'GifWindow', 'DataFlowAnimation']);
+const HOOK_EXCLUDED_OVERLAYS = new Set(['Callout', 'ConceptExplainer', 'QuoteCard', 'NameTitle', 'GifWindow', 'DataFlowAnimation']);
 
 /**
  * Convert a raw audio timestamp (seconds) to its composition frame using a
@@ -120,7 +120,18 @@ export const OverlayRenderer: React.FC<OverlayRendererProps> = ({
 
           // 1. Hook timeline - only add if not in the excluded set
           if (!HOOK_EXCLUDED_OVERLAYS.has(graphic.type)) {
-            const hookStartFrame = rawTimeToGroupFrame(graphic.at, hookSections, fps);
+            // Clamp to the output-start of this segment's own hook section so the cue
+            // never bleeds into a preceding section when graphic.at < hookFrom.
+            // Mirrors HookOverlay's behaviour: if at <= sourceStart, use outputStartFrame.
+            const sectionOutputStart = rawTimeToGroupFrame(
+              segment.hookFrom ?? segment.start,
+              hookSections,
+              fps,
+            );
+            const hookStartFrame = Math.max(
+              sectionOutputStart,
+              rawTimeToGroupFrame(graphic.at, hookSections, fps),
+            );
             let hookDuration = fullDurationFrames;
             if (segment.hookFrom !== undefined && segment.hookTo !== undefined) {
               const hookClipDuration = Math.round((segment.hookTo - segment.hookFrom) * fps);
@@ -140,7 +151,7 @@ export const OverlayRenderer: React.FC<OverlayRendererProps> = ({
               durationInFrames: finalDuration,
               key: `${segment.id}-${idx}-hook-${graphic.type}`,
             });
-            console.log(`[OverlayRenderer] Hook cue ${graphic.type} on seg ${segment.id}: hookStart=${hookStartFrame}, duration=${finalDuration}, endFrame=${hookStartFrame + finalDuration}`);
+            console.log(`[OverlayRenderer] Hook cue ${graphic.type} on seg ${segment.id}: hookStart=${hookStartFrame}, sectionStart=${sectionOutputStart}, duration=${finalDuration}, endFrame=${hookStartFrame + finalDuration}`);
           }
 
           // 2. Main timeline (full duration at original position) - always add

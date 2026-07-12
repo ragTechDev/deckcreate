@@ -1,0 +1,54 @@
+{
+  "sourceWidth": 1920,
+  "sourceHeight": 1080,
+  "outputWidth": 1920,
+  "outputHeight": 1080,
+  "wideViewport": {
+    "cx": 0.5,
+    "cy": 0.5,
+    "w": 1,
+    "h": 1
+  },
+  "speakers": {
+    "Saloni:angle1": {
+      "label": "Saloni",
+      "closeupViewport": {
+        "cx": 0.3543,
+        "cy": 0.4492,
+        "w": 0.5732,
+        "h": 0.5732
+      },
+      "portraitCx": 0.3543,
+      "angleName": "angle1"
+    },
+    "Natasha:angle1": {
+      "label": "Natasha",
+      "closeupViewport": {
+        "cx": 0.4887,
+        "cy": 0.458,
+        "w": 0.5449,
+        "h": 0.5449
+      },
+      "portraitCx": 0.4887,
+      "angleName": "angle1"
+    },
+    "Victoria:angle1": {
+      "label": "Victoria",
+      "closeupViewport": {
+        "cx": 0.7211,
+        "cy": 0.447,
+        "w": 0.5547,
+        "h": 0.5547
+      },
+      "portraitCx": 0.7211,
+      "angleName": "angle1"
+    }
+  },
+  "angles": {
+    "angle1": {
+      "videoSrc": "sync/output/synced-output.mp4",
+      "sourceWidth": 1920,
+      "sourceHeight": 1080
+    }
+  }
+}
