@@ -1,7 +1,7 @@
-import { Container, Title, Text, Stack, Group, Paper, Button, Badge, ThemeIcon, SimpleGrid, Box, Anchor } from '@mantine/core';
+import { Container, Title, Text, Stack, Group, Paper, Button, Badge, ThemeIcon, SimpleGrid, Anchor } from '@mantine/core';
 import { IconPhoto, IconFileText, IconLeaf, IconSparkles, IconArrowRight, IconBrandYoutube, IconWand, IconLock } from '@tabler/icons-react';
-import { Header } from './components/Header';
-import { InstagramEmbed } from './components/InstagramEmbed';
+import { Header } from '../components/Header';
+import { InstagramEmbed } from '../components/InstagramEmbed';
 
 export default function Home() {
   return (
@@ -95,7 +95,7 @@ export default function Home() {
                   <Badge size="xs" variant="dot" color="primary">Timestamps</Badge>
                   <Badge size="xs" variant="dot" color="secondary">Filler removal</Badge>
                 </Group>
-                <Anchor href="/transcribe" underline="never">
+                <Anchor href="/get-youtube-captions" underline="never">
                   <Button
                     fullWidth
                     size="md"

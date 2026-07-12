@@ -21,7 +21,7 @@ import {
   IconLeaf,
   IconUsers,
 } from '@tabler/icons-react';
-import { Header } from '../components/Header';
+import { Header } from '../../components/Header';
 
 export default function AboutPage() {
   return (
@@ -198,7 +198,7 @@ export default function AboutPage() {
               <Anchor href="/carousel" underline="never">
                 <Button size="md">Create Carousel</Button>
               </Anchor>
-              <Anchor href="/transcribe" underline="never">
+              <Anchor href="/get-youtube-captions" underline="never">
                 <Button size="md" variant="light">Transcribe Video</Button>
               </Anchor>
             </Group>

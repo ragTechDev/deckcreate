@@ -10,8 +10,8 @@ import {
   IconPlayerPlay, IconPlayerPause, IconScissors, IconDeviceFloppy,
   IconArrowsMaximize,
 } from '@tabler/icons-react';
-import type { Transcript, TimeCut, CameraCue } from '../../remotion/types/transcript';
-import type { CameraProfiles } from '../../remotion/types/camera';
+import type { Transcript, TimeCut, CameraCue } from '../../../remotion/types/transcript';
+import type { CameraProfiles } from '../../../remotion/types/camera';
 import { Timeline, fmtTimecode } from './Timeline';
 import { useTimelineNav } from './useTimelineNav';
 

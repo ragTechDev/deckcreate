@@ -1,5 +1,5 @@
-import type { Segment, TimeCut, CameraCue } from '../../remotion/types/transcript';
-import type { CameraProfiles } from '../../remotion/types/camera';
+import type { Segment, TimeCut, CameraCue } from '../../../remotion/types/transcript';
+import type { CameraProfiles } from '../../../remotion/types/camera';
 
 // ─── Layout constants ────────────────────────────────────────────────────────
 export const RULER_H = 24;

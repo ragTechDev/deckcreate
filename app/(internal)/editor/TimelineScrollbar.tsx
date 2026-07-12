@@ -31,6 +31,7 @@ export const TimelineScrollbar: React.FC<Props> = ({ total, zoom, panOffset, onP
     if (!el) return;
     const ratio = (e.clientX - el.getBoundingClientRect().left) / el.offsetWidth;
     const clickedTime = ratio * total;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const thumbMid = panOffset + visDur / 2;
     // If click lands inside the thumb, start a drag; otherwise page-jump
     const thumbLPx = (panOffset / total) * el.offsetWidth;
@@ -93,6 +94,7 @@ export const TimelineScrollbar: React.FC<Props> = ({ total, zoom, panOffset, onP
           left: `${thumbL}%`,
           width: `${thumbW}%`,
           height: 6,
+          // eslint-disable-next-line react-hooks/refs
           background: dragRef.current ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.25)',
           borderRadius: 3,
           cursor: 'grab',

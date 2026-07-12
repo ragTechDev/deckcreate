@@ -1,9 +1,10 @@
+/* eslint-disable react-hooks/refs */
 'use client';
 
 import React, { useRef, useEffect, useCallback } from 'react';
 import { Box, Text } from '@mantine/core';
-import type { Transcript, TimeCut, CameraCue } from '../../remotion/types/transcript';
-import type { CameraProfiles } from '../../remotion/types/camera';
+import type { Transcript, TimeCut, CameraCue } from '../../../remotion/types/transcript';
+import type { CameraProfiles } from '../../../remotion/types/camera';
 import {
   CANVAS_H, RULER_H, TRACK_H, TRACK_GAP, TRIM_W, N_TRACKS, CLIP_PAD,
   CAM_TRACK_Y, CAM_TRACK_H, CAM_HANDLE_HIT,
