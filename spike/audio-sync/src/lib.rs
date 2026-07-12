@@ -1,5 +1,9 @@
 use rustfft::{num_complex::Complex, FftPlanner};
 
+// Mirror of AudioSyncer.js constants — must not be changed; baseline.json was computed with these.
+const PEAK_NEARNESS_THRESHOLD: f64 = 0.5;
+const SYNC_FRAME_RATE: f64 = 30.0;
+
 pub fn next_power_of_two(n: usize) -> usize {
     let mut p = 1usize;
     while p < n {
@@ -42,6 +46,45 @@ pub fn compute_cross_correlation(samples_a: &[f32], samples_b: &[f32]) -> Vec<f6
     ifft.process(&mut product);
 
     product.iter().map(|c| c.re as f64 / n as f64).collect()
+}
+
+/// Finds the best lag from a cross-correlation array, replicating `findBestLag` in
+/// `scripts/sync/AudioSyncer.js` L188–216.
+///
+/// Collects all indices whose absolute value is within `PEAK_NEARNESS_THRESHOLD` of the global
+/// maximum, uses the earliest as a deterministic tie-break, converts the circular index to a
+/// signed sample lag, then quantizes to the nearest frame boundary at `SYNC_FRAME_RATE` fps.
+///
+/// Returns the lag in seconds. Returns `0.0` for an all-zero correlation without panicking.
+pub fn find_best_lag(correlation: &[f64], sample_rate: u32) -> f64 {
+    let n = correlation.len();
+    let mut max_val = f64::NEG_INFINITY;
+    let mut candidates: Vec<usize> = Vec::new();
+
+    for (i, &v) in correlation.iter().enumerate() {
+        let abs_v = v.abs();
+        if abs_v > max_val {
+            max_val = abs_v;
+            candidates.clear();
+            candidates.push(i);
+        } else if (abs_v - max_val).abs() <= PEAK_NEARNESS_THRESHOLD {
+            candidates.push(i);
+        }
+    }
+
+    // Earliest candidate = deterministic tie-break, matching JS `candidateIndices[0]`.
+    let max_idx = candidates.first().copied().unwrap_or(0);
+
+    // Circular index → signed lag in samples.
+    let lag_samples = if max_idx <= n / 2 {
+        max_idx as f64
+    } else {
+        max_idx as f64 - n as f64
+    };
+
+    // Quantize to nearest frame boundary, return as seconds.
+    let lag_frames = (lag_samples * SYNC_FRAME_RATE / sample_rate as f64).round();
+    lag_frames / SYNC_FRAME_RATE
 }
 
 #[cfg(test)]
@@ -115,5 +158,69 @@ mod tests {
         let corr = compute_cross_correlation(&a, &b);
         // next_power_of_two(1 + 1 - 1) = next_power_of_two(1) = 1
         assert_eq!(corr.len(), 1, "single-sample inputs should return length-1 result");
+    }
+
+    // --- find_best_lag tests ---
+
+    fn make_corr(len: usize, peak_idx: usize, peak_val: f64) -> Vec<f64> {
+        let mut c = vec![0.0f64; len];
+        c[peak_idx] = peak_val;
+        c
+    }
+
+    #[test]
+    fn find_best_lag_positive_lag() {
+        // Peak at index 100 in length-1024; K <= N/2 so positive lag.
+        // Expected: round(100 * 30 / 8000) / 30 = round(0.375) / 30 = 0.0 / 30 = 0.0
+        let corr = make_corr(1024, 100, 1.0);
+        let lag = find_best_lag(&corr, 8000);
+        let expected = (100.0_f64 * 30.0 / 8000.0).round() / 30.0;
+        assert_eq!(lag, expected);
+    }
+
+    #[test]
+    fn find_best_lag_negative_lag() {
+        // Peak at index 724 in length-1024; K > N/2 → lag = 724 - 1024 = -300 samples.
+        // -300 * 30 / 8000 = -1.125 → round to -1 frame → -1/30 s (survives quantization).
+        let corr = make_corr(1024, 724, 1.0);
+        let lag = find_best_lag(&corr, 8000);
+        assert!(lag < 0.0, "peak at index > N/2 should yield a negative lag, got {lag}");
+        let expected = ((-300.0_f64) * 30.0 / 8000.0).round() / 30.0;
+        assert_eq!(lag, expected);
+    }
+
+    #[test]
+    fn find_best_lag_tie_break_earliest_wins() {
+        // Two equal peaks at indices 50 and 200; earliest should win.
+        let mut corr = vec![0.0f64; 1024];
+        corr[50] = 1.0;
+        corr[200] = 1.0;
+        let lag = find_best_lag(&corr, 8000);
+        let expected = (50.0_f64 * 30.0 / 8000.0).round() / 30.0;
+        assert_eq!(lag, expected, "tie-break should select earliest candidate (index 50)");
+    }
+
+    #[test]
+    fn find_best_lag_all_zeros_no_panic() {
+        let corr = vec![0.0f64; 1024];
+        let lag = find_best_lag(&corr, 8000);
+        assert_eq!(lag, 0.0, "all-zero correlation should return 0.0");
+    }
+
+    #[test]
+    fn find_best_lag_peak_at_n_over_2_is_positive() {
+        // Peak exactly at N/2 = 512; boundary condition: maxIdx <= N/2 → positive lag.
+        let corr = make_corr(1024, 512, 1.0);
+        let lag = find_best_lag(&corr, 8000);
+        assert!(lag >= 0.0, "peak at exactly N/2 should be treated as positive lag, got {lag}");
+    }
+
+    #[test]
+    fn find_best_lag_one_frame_at_44100() {
+        // 1 frame at 30fps = 44100/30 = 1470 samples; result must be exactly 1/30 s.
+        let corr = make_corr(131072, 1470, 1.0);
+        let lag = find_best_lag(&corr, 44100);
+        let expected = 1.0_f64 / 30.0;
+        assert_eq!(lag, expected, "1470 samples at 44100 Hz should give exactly 1/30 s");
     }
 }
