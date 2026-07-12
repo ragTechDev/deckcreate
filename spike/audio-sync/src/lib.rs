@@ -105,6 +105,10 @@ pub fn find_best_lag(correlation: &[f64], sample_rate: u32) -> f64 {
 /// lags. Both rounds use `(x + 0.5).floor()` to replicate JS `Math.round` (ties → +infinity).
 ///
 /// Returns `(0.0, false)` when std = 0 (all-equal correlation) without panicking.
+///
+/// # Preconditions
+/// `correlation` must be non-empty. An empty slice causes `lag_samples % n_i` to perform
+/// integer division by zero, which is an unconditional panic in both debug and release.
 pub fn validate_peak(correlation: &[f64], lag_seconds: f64, sample_rate: u32) -> (f64, bool) {
     let n = correlation.len();
     let n_f = n as f64;
