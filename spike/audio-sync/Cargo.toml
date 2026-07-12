@@ -1,0 +1,8 @@
+[package]
+name = "audio-sync"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rustfft = "6"
+hound = "3"
