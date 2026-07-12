@@ -83,7 +83,11 @@ pub fn find_best_lag(correlation: &[f64], sample_rate: u32) -> f64 {
     };
 
     // Quantize to nearest frame boundary, return as seconds.
-    let lag_frames = (lag_samples * SYNC_FRAME_RATE / sample_rate as f64).round();
+    // Use (x + 0.5).floor() to replicate JavaScript Math.round, which rounds half-frames
+    // towards +infinity. Rust's f64::round() rounds away from zero, so Math.round(-1.5) = -1
+    // but (-1.5f64).round() = -2 — they diverge on negative half-frame boundaries.
+    let x = lag_samples * SYNC_FRAME_RATE / sample_rate as f64;
+    let lag_frames = (x + 0.5).floor();
     lag_frames / SYNC_FRAME_RATE
 }
 
@@ -171,11 +175,21 @@ mod tests {
     #[test]
     fn find_best_lag_positive_lag() {
         // Peak at index 100 in length-1024; K <= N/2 so positive lag.
-        // Expected: round(100 * 30 / 8000) / 30 = round(0.375) / 30 = 0.0 / 30 = 0.0
+        // 100 * 30 / 8000 = 0.375 → 0 frames → 0.0 s (rounds to zero but formula is correct).
         let corr = make_corr(1024, 100, 1.0);
         let lag = find_best_lag(&corr, 8000);
-        let expected = (100.0_f64 * 30.0 / 8000.0).round() / 30.0;
+        let expected = (100.0_f64 * 30.0 / 8000.0 + 0.5).floor() / 30.0;
         assert_eq!(lag, expected);
+    }
+
+    #[test]
+    fn find_best_lag_positive_lag_nonzero() {
+        // Peak at index 267 (≤ N/2 = 512, so positive lag).
+        // 267 * 30 / 8000 = 1.00125 → (1.00125 + 0.5).floor() = 1 frame → 1/30 s.
+        // Verifies a nonzero positive result so the "positive lag" AC has meaningful coverage.
+        let corr = make_corr(1024, 267, 1.0);
+        let lag = find_best_lag(&corr, 8000);
+        assert_eq!(lag, 1.0 / 30.0);
     }
 
     #[test]
@@ -213,6 +227,17 @@ mod tests {
         let corr = make_corr(1024, 512, 1.0);
         let lag = find_best_lag(&corr, 8000);
         assert!(lag >= 0.0, "peak at exactly N/2 should be treated as positive lag, got {lag}");
+    }
+
+    #[test]
+    fn find_best_lag_negative_half_frame_regression() {
+        // lag_samples = -400 → -400 * 30 / 8000 = -1.5 frames.
+        // JS Math.round(-1.5) = -1; Rust f64::round(-1.5) = -2.
+        // The (x + 0.5).floor() fix must return -1/30, not -2/30.
+        let n = 1024usize;
+        let corr = make_corr(n, n - 400, 1.0);
+        let lag = find_best_lag(&corr, 8000);
+        assert_eq!(lag, -1.0 / 30.0, "negative half-frame should round toward +inf like JS Math.round");
     }
 
     #[test]
