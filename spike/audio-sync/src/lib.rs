@@ -3,6 +3,7 @@ use rustfft::{num_complex::Complex, FftPlanner};
 // Mirror of AudioSyncer.js constants — must not be changed; baseline.json was computed with these.
 const PEAK_NEARNESS_THRESHOLD: f64 = 0.5;
 const SYNC_FRAME_RATE: f64 = 30.0;
+const RELIABILITY_SNR_THRESHOLD: f64 = 3.0;
 
 pub fn next_power_of_two(n: usize) -> usize {
     let mut p = 1usize;
@@ -89,6 +90,52 @@ pub fn find_best_lag(correlation: &[f64], sample_rate: u32) -> f64 {
     let x = lag_samples * SYNC_FRAME_RATE / sample_rate as f64;
     let lag_frames = (x + 0.5).floor();
     lag_frames / SYNC_FRAME_RATE
+}
+
+/// Validates the reliability of a lag computed by `find_best_lag`, replicating `validatePeak`
+/// from `scripts/sync/AudioSyncer.js` L218–235.
+///
+/// Computes an SNR metric: how many standard deviations above the mean is the correlation value
+/// at the reconstructed sample index? If the SNR is below `RELIABILITY_SNR_THRESHOLD = 3.0` the
+/// result is flagged as unreliable — the caller should verify the sync manually.
+///
+/// Uses biased (population) variance `sumSq/N - mean²` to match the JS formula.
+/// The index reconstruction mirrors the JS exactly: `lagFrames = round(lagSeconds * FRAME_RATE)`,
+/// then `lagSamples = round(lagFrames * sampleRate / FRAME_RATE)`, with modular wrap for negative
+/// lags. Both rounds use `(x + 0.5).floor()` to replicate JS `Math.round` (ties → +infinity).
+///
+/// Returns `(0.0, false)` when std = 0 (all-equal correlation) without panicking.
+///
+/// # Preconditions
+/// `correlation` must be non-empty. An empty slice causes `lag_samples % n_i` to perform
+/// integer division by zero, which is an unconditional panic in both debug and release.
+pub fn validate_peak(correlation: &[f64], lag_seconds: f64, sample_rate: u32) -> (f64, bool) {
+    let n = correlation.len();
+    let n_f = n as f64;
+
+    let sum: f64 = correlation.iter().sum();
+    let sum_sq: f64 = correlation.iter().map(|x| x * x).sum();
+    let mean = sum / n_f;
+    // Biased population variance: sumSq/N - mean² (matches JS, not Bessel-corrected).
+    let std = (sum_sq / n_f - mean * mean).sqrt();
+
+    // Reconstruct sample index from the already-quantized lag seconds.
+    let lag_frames = (lag_seconds * SYNC_FRAME_RATE + 0.5).floor();
+    let lag_samples = (lag_frames * sample_rate as f64 / SYNC_FRAME_RATE + 0.5).floor() as i64;
+
+    // Modular wrap handles negative lags: ((lagSamples % N) + N) % N.
+    let n_i = n as i64;
+    let raw_idx = ((lag_samples % n_i) + n_i) % n_i;
+    let idx = raw_idx as usize;
+
+    let signal_value = correlation[idx];
+    let snr = if std > 0.0 {
+        (signal_value - mean).abs() / std
+    } else {
+        0.0
+    };
+
+    (snr, snr >= RELIABILITY_SNR_THRESHOLD)
 }
 
 #[cfg(test)]
@@ -247,5 +294,66 @@ mod tests {
         let lag = find_best_lag(&corr, 44100);
         let expected = 1.0_f64 / 30.0;
         assert_eq!(lag, expected, "1470 samples at 44100 Hz should give exactly 1/30 s");
+    }
+
+    // --- validate_peak tests ---
+
+    #[test]
+    fn validate_peak_high_snr_returns_reliable() {
+        // All zeros except one large spike at index 0; lag_seconds=0.0 → idx=0.
+        // SNR will be ~32 (peak is ~32 std-deviations above the mean), well above threshold.
+        let mut corr = vec![0.0f64; 1024];
+        corr[0] = 1000.0;
+        let (snr, is_reliable) = validate_peak(&corr, 0.0, 8000);
+        assert!(is_reliable, "sharp peak should be reliable, got snr={snr}");
+        assert!(snr >= 3.0, "snr should be >= 3.0, got {snr}");
+    }
+
+    #[test]
+    fn validate_peak_flat_array_returns_not_reliable() {
+        // All values equal → std = 0 → snr = 0.0 → not reliable.
+        // Models a near-silence correlation with no discernible peak.
+        let corr = vec![1.0f64; 1024];
+        let (snr, is_reliable) = validate_peak(&corr, 0.0, 8000);
+        assert!(!is_reliable, "flat correlation should not be reliable");
+        assert_eq!(snr, 0.0, "flat correlation snr should be exactly 0.0, got {snr}");
+    }
+
+    #[test]
+    fn validate_peak_zero_std_no_panic() {
+        // All values exactly equal — explicit zero-std guard test.
+        // Must not divide by zero; must return (0.0, false).
+        let corr = vec![5.0f64; 256];
+        let (snr, is_reliable) = validate_peak(&corr, 0.0, 44100);
+        assert_eq!(snr, 0.0, "zero-std case must return snr=0.0, got {snr}");
+        assert!(!is_reliable, "zero-std case must not be reliable");
+    }
+
+    #[test]
+    fn validate_peak_negative_lag_modular_wrap() {
+        // Symmetric correlation: equal peaks at index 100 and N-100 (=924) for N=1024.
+        // sample_rate=3000: lag_frames=±1 → lag_samples=±100 → idx=100 or 924.
+        // Since correlation[100] == correlation[924], SNR should be identical.
+        let mut corr = vec![0.0f64; 1024];
+        corr[100] = 500.0;
+        corr[924] = 500.0;
+        let pos_lag = 1.0_f64 / 30.0; // +1 frame → lag_samples=+100 → idx=100
+        let neg_lag = -1.0_f64 / 30.0; // -1 frame → lag_samples=-100 → idx=924
+        let (snr_pos, _) = validate_peak(&corr, pos_lag, 3000);
+        let (snr_neg, _) = validate_peak(&corr, neg_lag, 3000);
+        assert_eq!(
+            snr_pos, snr_neg,
+            "symmetric correlation: +lag and -lag should yield same SNR, got {snr_pos} vs {snr_neg}"
+        );
+    }
+
+    #[test]
+    fn validate_peak_length_one_no_panic() {
+        // Single-element array: any lag maps to idx=0 (anything % 1 = 0).
+        // std = 0 → snr = 0.0, no panic.
+        let corr = vec![42.0f64];
+        let (snr, is_reliable) = validate_peak(&corr, 0.5, 8000);
+        assert_eq!(snr, 0.0, "length-1 array must return snr=0.0, got {snr}");
+        assert!(!is_reliable, "length-1 array must not be reliable");
     }
 }
