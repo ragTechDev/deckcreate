@@ -38,9 +38,24 @@ cargo build
 
 ## Run
 
+Against the committed fixture WAVs (from repo root):
+
 ```bash
-cargo run --manifest-path spike/audio-sync/Cargo.toml
-# → audio-sync spike — not yet implemented
+cargo run --manifest-path spike/audio-sync/Cargo.toml -- spike/audio-sync/fixtures/video-audio.wav spike/audio-sync/fixtures/audio-track.wav
+# → lag: -6.800000s  snr: 9.815
+```
+
+Against any two WAV files:
+
+```bash
+cargo run --manifest-path spike/audio-sync/Cargo.toml -- <ref.wav> <target.wav>
+```
+
+## Test
+
+```bash
+cargo test --manifest-path spike/audio-sync/Cargo.toml
+# 19 tests — includes fixture_roundtrip which asserts lag matches baseline.json to ±1 sample
 ```
 
 ## Dependencies

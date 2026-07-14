@@ -1,5 +1,20 @@
 use rustfft::{num_complex::Complex, FftPlanner};
 
+/// Loads mono PCM samples from a WAV file, normalising to `[-1.0, 1.0]`.
+/// Supports 16-bit integer PCM (the fixture format) and 32-bit float WAV.
+pub fn load_wav_samples(path: &str) -> Result<(Vec<f32>, u32), Box<dyn std::error::Error>> {
+    let mut reader = hound::WavReader::open(path)?;
+    let spec = reader.spec();
+    let samples: Vec<f32> = match spec.sample_format {
+        hound::SampleFormat::Int => reader
+            .samples::<i16>()
+            .map(|s| s.map(|v| v as f32 / i16::MAX as f32))
+            .collect::<Result<_, _>>()?,
+        hound::SampleFormat::Float => reader.samples::<f32>().collect::<Result<_, _>>()?,
+    };
+    Ok((samples, spec.sample_rate))
+}
+
 // Mirror of AudioSyncer.js constants — must not be changed; baseline.json was computed with these.
 const PEAK_NEARNESS_THRESHOLD: f64 = 0.5;
 const SYNC_FRAME_RATE: f64 = 30.0;
@@ -355,5 +370,34 @@ mod tests {
         let (snr, is_reliable) = validate_peak(&corr, 0.5, 8000);
         assert_eq!(snr, 0.0, "length-1 array must return snr=0.0, got {snr}");
         assert!(!is_reliable, "length-1 array must not be reliable");
+    }
+
+    // --- fixture round-trip test ---
+
+    #[test]
+    fn fixture_roundtrip() {
+        // Run the full Rust pipeline against the committed fixture WAVs and assert
+        // the lag matches the JS baseline to within ±1 sample at 8 kHz.
+        let baseline_json = std::fs::read_to_string("fixtures/baseline.json")
+            .expect("fixtures/baseline.json not found — run cargo test from spike/audio-sync/");
+        let baseline: serde_json::Value =
+            serde_json::from_str(&baseline_json).expect("invalid baseline.json");
+        let baseline_lag: f64 = baseline["lagSeconds"]
+            .as_f64()
+            .expect("baseline.json missing lagSeconds");
+
+        let (samples_a, sample_rate) =
+            load_wav_samples("fixtures/video-audio.wav").expect("failed to load video-audio.wav");
+        let (samples_b, _) =
+            load_wav_samples("fixtures/audio-track.wav").expect("failed to load audio-track.wav");
+
+        let correlation = compute_cross_correlation(&samples_a, &samples_b);
+        let lag = find_best_lag(&correlation, sample_rate);
+
+        let tolerance = 1.0 / sample_rate as f64; // ±1 sample
+        assert!(
+            (lag - baseline_lag).abs() <= tolerance,
+            "Rust lag {lag:.6}s differs from JS baseline {baseline_lag:.6}s by more than ±1 sample ({tolerance:.9}s)"
+        );
     }
 }
