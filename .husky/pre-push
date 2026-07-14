@@ -57,7 +57,7 @@ if grep -rEn \
     'ghp_[A-Za-z0-9]{36}|AKIA[0-9A-Z]{16}|sk-ant-[A-Za-z0-9_\-]{90,}|sk-[A-Za-z0-9]{48}' \
     --include='*.ts' --include='*.tsx' --include='*.js' \
     --include='*.json' --include='*.py' \
-    --exclude-dir=node_modules --exclude-dir=.next \
+    --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=.venv \
     .; then
   echo "✗ Secret token detected — remove from source before pushing."
   exit 1
