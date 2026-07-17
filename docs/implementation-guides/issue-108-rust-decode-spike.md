@@ -47,19 +47,21 @@ hardware share one seek/decode/compare flow rather than splitting into a second 
 
 **Status check:** `cargo run --manifest-path spike/rust-decode-spike/ffmpeg-candidate/Cargo.toml -- spike/rust-decode-spike/fixtures/test-clip.mp4 1.5 spike/rust-decode-spike/fixtures/reference/frame_at_1.5s.ppm --hw | grep -q "HARDWARE PATH: active"`
 
-### Step 4 — gstreamer-rs candidate: decode, seek, pixel verify (software + VideoToolbox)
+### Step 3 — gstreamer-rs candidate: decode, seek, pixel verify (software + VideoToolbox)
 
 Create `spike/rust-decode-spike/gstreamer-candidate/` (standalone `Cargo.toml`, depends on
 `gstreamer`, `gstreamer-app`, `gstreamer-video`). CLI mirrors the ffmpeg candidate. Software path
-uses `decodebin`; hardware path pins the pipeline to the `vtdec_hw` element (hardware-only —
-pipeline fails fast if VideoToolbox isn't actually engaged, which is itself the criterion #1
-answer for this candidate). Pull the frame via `appsink`, compare against the same reference PPM.
-Scaffold (but do not require passing) a Windows branch using `nvh264dec`/`nvdec` element names
-behind a comment, for the NVIDIA contributor to complete.
+uses `avdec_h264` (explicit software decoder, not `decodebin`, so the software/hardware choice
+stays deliberate rather than autonegotiated); hardware path pins the pipeline to the `vtdec_hw`
+element (hardware-only — pipeline fails to reach PAUSED if VideoToolbox isn't actually engaged,
+which is itself the criterion #1 answer for this candidate). Pull the frame via `appsink`, compare
+against the same reference PPM. Note for the Windows/NVIDIA contributor: swap `vtdec_hw` for
+`nvh264dec` (nvcodec plugin) behind a platform check to complete criterion #1 on that hardware —
+not attempted here since it cannot be verified on this machine.
 
-**Status check:** `cargo run --manifest-path spike/rust-decode-spike/gstreamer-candidate/Cargo.toml -- spike/rust-decode-spike/fixtures/test-clip.mp4 1.5 spike/rust-decode-spike/fixtures/reference/frame_at_1.5s.ppm --hw | grep -q PASS`
+**Status check:** `cargo run --manifest-path spike/rust-decode-spike/gstreamer-candidate/Cargo.toml -- spike/rust-decode-spike/fixtures/test-clip.mp4 1.5 spike/rust-decode-spike/fixtures/reference/frame_at_1.5s.ppm | grep -q PASS`
 
-### Step 5 — FINDINGS.md and contributor README
+### Step 4 — FINDINGS.md and contributor README
 
 Write `spike/rust-decode-spike/FINDINGS.md` covering all five evaluation criteria, with real
 results filled in for Mac M3 (this machine) and open template rows for Mac M2 / Windows+NVIDIA.
@@ -69,7 +71,7 @@ run commands for the contributors who'll fill in the remaining rows.
 
 **Status check:** `test -f spike/rust-decode-spike/FINDINGS.md && grep -q "Mac M2" spike/rust-decode-spike/FINDINGS.md && grep -q "Windows" spike/rust-decode-spike/FINDINGS.md`
 
-### Step 6 — Update CLAUDE.md
+### Step 5 — Update CLAUDE.md
 
 Add a one-line pointer to the spike under a relevant section (Refactor Plan) so future agents know
 it exists and where.
