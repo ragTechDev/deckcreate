@@ -140,7 +140,7 @@ async function runPathA() {
   let syncedVideos = [];
   if (await fs.pathExists(syncOutputDir)) {
     const files = await fs.readdir(syncOutputDir);
-    syncedVideos = files.filter(f => f.startsWith('synced-output-') && f.endsWith('.mp4'));
+    syncedVideos = files.filter(f => /^synced-output(-\d+)?\.mp4$/.test(f));
     if (syncedVideos.length > 0) {
       console.log(`\n  Found synced videos:`);
       syncedVideos.forEach(v => console.log(`    - ${v}`));
@@ -632,7 +632,7 @@ async function runContinueCarousel(carouselId) {
             const syncDir = path.join(cwd, 'public', 'sync', 'output');
             if (await fs.pathExists(syncDir)) {
               const files = await fs.readdir(syncDir);
-              const synced = files.filter(f => f.startsWith('synced-output-') && f.endsWith('.mp4'));
+              const synced = files.filter(f => /^synced-output(-\d+)?\.mp4$/.test(f));
               if (synced.length > 0) {
                 console.log('  Found synced videos:');
                 synced.forEach((f, i) => console.log(`    ${i + 1}. ${f}`));
@@ -703,7 +703,7 @@ async function runContinueCarousel(carouselId) {
           let synced = [];
           if (await fs.pathExists(syncDir)) {
             const files = await fs.readdir(syncDir);
-            synced = files.filter(f => f.startsWith('synced-output-') && f.endsWith('.mp4'));
+            synced = files.filter(f => /^synced-output(-\d+)?\.mp4$/.test(f));
           }
           if (synced.length > 0) {
             console.log('  Synced videos:');
