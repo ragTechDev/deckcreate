@@ -30,24 +30,20 @@ Create `spike/rust-decode-spike/` with:
 
 **Status check:** `test -f spike/rust-decode-spike/fixtures/test-clip.mp4 && grep -q 'spike/rust-decode-spike' .gitignore`
 
-### Step 2 — ffmpeg-the-third candidate: software decode, seek, pixel verify
+### Step 2 — ffmpeg-the-third candidate: decode, seek, pixel verify (software + VideoToolbox)
 
 Create `spike/rust-decode-spike/ffmpeg-candidate/` (standalone `Cargo.toml`, depends on
 `ffmpeg-the-third`). CLI: `ffmpeg-candidate <clip> <timestamp_secs> <reference.ppm> [--hw]`.
 Software path: open input, seek near the target timestamp, decode forward to the exact frame,
 convert to RGB24 via the software scaler, compare against the reference PPM (mean/max abs diff),
-print PASS/FAIL.
-
-**Status check:** `cargo run --manifest-path spike/rust-decode-spike/ffmpeg-candidate/Cargo.toml -- spike/rust-decode-spike/fixtures/test-clip.mp4 1.5 spike/rust-decode-spike/fixtures/reference/frame_at_1.5s.ppm | grep -q PASS`
-
-### Step 3 — ffmpeg-the-third candidate: VideoToolbox hardware path
-
-Add the `--hw` path: raw FFI through `ffmpeg_the_third::sys` to set `hw_device_ctx`
+print PASS/FAIL. `--hw` path: raw FFI through `ffmpeg_the_third::ffi` to set `hw_device_ctx`
 (`av_hwdevice_ctx_create` with `AVHWDeviceType::VIDEOTOOLBOX`) and a `get_format` callback on the
-decoder's `AVCodecContext`, then `av_hwframe_transfer_data` to copy each decoded frame back to a
-software `nv12` buffer before the same RGB24 compare. No high-level wrapper exists for this in the
-crate — document exactly how much unsafe code this requires (this is the "without extra shims"
-answer for criterion #1).
+decoder's *unopened* `AVCodecContext`, then `av_hwframe_transfer_data` to copy each decoded frame
+back to a software buffer before the same RGB24 compare. No high-level wrapper exists for this in
+the crate (checked: no hwaccel/hwdevice/hwcontext module) — this hand-written unsafe path, and how
+much of it there is, is itself the "without extra shims" answer for criterion #1. Software and
+hardware share one seek/decode/compare flow rather than splitting into a second commit, since the
+`--hw` branch is threaded through the same loop, not a separable unit.
 
 **Status check:** `cargo run --manifest-path spike/rust-decode-spike/ffmpeg-candidate/Cargo.toml -- spike/rust-decode-spike/fixtures/test-clip.mp4 1.5 spike/rust-decode-spike/fixtures/reference/frame_at_1.5s.ppm --hw | grep -q "HARDWARE PATH: active"`
 
