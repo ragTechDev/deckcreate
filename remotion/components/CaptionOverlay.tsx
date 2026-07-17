@@ -163,6 +163,7 @@ function buildAllTimings(
   }
 
   // ── Main segments ─────────────────────────────────────────────────────────────
+  let lastMainTimingIndex = -1;
   for (const seg of mainSegments) {
     if (seg.cut || seg.hook) continue;
     if (videoStart !== undefined && seg.end <= videoStart) continue;
@@ -174,9 +175,17 @@ function buildAllTimings(
     const durationFrames = Math.ceil(getEffectiveDuration(seg) * fps);
     if (durationFrames <= 0) continue;
 
+    // Bridge silent gaps: keep the previous line on screen through any pause
+    // between segments instead of leaving a caption-free hole before this one starts.
+    if (lastMainTimingIndex !== -1) {
+      const prevTiming = timings[lastMainTimingIndex];
+      if (prevTiming.sourceEnd < sourceStart) prevTiming.sourceEnd = sourceStart;
+    }
+
     const captions = buildCaptions(seg.tokens, sourceStart, sourceEnd, false);
     const { pages } = createTikTokStyleCaptions({ captions, combineTokensWithinMilliseconds: 800 });
     timings.push({ outputStartFrame: cum, outputEndFrame: cum + durationFrames, sourceStart, sourceEnd, pages });
+    lastMainTimingIndex = timings.length - 1;
     cum += durationFrames;
   }
 
@@ -186,6 +195,7 @@ function buildAllTimings(
   // source range of each hook segment so the section-based lookup finds them.
   // These are appended last so hook-section timings (added above) take precedence
   // for overlapping source times via Array.find's first-match behaviour.
+  let lastHookInMainTimingIndex = -1;
   for (const seg of hookSegments) {
     if (seg.cut) continue;
     if (videoStart !== undefined && seg.end <= videoStart) continue;
@@ -194,10 +204,16 @@ function buildAllTimings(
     const sourceStart = videoStart !== undefined ? Math.max(seg.start, videoStart) : seg.start;
     const sourceEnd   = videoEnd   !== undefined ? Math.min(seg.end,   videoEnd)   : seg.end;
 
+    if (lastHookInMainTimingIndex !== -1) {
+      const prevTiming = timings[lastHookInMainTimingIndex];
+      if (prevTiming.sourceEnd < sourceStart) prevTiming.sourceEnd = sourceStart;
+    }
+
     const captions = buildCaptions(seg.tokens, sourceStart, sourceEnd, false);
     const { pages } = createTikTokStyleCaptions({ captions, combineTokensWithinMilliseconds: 800 });
     // outputStartFrame/outputEndFrame unused in section-based path — set to 0
     timings.push({ outputStartFrame: 0, outputEndFrame: 0, sourceStart, sourceEnd, pages });
+    lastHookInMainTimingIndex = timings.length - 1;
   }
 
   return timings;

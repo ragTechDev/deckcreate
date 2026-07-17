@@ -155,9 +155,13 @@ Select **5–15 hook annotations** using patterns from the existing ai-bicycle, 
 **Format rules:**
 - `> HOOK "exact phrase"` — for a specific phrase (must match exact token text)
 - `> HOOK` — for the entire segment
+- `> HOOK "exact phrase" 12.450-15.300` — explicit timing override (seconds, 3 dp); merge writes resolved times back so you can fine-tune
+- `> HOOK "phrase" title="My Title"` — with title overlay
+- `> HOOK "phrase" title="My Title" placement="upper"` — with title + placement (`upper` or `middle`)
 - 4-space indent after the segment line
 - At least one hook per speaker in the clip
 - Do not duplicate existing `> HOOK` annotations
+- After `merge-short-doc.js` runs, resolved `from-to` times are written back into the doc — edit them and re-run to adjust
 
 ---
 

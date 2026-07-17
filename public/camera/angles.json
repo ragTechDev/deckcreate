@@ -1,0 +1,8 @@
+[
+  {
+    "angleName": "angle1",
+    "videoSrc": "sync/output/synced-output.mp4",
+    "frameFile": "frame.jpg",
+    "detectFile": "detections.json"
+  }
+]
