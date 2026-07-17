@@ -256,6 +256,8 @@ Core problems being fixed: non-deterministic output, no project file, no pipelin
 
 Phases 0–4 (scripts) and 5–6 (Remotion) can proceed on separate branches in parallel.
 
+**Native rewrite spikes** (separate from the phases above — see `docs/rfcs/0001-native-desktop-rewrite.md`): throwaway Rust crates under `spike/`, deleted once each spike concludes. `spike/audio-sync/` validated the agent-driven Rust dev loop; `spike/rust-decode-spike/` (issue #108) is evaluating `ffmpeg-the-third` vs `gstreamer-rs` for the render engine's decode/encode binding — see its `FINDINGS.md`.
+
 ### Target directory additions (post-refactor)
 
 **`.gitignore` rule:** Every directory under `.ragtech/` (and any other runtime-generated directory such as `runs/`, `cache/`, output artifact dirs) must be listed in `.gitignore`. These hold generated/binary data, not source code, and must never be committed.
