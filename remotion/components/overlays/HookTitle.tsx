@@ -54,7 +54,7 @@ export const HookTitle: React.FC<HookTitleProps> = ({
   const topPosition = placement === 'middle' ? '43%' : '20%';
 
   return (
-    <AbsoluteFill style={{ pointerEvents: 'none' }}>
+    <AbsoluteFill style={{ pointerEvents: 'none', zIndex: 150 }}>
       <div
         style={{
           position: 'absolute',

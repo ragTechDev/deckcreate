@@ -17,6 +17,7 @@ import { CaptionOverlay } from './components/CaptionOverlay';
 import { OverlayRenderer } from './components/OverlayRenderer';
 import { EpisodePill } from './components/overlays/EpisodePill';
 import { HookTitle } from './components/overlays/HookTitle';
+import { HookLogo } from './components/overlays/HookLogo';
 import { ShortFormOutro } from './components/overlays/ShortFormOutro';
 import { loadNunito } from './loadFonts';
 import { Transition } from './components/Transition';
@@ -201,6 +202,11 @@ const TranscriptComposition: React.FC<TranscriptCompositionProps> = ({
           endFrame={totalHookFrames}
           placement={transcript.meta.hookTitlePlacement}
         />
+      )}
+
+      {/* Logo watermark — visible for the duration of the hook section */}
+      {hasHooks && totalHookFrames > 0 && (
+        <HookLogo startFrame={0} endFrame={totalHookFrames} />
       )}
 
       {/* Outro overlay — last 5 seconds */}

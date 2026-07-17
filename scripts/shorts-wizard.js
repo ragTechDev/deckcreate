@@ -380,7 +380,7 @@ async function createCarouselFromShort(clipId) {
     let synced = [];
     if (await fs.pathExists(syncDir)) {
       const files = await fs.readdir(syncDir);
-      synced = files.filter(f => f.startsWith('synced-output-') && f.endsWith('.mp4'));
+      synced = files.filter(f => /^synced-output(-\d+)?\.mp4$/.test(f));
     }
     if (synced.length === 0) {
       console.log('  ✗ No camera-profiles.json found and no synced videos in public/sync/output/.');
