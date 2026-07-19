@@ -69,7 +69,7 @@ fn run(
         // so setting hw_device_ctx/get_format here is exactly the window FFmpeg's own
         // hw_decode.c example requires them to be set in.
         unsafe {
-            hw::attach_videotoolbox(decoder_ctx.as_mut_ptr())?;
+            hw::attach_hardware(decoder_ctx.as_mut_ptr())?;
         }
     }
 
@@ -175,7 +175,7 @@ mod hw {
     /// Sets up VideoToolbox hw_device_ctx + get_format on an *unopened* decoder context.
     /// This is hand-written unsafe FFI because ffmpeg-the-third has no high-level
     /// hwaccel wrapper (checked: no hwaccel/hwdevice/hwcontext module in the crate).
-    pub unsafe fn attach_videotoolbox(
+    pub unsafe fn attach_hardware(
         ctx: *mut ffi::AVCodecContext,
     ) -> Result<(), ffmpeg::Error> {
         let mut hw_device_ctx: *mut ffi::AVBufferRef = ptr::null_mut();
@@ -233,16 +233,75 @@ mod hw {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+mod hw {
+    use ffmpeg_the_third as ffmpeg;
+    use ffmpeg_the_third::ffi;
+    use std::ptr;
+
+    /// Sets up CUDA hw_device_ctx + get_format on an *unopened* decoder context.
+    pub unsafe fn attach_hardware(
+        ctx: *mut ffi::AVCodecContext,
+    ) -> Result<(), ffmpeg::Error> {
+        let mut hw_device_ctx: *mut ffi::AVBufferRef = ptr::null_mut();
+        let ret = ffi::av_hwdevice_ctx_create(
+            &mut hw_device_ctx,
+            ffi::AVHWDeviceType::CUDA,
+            ptr::null(),
+            ptr::null_mut(),
+            0,
+        );
+        if ret < 0 {
+            return Err(ffmpeg::Error::from(ret));
+        }
+        (*ctx).hw_device_ctx = hw_device_ctx;
+        (*ctx).get_format = Some(get_format);
+        Ok(())
+    }
+
+    unsafe extern "C" fn get_format(
+        _ctx: *mut ffi::AVCodecContext,
+        mut fmt: *const ffi::AVPixelFormat,
+    ) -> ffi::AVPixelFormat {
+        while *fmt != ffi::AVPixelFormat::NONE {
+            if *fmt == ffi::AVPixelFormat::CUDA {
+                return *fmt;
+            }
+            fmt = fmt.add(1);
+        }
+        ffi::AVPixelFormat::NONE
+    }
+
+    pub fn transfer_to_software(
+        decoded: &ffmpeg::util::frame::video::Video,
+    ) -> Result<(ffmpeg::util::frame::video::Video, bool), ffmpeg::Error> {
+        if decoded.format() != ffmpeg::util::format::pixel::Pixel::CUDA {
+            return Ok((decoded.clone(), false));
+        }
+        let mut software_frame = ffmpeg::util::frame::video::Video::empty();
+        unsafe {
+            let ret = ffi::av_hwframe_transfer_data(
+                software_frame.as_mut_ptr(),
+                decoded.as_ptr(),
+                0,
+            );
+            if ret < 0 {
+                return Err(ffmpeg::Error::from(ret));
+            }
+        }
+        Ok((software_frame, true))
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 mod hw {
     use ffmpeg_the_third as ffmpeg;
     use ffmpeg_the_third::ffi;
 
-    pub unsafe fn attach_videotoolbox(
+    pub unsafe fn attach_hardware(
         _ctx: *mut ffi::AVCodecContext,
     ) -> Result<(), ffmpeg::Error> {
-        Err(ffmpeg::Error::Bug) // VideoToolbox is macOS-only; NVENC/NVDEC path is a
-                                // separate --hw-nvdec flag left for the Windows contributor.
+        Err(ffmpeg::Error::Bug)
     }
 
     pub fn transfer_to_software(
