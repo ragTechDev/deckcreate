@@ -64,12 +64,11 @@ fn run(
 ) -> Result<bool, Box<dyn std::error::Error>> {
     gst::init()?;
 
-    // vtdec_hw is macOS/VideoToolbox-only and hardware-only by name. A Windows/NVIDIA
-    // contributor completing criterion #1 for that platform should swap this element
-    // for `nvh264dec` (NVDEC via the nvcodec plugin) behind a `#[cfg(target_os =
-    // "windows")]`-equivalent flag — left as a TODO rather than guessed at here, since
-    // it cannot be verified on this machine.
-    let decoder_element = if use_hw { "vtdec_hw" } else { "avdec_h264" };
+    let decoder_element = if use_hw {
+        hw_decoder_element()
+    } else {
+        "avdec_h264"
+    };
     let pipeline_desc = format!(
         "filesrc location=\"{clip_path}\" ! qtdemux ! h264parse ! {decoder_element} ! \
          videoconvert ! video/x-raw,format=RGB ! appsink name=sink sync=false"
@@ -104,7 +103,7 @@ fn run(
     pipeline.state(Some(gst::ClockTime::from_seconds(10))).0?;
 
     if use_hw {
-        println!("HARDWARE PATH: active (vtdec_hw negotiated successfully)");
+        println!("HARDWARE PATH: active ({decoder_element} negotiated successfully)");
     }
 
     let sample = appsink.pull_preroll().map_err(|e| format!("pull_preroll: {e:?}"))?;
@@ -143,4 +142,19 @@ fn run(
         if pass { "PASS" } else { "FAIL" }
     );
     Ok(pass)
+}
+
+#[cfg(target_os = "windows")]
+fn hw_decoder_element() -> &'static str {
+    "nvh264dec"
+}
+
+#[cfg(target_os = "macos")]
+fn hw_decoder_element() -> &'static str {
+    "vtdec_hw"
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn hw_decoder_element() -> &'static str {
+    "avdec_h264"
 }
