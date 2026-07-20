@@ -1,0 +1,12 @@
+[package]
+name = "ffmpeg-candidate"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "ffmpeg-candidate"
+path = "src/main.rs"
+
+[dependencies]
+ffmpeg-the-third = "5.0.0"

@@ -111,3 +111,5 @@ scripts/diarize/__pycache__/
 
 # Rust spike build artifacts
 spike/audio-sync/target/
+spike/rust-decode-spike/ffmpeg-candidate/target/
+spike/rust-decode-spike/gstreamer-candidate/target/
