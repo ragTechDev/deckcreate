@@ -6,27 +6,27 @@ This document is the direct bridge from product discovery to engineering. Each e
 - Each epic becomes a GitHub Epic (or milestone, depending on how the new repo structures work).
 - Each feature under an epic becomes one or more GitHub issues, with acceptance criteria derived from the success metrics in the linked opportunity doc.
 - Epic 0 must be the first epic completed — its outputs (test fixtures, golden-frame baselines, AI harness) are the acceptance criteria infrastructure that every subsequent epic depends on.
-- The spike must be resolved before Epic 1 issues are written — its outcome determines which FFmpeg binding the entire render engine is built against. It can run in parallel with Epic 0 since it lives in the current repo.
+- The spike is resolved — `ffmpeg-the-third` is the chosen binding (see `spike/rust-decode-spike/FINDINGS.md`). Epic 1 issues can be written now, with F1.0 (LGPL FFmpeg build) as the first task.
 
 ---
 
 ## Pre-epic: FFmpeg vs gstreamer-rs spike
 
-**Not an epic — a one-off technical investigation that must complete before Epic 1 begins.**
+**Status: RESOLVED.** See [`spike/rust-decode-spike/FINDINGS.md`](../../spike/rust-decode-spike/FINDINGS.md) — verified on Mac M3, Mac M2, and Windows/NVIDIA. Decision feeds into Epic 1 F1.0.
 
-The RFC calls this out explicitly as non-blocking to the plan but blocking to the render engine epic: the decode/encode binding choice determines every subsequent API call in the compositor. Deciding mid-epic would force a rewrite of already-written code.
+**Decision: `ffmpeg-the-third`** (the actively-maintained fork of `ffmpeg-next`; `ffmpeg-next` itself is maintenance-mode only — confirmed by the spike).
 
-**Question to answer:** Is `ffmpeg-next` (direct FFmpeg C API bindings) or `gstreamer-rs` the better foundation for the render engine on the target hardware matrix (Mac M2/M3 VideoToolbox, Windows NVIDIA NVENC/NVDEC)?
+**Rationale summary:**
+- On Mac M2 and M3: `ffmpeg-the-third` with VideoToolbox hardware path is pixel-exact (mean diff = 0.000, max = 0) against reference frames at both tested timestamps. `gstreamer-rs`/`vtdec_hw` fails pixel tolerance on both chips (mean ~3.86, max ~168–181) — root cause is a colorimetry/YUV-matrix mismatch during GPU→CPU readback, not a seek bug.
+- On Windows/NVIDIA: both candidates' hardware paths are active but fail the spike's pixel tolerance. `ffmpeg-the-third`/CUDA is materially closer to reference than `gstreamer-rs`/`nvh264dec` (lower mean and much lower max diff). Both require follow-up hardening in Epic 1.
+- `ffmpeg-the-third`'s missing high-level hwaccel API requires ~40 lines of unsafe FFI for the VideoToolbox and CUDA paths — this is a one-time bounded cost, and the spike's `hw` module (`ffmpeg-candidate/src/main.rs`) is the working reference implementation. Do not re-derive from FFmpeg's C `hw_decode.c` example — use the spike code directly.
+- `gstreamer-rs` has the easier integration surface but unresolved hardware-path pixel failures on both Mac and Windows, plus a Cocoa run-loop dependency (`NSApplication`) introduced by `vtdec_hw`'s GL-memory output — a real open question for a headless render engine.
 
-**Evaluation criteria:**
-- Hardware codec access: can it reach VideoToolbox on Mac and NVENC/NVDEC on Windows without extra shims?
-- Seek/decode accuracy: frame-accurate seek to an arbitrary timestamp (required for jump-cut editing).
-- Build complexity: does it cross-compile cleanly on all three target platforms from CI?
-- Maintenance: crate maturity, update frequency, known soundness issues.
+**Open questions carried into Epic 1** (not re-investigated in the spike):
+1. Windows/NVIDIA hardware decode pixel quality needs root-cause and correction — treat as integration-incomplete until resolved in Epic 1.
+2. The GPL/LGPL FFmpeg build configuration is a **hard prerequisite for Epic 1**: both Mac and Windows test machines used Homebrew/system FFmpeg builds with `--enable-gpl --enable-libx264 --enable-libx265`, making the software `avdec_h264` decode path GPL-contaminated. A clean LGPL-only FFmpeg build (without `--enable-gpl`) fully supports H.264 decode and removes this risk — this must be resolved before Epic 1 begins, not deferred. See F1.0 below.
 
-**Spike output:** a short findings doc (not a polished RFC — a decision record with the test results) committed to the spike branch. The finding becomes the `encoderProfile` design decision that Epic 1 is built against.
-
-**Where to run it:** a `spikes/rust-decode-spike/` directory in the current repo (deckcreate), on its own branch. Findings port to the new repo; the spike code does not.
+**Where the spike ran:** `spikes/rust-decode-spike/` in the deckcreate repo. Spike code is not ported — only the `hw` module pattern and the findings doc carry forward.
 
 ---
 
@@ -48,8 +48,8 @@ The RFC calls this out explicitly as non-blocking to the plan but blocking to th
 | F0.2 | CLAUDE.md — AI harness | Agent implementation convention for the new repo: crate layout, how to run tests (`cargo test`, `cargo clippy`, `cargo fmt --check`), implementation doc format (one doc per multi-step task in `docs/implementation-guides/`), status check per step, one commit per step, per-PR checklist adapted for Rust | An agent given a feature issue can orient, find the right crate, run the test suite, and know what done looks like without any out-of-repo context |
 | F0.3 | CI/CD cross-platform matrix | GitHub Actions workflow: build + test on Mac ARM (M-series), Windows x64 with NVIDIA GPU runner; clippy and rustfmt checks on every PR; test matrix fails fast if any target fails | Green CI required to merge any PR; a failure on Windows/NVIDIA is as blocking as a failure on Mac |
 | F0.4 | Test fixture export | Export real `transcript.json` + `camera-profiles.json` from at least two already-shipped episodes from the current production pipeline; commit as versioned fixtures in `tests/fixtures/` | Fixtures round-trip through the new repo's Rust schema structs without loss; used as the canonical input for all Epic 1–3 acceptance tests |
-| F0.5 | Golden-frame baseline export | For each fixture episode, render a reference set of frames using the current Remotion pipeline and commit as baselines in `tests/baselines/`; include a PSNR threshold and audio hash per fixture | Epic 1's compositor output can be diffed against these baselines with a single test command; baselines are reproducible from the current pipeline if they need to be regenerated |
-| F0.6 | Shared test utilities | Common test helpers in `crates/test-utils`: fixture loader, PSNR calculator, audio hash utility, frame extractor — consumed by all epic test suites | Any crate's test suite can load a fixture and run a PSNR diff in under 5 lines of test code |
+| F0.5 | Compositor property specs and sanity frames | **Tier 1 (primary gate):** a `properties.json` spec per fixture episode, generated from the deckcreate pipeline's JS logic, defining expected compositor state (active angle, viewport crop, cut/hook/speaker flags, source timestamp) at key checkpoints. **Tier 2 (sanity signal only):** a small set of Remotion-rendered frames per fixture for gross visual regression detection — not a pass/fail gate. | Tier 1 property specs are the acceptance criterion for Epic 1 correctness; Tier 2 frames are informational only. Remotion pixel output is not the correctness target — deckcreate artifacts were produced as prototypes, not pixel-perfect benchmarks. |
+| F0.6 | Shared test utilities | Common test helpers in `crates/test-utils`: fixture loader, property spec checker (loads `properties.json` and asserts compositor state), frame extractor, audio hash utility — consumed by all epic test suites | Any crate's test suite can load a fixture and assert compositor state against its property spec in under 5 lines of test code |
 | F0.7 | Dev tooling | `rustfmt.toml`, `.clippy.toml`, pre-commit hooks (or equivalent) enforcing format and lint on changed files; `Makefile` or `justfile` with canonical commands (`make test`, `make lint`, `make baseline`) | A new contributor (or agent) can set up the dev environment and run the full check suite with documented commands; no manual tool invocation required |
 
 ---
@@ -62,19 +62,20 @@ The RFC calls this out explicitly as non-blocking to the plan but blocking to th
 
 **Problem it solves:** The current Remotion/headless-Chromium render path has a hard 2–5fps ceiling with no GPU path, producing 6–18 hour renders for a 60-minute episode. Hardware inconsistency (Windows/NVIDIA silently falling back to software encode) means output quality depends on which machine ran the job.
 
-**Definition of done:** A render of the same episode fixture on Mac M2, Mac M3, and Windows/NVIDIA produces output that passes a PSNR/hash diff gate and completes in under 1 hour — verified across all three hardware targets.
+**Definition of done:** A render of the same episode fixture on Mac M2, Mac M3, and Windows/NVIDIA produces output that passes the Tier 1 compositor property spec checks (from F0.5) and completes in under 1 hour — verified across all three hardware targets. Windows NVDEC pixel drift (open from spike) must be root-caused and corrected before this epic closes.
 
 ### Features
 
 | ID | Feature | Description | Acceptance criteria |
 |----|---------|-------------|---------------------|
-| F1.0 | Spike outcome applied | FFmpeg binding (or gstreamer-rs) chosen from the spike; dependency declared in `Cargo.toml` | Spike findings doc exists and is linked from this epic's first issue |
+| F1.0 | GPL/LGPL FFmpeg build prerequisite | Before any Epic 1 code is written: verify a clean LGPL-only FFmpeg build (compiled without `--enable-gpl --enable-libx264 --enable-libx265`) is available on all CI and dev machines. This removes GPL contamination from the `avdec_h264` software decode path. The spike used Homebrew/system FFmpeg with GPL flags — this must be resolved before the `ffmpeg-the-third` binding is linked in production builds. Document the required build flags in `docs/implementation-guides/ffmpeg-build.md`. | CI pipeline uses an LGPL-clean FFmpeg on Mac ARM and Windows x64; `ffmpeg-the-third` links against it without GPL symbols; build flags documented and reproducible. |
+| F1.0a | `ffmpeg-the-third` binding bootstrapped | Add `ffmpeg-the-third` to `crates/compositor/Cargo.toml`; port the spike's `hw` module (`spike/rust-decode-spike/ffmpeg-candidate/src/main.rs`) as the starting point for the hardware decode path — do not re-derive from FFmpeg's C `hw_decode.c` example. VideoToolbox and CUDA paths brought over from the spike. | `cargo build --workspace` succeeds on Mac and Windows with `ffmpeg-the-third` declared; hw module compiles against the LGPL-clean build; spike findings doc linked from this feature's issue. |
 | F1.1 | Multi-angle compositor | wgpu-based compositor that stacks multiple decoded video planes, applies viewport crops, and composites to an output surface — same code path for preview and final render | Composites 3 angles with correct viewport transforms matching the `camera-profiles.json` spec; verified against golden frames from the current Remotion output |
-| F1.2 | VideoToolbox decode/encode path | Hardware-accelerated H.264 decode and encode via AVFoundation + VideoToolbox on macOS | Render on Mac M2 and Mac M3 completes in under 1 hour for a 60-min episode; output passes PSNR gate vs Remotion baseline |
-| F1.3 | NVENC/NVDEC decode/encode path | Hardware-accelerated H.264 decode (NVDEC) and encode (NVENC) on Windows/NVIDIA | Render on Windows/NVIDIA completes in under 1 hour; output passes PSNR gate; no silent fallback to libx264 |
+| F1.2 | VideoToolbox decode/encode path | Hardware-accelerated H.264 decode and encode via AVFoundation + VideoToolbox on macOS. **Spike result:** `ffmpeg-the-third` VideoToolbox path is pixel-exact on both Mac M2 and Mac M3 (mean diff = 0.000, max = 0 at both tested timestamps) — the implementation baseline exists in the spike's `hw` module. | Render on Mac M2 and Mac M3 completes in under 1 hour for a 60-min episode; output passes Tier 1 property spec checks; VideoToolbox path engaged (verified in logs, not silent software fallback). |
+| F1.3 | NVENC/NVDEC decode/encode path | Hardware-accelerated H.264 decode (NVDEC) and encode (NVENC) on Windows/NVIDIA. **Spike result:** NVDEC hardware path is active on both candidates but both fail the spike's pixel tolerance (`ffmpeg-the-third`/CUDA mean diff ≈ 1.85 / max 91; gstreamer-rs/nvh264dec mean ≈ 3.86 / max 168). Root cause is unknown — this is an open Epic 1 investigation item, not a deferred nice-to-have. Both the LGPL build (F1.0) and the root-cause investigation must complete before this feature can be marked done. | Root cause of Windows NVDEC pixel drift identified and corrected; render on Windows/NVIDIA completes in under 1 hour; output passes Tier 1 property spec checks; no silent fallback to libx264; NVDEC hardware engagement verified in logs. |
 | F1.4 | Real hardware capability probing | Replaces the `process.platform`/`process.arch` string heuristic in `hardware.ts` with actual GPU/codec capability queries at startup | Correctly identifies VideoToolbox on Mac and NVENC on Windows/NVIDIA; logs the resolved encoder profile at startup; does not silently fall back |
 | F1.5 | Unified encoder profile mapping | Single `encoderProfile → FFmpeg/codec args` mapping consumed by every pipeline stage — no per-script encoder decisions | No pipeline script sets its own encoder; all route through the profile mapping; adding a new profile requires one code change in one file |
-| F1.6 | Golden-frame validation suite | Automated diff of new-engine output against Remotion output for real-episode fixtures — PSNR/hash diff for video, audio-hash diff for audio | Suite runs on CI across Mac M2, Mac M3, and Windows/NVIDIA; fails if PSNR drops below threshold or audio hash mismatches |
+| F1.6 | Property spec validation suite | Automated Tier 1 property spec checks (active angle, viewport crop, cut/hook/speaker flags, source timestamps) against `properties.json` fixtures for all fixture episodes; Tier 2 sanity frames generated as informational artifact. | Suite runs on CI across Mac M2, Mac M3, and Windows/NVIDIA; Tier 1 checks are the pass/fail gate; Tier 2 frames stored as CI artifacts for visual review — not a blocking gate. |
 | F1.7 | `transcript.json` + `camera-profiles.json` schema ingestion | Rust structs for both schemas; round-trips real fixture files without loss | Schema conformance tests pass on all fixture files exported from the current production pipeline |
 
 ---
@@ -171,10 +172,10 @@ The RFC calls this out explicitly as non-blocking to the plan but blocking to th
 ## Sequencing summary
 
 ```
-[Spike]  FFmpeg vs gstreamer-rs         ← runs in deckcreate repo; parallel with Epic 0
-[Epic 0] Project Setup & AI Harness    ← new repo; fixtures + baselines + harness; must finish before Epic 1
+[Spike]  FFmpeg vs gstreamer-rs         ← RESOLVED: ffmpeg-the-third chosen; findings in spike/rust-decode-spike/FINDINGS.md
+[Epic 0] Project Setup & AI Harness    ← new repo; fixtures + property specs + harness; must finish before Epic 1
     ↓
-[Epic 1] Native Render Engine          ← compositor API must be stable before anything builds on it
+[Epic 1] Native Render Engine          ← starts with F1.0 (LGPL FFmpeg build) then F1.0a (hw binding bootstrap)
 [Epic 4] Multi-brand Support           ← parallel with Epic 1; brand schema must be in from day 1
     ↓
 [Epic 2] Transcription and Alignment   ← begin once Epic 1 compositor API is stable
@@ -183,4 +184,6 @@ The RFC calls this out explicitly as non-blocking to the plan but blocking to th
 [Epic 5] Visual Transcript Editor      ← built last; shares compositor from Epic 1
 ```
 
-The spike and Epic 0 are the only things that can run in parallel at the start — everything else has a hard dependency chain. Epics 1+4 are parallel. Epics 2+3 are parallel after Epic 1. Epic 5 is last.
+The spike is resolved. Epic 0 is the current blocker — until fixtures (F0.4), property specs (F0.5), and the AI harness (F0.2) are complete, Epic 1 acceptance criteria cannot be evaluated. Epics 1+4 are parallel once Epic 0 is done. Epics 2+3 are parallel after Epic 1. Epic 5 is last.
+
+**Epic 1 internal sequencing note:** F1.0 (LGPL FFmpeg build verification) must be the first task in Epic 1 — it is a prerequisite for F1.0a (binding bootstrap) and all subsequent F1.x work. F1.3 (Windows NVDEC) has an open root-cause investigation; it is not parallel-safe with F1.2 until the spike pixel drift is understood.
